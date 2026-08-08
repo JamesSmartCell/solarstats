@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Poll Home Assistant PowMr sensors and forward snapshots to solarstats",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "poll": "DRY_RUN=1 node src/index.js"
   },
   "engines": {
     "node": ">=18"

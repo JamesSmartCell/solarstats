@@ -1,13 +1,16 @@
 import "dotenv/config";
 
-const HA_BASE_URL = (process.env.HA_BASE_URL || "http://192.168.50.41").replace(
-  /\/$/,
-  "",
-);
-const HA_TOKEN = process.env.HA_TOKEN;
-const SITE_INGEST_URL = process.env.SITE_INGEST_URL;
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 15000);
-const INGEST_SECRET = process.env.INGEST_SECRET || "";
+function env(name, fallback = "") {
+  const raw = process.env[name] ?? fallback;
+  return String(raw).trim().replace(/^["']|["']$/g, "");
+}
+
+const HA_BASE_URL = env("HA_BASE_URL", "http://192.168.50.41").replace(/\/$/, "");
+const HA_TOKEN = env("HA_TOKEN");
+const SITE_INGEST_URL = env("SITE_INGEST_URL");
+const POLL_INTERVAL_MS = Number(env("POLL_INTERVAL_MS", "15000"));
+const INGEST_SECRET = env("INGEST_SECRET");
+const DRY_RUN = ["1", "true", "yes"].includes(env("DRY_RUN", "false").toLowerCase());
 
 const ENTITIES = {
   gridVoltage: "sensor.powmr_inverter_grid_voltage",
@@ -30,20 +33,36 @@ function requireEnv(name, value) {
 }
 
 requireEnv("HA_TOKEN", HA_TOKEN);
-requireEnv("SITE_INGEST_URL", SITE_INGEST_URL);
+if (!DRY_RUN) {
+  requireEnv("SITE_INGEST_URL", SITE_INGEST_URL);
+}
 
 function parseState(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
+function formatFetchError(stage, err) {
+  const cause = err.cause;
+  const detail = cause
+    ? `${cause.code || ""} ${cause.message || cause}`.trim()
+    : err.message;
+  return `${stage}: ${detail}`;
+}
+
 async function fetchEntity(entityId) {
-  const res = await fetch(`${HA_BASE_URL}/api/states/${entityId}`, {
-    headers: {
-      Authorization: `Bearer ${HA_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-  });
+  const url = `${HA_BASE_URL}/api/states/${entityId}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${HA_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (err) {
+    throw new Error(formatFetchError(`HA GET ${url}`, err));
+  }
 
   if (!res.ok) {
     throw new Error(`HA ${entityId}: HTTP ${res.status}`);
@@ -75,11 +94,21 @@ async function forwardSnapshot(snapshot) {
     headers.Authorization = `Bearer ${INGEST_SECRET}`;
   }
 
-  const res = await fetch(SITE_INGEST_URL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(snapshot),
-  });
+  let res;
+  try {
+    res = await fetch(SITE_INGEST_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(snapshot),
+    });
+  } catch (err) {
+    throw new Error(
+      formatFetchError(
+        `Ingest POST ${SITE_INGEST_URL} (is solarstats running / tunnel up?)`,
+        err,
+      ),
+    );
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -90,6 +119,10 @@ async function forwardSnapshot(snapshot) {
 async function tick() {
   try {
     const snapshot = await collectSnapshot();
+    if (DRY_RUN) {
+      console.log(`[${snapshot.ts}] dry-run snapshot:`, JSON.stringify(snapshot));
+      return;
+    }
     await forwardSnapshot(snapshot);
     console.log(
       `[${snapshot.ts}] forwarded SoC=${snapshot.batterySoc}% PV=${snapshot.pvPower}W Out=${snapshot.outputPower}W`,
@@ -100,7 +133,9 @@ async function tick() {
 }
 
 console.log(
-  `solarstatsapi starting → HA ${HA_BASE_URL}, ingest ${SITE_INGEST_URL}, every ${POLL_INTERVAL_MS}ms`,
+  DRY_RUN
+    ? `solarstatsapi DRY_RUN → HA ${HA_BASE_URL}, every ${POLL_INTERVAL_MS}ms (no ingest)`
+    : `solarstatsapi starting → HA ${HA_BASE_URL}, ingest ${SITE_INGEST_URL}, every ${POLL_INTERVAL_MS}ms`,
 );
 
 await tick();
