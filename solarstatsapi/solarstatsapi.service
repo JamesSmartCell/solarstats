@@ -1,0 +1,20 @@
+[Unit]
+Description=Solarstats API — poll Home Assistant and forward to solarstats
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/dev/solarstats/solarstatsapi
+ExecStart=/usr/local/bin/node src/index.js
+
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

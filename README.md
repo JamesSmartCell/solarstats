@@ -8,7 +8,7 @@ PowMr inverter ──RS232/TTL──► ESP32 (ESPHome) ──Wi‑Fi──► H
                                               solarstatsapi (Pi)
                                                           │ POST /api/ingest
                                                           ▼
-                                              solarstats (/solarstats)
+                                              solarstats (site root /)
 ```
 
 | Path | Role |
@@ -114,7 +114,7 @@ npm install
 npm start
 ```
 
-Open: `http://<server>:8787/solarstats`
+Open: `http://<server>:8787/` (or your Caddy HTTPS hostname)
 
 Needs Node **18+**. `better-sqlite3` requires build tools on Linux (`build-essential`, Python).
 

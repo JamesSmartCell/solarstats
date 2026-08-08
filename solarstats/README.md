@@ -1,6 +1,6 @@
 # solarstats
 
-Receives PowMr snapshots from `solarstatsapi`, stores history in SQLite, integrates inverter output into **kWh**, and serves a live dashboard at **`/solarstats`**.
+Receives PowMr snapshots from `solarstatsapi`, stores history in SQLite, integrates inverter output into **kWh**, and serves a live dashboard at **`/`**.
 
 ## Setup (remote server)
 
@@ -12,9 +12,52 @@ npm install
 npm start
 ```
 
-Open: `http://<server>:8787/solarstats`
+Local check: `http://127.0.0.1:8787/`  
+Public (via Caddy): `https://solar.example.com/`
 
 > `better-sqlite3` needs build tools on the server (`build-essential` / Python on Linux).
+
+### systemd
+
+Edit paths/user in [`solarstats.service`](solarstats.service), then:
+
+```bash
+sudo cp solarstats.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now solarstats
+sudo systemctl status solarstats
+```
+
+## Caddy (DNS → TLS → Node on 8787)
+
+Proxy the whole host to Node:
+
+```caddy
+solar.example.com {
+	tls /etc/letsencrypt/live/solar.example.com/fullchain.pem /etc/letsencrypt/live/solar.example.com/privkey.pem
+
+	reverse_proxy 127.0.0.1:8787
+}
+```
+
+That covers:
+
+- `GET /` (dashboard; `/solarstats` redirects here)
+- `GET /solarstats.css`, `/solarstats.js`, …
+- `POST /api/ingest`, `GET /api/history`, `GET /api/health`
+- `WS /ws` (live updates)
+
+### Port 8787 vs SSH tunnel — not a conflict
+
+| Where | What listens on 8787 |
+|-------|----------------------|
+| **EC2** | `solarstats` (Node) on `127.0.0.1:8787` |
+| **Pi** | SSH `-L 8787:127.0.0.1:8787` — Pi’s localhost:8787 forwards **to** EC2’s 8787 |
+
+Caddy on EC2 also talks to the **same** Node process (`127.0.0.1:8787`).  
+Public clients use **443** only; leave **8787 closed** in the security group.
+
+Pi `.env`: `SITE_INGEST_URL=http://127.0.0.1:8787/api/ingest` (through the tunnel).
 
 ## Environment
 
@@ -29,7 +72,7 @@ Open: `http://<server>:8787/solarstats`
 
 - `POST /api/ingest` — accept snapshot from Pi (`Authorization: Bearer <INGEST_SECRET>`)
 - `GET /api/history?range=24h` — chart series + totals (`24h`, `7d`, …)
-- `GET /solarstats` — dashboard
+- `GET /` — dashboard (`/solarstats` → `/`)
 - `WS /ws` — live sample push
 
 ## Energy

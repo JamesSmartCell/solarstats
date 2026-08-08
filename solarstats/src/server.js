@@ -36,8 +36,13 @@ function authorizeIngest(req, res, next) {
   return next();
 }
 
-app.get("/solarstats", (_req, res) => {
+app.get("/", (_req, res) => {
   res.sendFile(path.join(publicDir, "solarstats.html"));
+});
+
+// Back-compat for old bookmarks
+app.get("/solarstats", (_req, res) => {
+  res.redirect(301, "/");
 });
 
 app.get("/api/history", (req, res) => {
@@ -87,5 +92,5 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log(`solarstats listening on http://0.0.0.0:${PORT}`);
-  console.log(`dashboard: http://127.0.0.1:${PORT}/solarstats`);
+  console.log(`dashboard: http://127.0.0.1:${PORT}/`);
 });

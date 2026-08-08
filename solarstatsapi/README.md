@@ -12,6 +12,17 @@ npm install
 npm start
 ```
 
+### systemd
+
+Edit paths/user in [`solarstatsapi.service`](solarstatsapi.service), then:
+
+```bash
+sudo cp solarstatsapi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now solarstatsapi
+sudo systemctl status solarstatsapi
+```
+
 ## Environment
 
 | Variable | Example | Notes |
