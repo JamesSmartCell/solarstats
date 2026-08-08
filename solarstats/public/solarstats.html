@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Solarstats — PowMr</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/solarstats.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <div>
+          <h1 class="brand">Solar<span>stats</span></h1>
+          <p class="sub">PowMr inverter · live feed every 15s</p>
+        </div>
+        <div class="status">
+          <div class="pill">
+            <span class="dot" id="connDot"></span>
+            <span id="connection">Connecting…</span>
+          </div>
+          <div>Last update: <span id="lastUpdate">—</span></div>
+        </div>
+      </header>
+
+      <section class="tiles" aria-label="Current readings">
+        <article class="tile">
+          <div class="label">Battery SoC</div>
+          <div class="value"><span id="batterySoc">—</span><span class="unit">%</span></div>
+        </article>
+        <article class="tile">
+          <div class="label">Battery V</div>
+          <div class="value"><span id="batteryVoltage">—</span><span class="unit">V</span></div>
+        </article>
+        <article class="tile">
+          <div class="label">Charge</div>
+          <div class="value"><span id="chargeCurrent">—</span><span class="unit">A</span></div>
+        </article>
+        <article class="tile">
+          <div class="label">Discharge</div>
+          <div class="value"><span id="dischargeCurrent">—</span><span class="unit">A</span></div>
+        </article>
+        <article class="tile">
+          <div class="label">PV Voltage</div>
+          <div class="value"><span id="pvVoltage">—</span><span class="unit">V</span></div>
+        </article>
+        <article class="tile">
+          <div class="label">PV Power</div>
+          <div class="value"><span id="pvPower">—</span><span class="unit">W</span></div>
+        </article>
+        <article class="tile">
+          <div class="label">Inverter Out</div>
+          <div class="value"><span id="outputPower">—</span><span class="unit">W</span></div>
+        </article>
+        <article class="tile">
+          <div class="label">Load</div>
+          <div class="value"><span id="loadPercent">—</span><span class="unit">%</span></div>
+        </article>
+        <article class="tile kwh">
+          <div class="label">Energy supplied</div>
+          <div class="value"><span id="energyTotal">—</span><span class="unit">kWh</span></div>
+        </article>
+      </section>
+
+      <section class="charts">
+        <article class="panel">
+          <h2>Battery charge</h2>
+          <p class="hint">State of charge over the last 24 hours</p>
+          <div class="chart-wrap"><canvas id="socChart"></canvas></div>
+        </article>
+
+        <article class="panel">
+          <h2>PV power</h2>
+          <p class="hint">Solar input power (W)</p>
+          <div class="chart-wrap"><canvas id="pvChart"></canvas></div>
+        </article>
+
+        <article class="panel">
+          <h2>Inverter supply</h2>
+          <p class="hint">Output power (W) with cumulative energy under the curve (kWh)</p>
+          <div class="chart-wrap"><canvas id="outChart"></canvas></div>
+        </article>
+      </section>
+
+      <p class="foot">Window: 24h · ingest interval 15s · trapezoid kWh integration</p>
+    </div>
+
+    <script src="/solarstats.js"></script>
+  </body>
+</html>

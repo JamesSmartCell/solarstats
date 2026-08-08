@@ -1,0 +1,19 @@
+{
+  "name": "solarstats",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ingest PowMr snapshots and serve /solarstats dashboard",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}
