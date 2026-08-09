@@ -1,5 +1,12 @@
-const RANGE = "24h";
-const MAX_POINTS = 6000;
+const RANGE_LABELS = {
+  "1h": "1 hour",
+  "6h": "6 hours",
+  "12h": "12 hours",
+  "24h": "24 hours",
+  "3d": "3 days",
+  "7d": "7 days",
+  "30d": "30 days",
+};
 
 const els = {
   connection: document.getElementById("connection"),
@@ -13,11 +20,54 @@ const els = {
   outputPower: document.getElementById("outputPower"),
   loadPercent: document.getElementById("loadPercent"),
   energyTotal: document.getElementById("energyTotal"),
+  rangeSelect: document.getElementById("rangeSelect"),
+  resetZoom: document.getElementById("resetZoom"),
+  footNote: document.getElementById("footNote"),
+  socHint: document.getElementById("socHint"),
 };
 
 const state = {
+  range: els.rangeSelect.value || "24h",
   samples: [],
   energyKwhTotal: 0,
+  rangeStartMs: 0,
+};
+
+function rangeToMs(range) {
+  const match = /^(\d+)([hdw])$/i.exec(range || "24h");
+  if (!match) return 24 * 3600000;
+  const n = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  if (unit === "w") return n * 7 * 86400000;
+  if (unit === "d") return n * 86400000;
+  return n * 3600000;
+}
+
+/** HA-like light EMA smoothing for display (does not alter stored samples). */
+function smoothSeries(points, alpha = 0.22) {
+  let ema = null;
+  return points.map((p) => {
+    if (p.y == null || Number.isNaN(Number(p.y))) return p;
+    const y = Number(p.y);
+    ema = ema == null ? y : alpha * y + (1 - alpha) * ema;
+    return { x: p.x, y: ema };
+  });
+}
+
+const zoomOptions = {
+  pan: {
+    enabled: true,
+    mode: "x",
+    modifierKey: null,
+  },
+  zoom: {
+    wheel: { enabled: true, speed: 0.1 },
+    pinch: { enabled: true },
+    mode: "x",
+  },
+  limits: {
+    x: { min: "original", max: "original" },
+  },
 };
 
 const chartDefaults = {
@@ -28,8 +78,15 @@ const chartDefaults = {
   scales: {
     x: {
       type: "time",
-      time: { tooltipFormat: "HH:mm:ss", displayFormats: { minute: "HH:mm", hour: "HH:mm" } },
-      ticks: { color: "#8b9aab", maxRotation: 0 },
+      time: {
+        tooltipFormat: "MMM d HH:mm:ss",
+        displayFormats: {
+          minute: "HH:mm",
+          hour: "MMM d HH:mm",
+          day: "MMM d",
+        },
+      },
+      ticks: { color: "#8b9aab", maxRotation: 0, autoSkipPadding: 12 },
       grid: { color: "rgba(42,53,64,0.7)" },
     },
     y: {
@@ -46,6 +103,7 @@ const chartDefaults = {
       titleColor: "#e8eef3",
       bodyColor: "#e8eef3",
     },
+    zoom: zoomOptions,
   },
 };
 
@@ -61,9 +119,11 @@ function makeLineChart(canvasId, color, label, ySuggested) {
           borderColor: color,
           backgroundColor: color + "33",
           fill: true,
-          tension: 0.2,
+          tension: 0.4,
+          cubicInterpolationMode: "monotone",
           pointRadius: 0,
           borderWidth: 2,
+          spanGaps: true,
         },
       ],
     },
@@ -96,9 +156,11 @@ const outChart = new Chart(document.getElementById("outChart"), {
         borderColor: "#5ec8d6",
         backgroundColor: "#5ec8d633",
         fill: true,
-        tension: 0.2,
+        tension: 0.4,
+        cubicInterpolationMode: "monotone",
         pointRadius: 0,
         borderWidth: 2,
+        spanGaps: true,
         yAxisID: "y",
       },
       {
@@ -107,7 +169,8 @@ const outChart = new Chart(document.getElementById("outChart"), {
         borderColor: "#3ecf8e",
         backgroundColor: "transparent",
         fill: false,
-        tension: 0.15,
+        tension: 0.25,
+        cubicInterpolationMode: "monotone",
         pointRadius: 0,
         borderWidth: 1.5,
         borderDash: [5, 4],
@@ -142,6 +205,8 @@ const outChart = new Chart(document.getElementById("outChart"), {
     },
   },
 });
+
+const charts = [socChart, pvChart, outChart];
 
 function fmt(value, digits = 1) {
   if (value == null || Number.isNaN(Number(value))) return "—";
@@ -182,10 +247,10 @@ function updateTiles(sample) {
     : "—";
 }
 
-function trimSamples() {
-  if (state.samples.length > MAX_POINTS) {
-    state.samples = state.samples.slice(-MAX_POINTS);
-  }
+function updateChrome() {
+  const label = RANGE_LABELS[state.range] || state.range;
+  els.socHint.textContent = `State of charge · ${label}`;
+  els.footNote.textContent = `Window: ${label} · pinch/wheel zoom · smoothed series · trapezoid kWh`;
 }
 
 function syncCharts() {
@@ -202,45 +267,63 @@ function syncCharts() {
     energy.push({ x, y: s.energyKwhCumulative });
   }
 
-  socChart.data.datasets[0].data = soc;
-  pvChart.data.datasets[0].data = pv;
-  outChart.data.datasets[0].data = out;
-  outChart.data.datasets[1].data = energy;
-  socChart.update("none");
-  pvChart.update("none");
-  outChart.update("none");
+  // Slightly stronger smoothing on noisier power series; SoC milder; energy almost raw.
+  socChart.data.datasets[0].data = smoothSeries(soc, 0.28);
+  pvChart.data.datasets[0].data = smoothSeries(pv, 0.2);
+  outChart.data.datasets[0].data = smoothSeries(out, 0.2);
+  outChart.data.datasets[1].data = smoothSeries(energy, 0.45);
+
+  for (const chart of charts) {
+    chart.update("none");
+  }
+}
+
+function resetAllZoom() {
+  for (const chart of charts) {
+    chart.resetZoom();
+  }
 }
 
 function applyHistory(payload) {
   state.samples = payload.samples || [];
   state.energyKwhTotal = payload.energyKwhTotal || 0;
-  trimSamples();
+  state.rangeStartMs = Date.now() - rangeToMs(state.range);
   syncCharts();
+  resetAllZoom();
   updateTiles(
     payload.latest
       ? { ...payload.latest, energyKwhTotal: state.energyKwhTotal }
       : null,
   );
+  updateChrome();
+}
+
+function sampleInRange(sample) {
+  const t = Date.parse(sample.ts);
+  return Number.isFinite(t) && t >= state.rangeStartMs;
 }
 
 function applySample(sample) {
   if (!sample?.ts) return;
+
+  if (sample.energyKwhTotal != null) {
+    state.energyKwhTotal = sample.energyKwhTotal;
+  }
+  updateTiles(sample);
+
+  if (!sampleInRange(sample)) return;
+
   const last = state.samples[state.samples.length - 1];
   if (last && last.ts === sample.ts) {
     state.samples[state.samples.length - 1] = sample;
   } else {
     state.samples.push(sample);
   }
-  if (sample.energyKwhTotal != null) {
-    state.energyKwhTotal = sample.energyKwhTotal;
-  }
-  trimSamples();
   syncCharts();
-  updateTiles(sample);
 }
 
 async function loadHistory() {
-  const res = await fetch(`/api/history?range=${RANGE}`);
+  const res = await fetch(`/api/history?range=${encodeURIComponent(state.range)}`);
   if (!res.ok) throw new Error(`history HTTP ${res.status}`);
   applyHistory(await res.json());
 }
@@ -262,10 +345,16 @@ function connectWs() {
   ws.addEventListener("message", (event) => {
     try {
       const msg = JSON.parse(event.data);
-      if (msg.type === "history") {
-        applyHistory(msg);
+      if (msg.type === "hello") {
+        if (msg.energyKwhTotal != null) state.energyKwhTotal = msg.energyKwhTotal;
+        if (msg.latest) {
+          updateTiles({ ...msg.latest, energyKwhTotal: state.energyKwhTotal });
+        }
       } else if (msg.type === "sample") {
         applySample(msg.sample);
+      } else if (msg.type === "history") {
+        // Older servers; ignore if we already drive range from the dropdown.
+        applyHistory(msg);
       }
     } catch (err) {
       console.error("ws message error", err);
@@ -273,11 +362,18 @@ function connectWs() {
   });
 }
 
+els.rangeSelect.addEventListener("change", () => {
+  state.range = els.rangeSelect.value;
+  loadHistory().catch((err) => console.error(err));
+});
+
+els.resetZoom.addEventListener("click", resetAllZoom);
+
+updateChrome();
 loadHistory()
   .catch((err) => console.error(err))
   .finally(connectWs);
 
-// Fallback refresh aligned with HA/API interval if WS drops
 setInterval(() => {
   if (els.connection.textContent !== "Live") {
     loadHistory().catch(() => {});

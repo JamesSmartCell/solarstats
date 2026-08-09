@@ -13,6 +13,8 @@
     <link rel="stylesheet" href="/solarstats.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
   </head>
   <body>
     <div class="shell">
@@ -69,10 +71,25 @@
         </article>
       </section>
 
+      <section class="chart-toolbar" aria-label="Chart controls">
+        <label class="range-label" for="rangeSelect">Range</label>
+        <select id="rangeSelect" class="range-select">
+          <option value="1h">1 hour</option>
+          <option value="6h">6 hours</option>
+          <option value="12h">12 hours</option>
+          <option value="24h" selected>24 hours</option>
+          <option value="3d">3 days</option>
+          <option value="7d">7 days</option>
+          <option value="30d">30 days</option>
+        </select>
+        <button type="button" id="resetZoom" class="toolbar-btn">Reset zoom</button>
+        <span class="toolbar-hint">Pinch or scroll-wheel to zoom · drag to pan</span>
+      </section>
+
       <section class="charts">
         <article class="panel">
           <h2>Battery charge</h2>
-          <p class="hint">State of charge over the last 24 hours</p>
+          <p class="hint" id="socHint">State of charge</p>
           <div class="chart-wrap"><canvas id="socChart"></canvas></div>
         </article>
 
@@ -89,7 +106,7 @@
         </article>
       </section>
 
-      <p class="foot">Window: 24h · ingest interval 15s · trapezoid kWh integration</p>
+      <p class="foot" id="footNote">Window: 24h · ingest interval 15s · smoothed series · trapezoid kWh</p>
     </div>
 
     <script src="/solarstats.js"></script>

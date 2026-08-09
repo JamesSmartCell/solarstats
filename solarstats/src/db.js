@@ -137,10 +137,55 @@ function sampleToApi(row) {
 }
 
 function rangeToMs(range) {
-  const match = /^(\d+)([hd])$/i.exec(range || "24h");
+  const match = /^(\d+)([hdw])$/i.exec(range || "24h");
   if (!match) return 24 * 3600000;
   const n = Number(match[1]);
-  return match[2].toLowerCase() === "d" ? n * 86400000 : n * 3600000;
+  const unit = match[2].toLowerCase();
+  if (unit === "w") return n * 7 * 86400000;
+  if (unit === "d") return n * 86400000;
+  return n * 3600000;
+}
+
+/** Target ~maxPoints by averaging numeric fields in equal-sized buckets. */
+function downsampleRows(rows, maxPoints = 1500) {
+  if (rows.length <= maxPoints) return rows;
+  const bucketSize = Math.ceil(rows.length / maxPoints);
+  const out = [];
+  const numericKeys = [
+    "grid_voltage",
+    "pv_voltage",
+    "battery_voltage",
+    "battery_soc",
+    "battery_charge_current",
+    "load_percent",
+    "ac_frequency",
+    "pv_power",
+    "battery_discharge_current",
+    "output_power",
+    "energy_kwh_cumulative",
+  ];
+
+  for (let i = 0; i < rows.length; i += bucketSize) {
+    const chunk = rows.slice(i, i + bucketSize);
+    const avg = { ...chunk[chunk.length - 1] };
+    for (const key of numericKeys) {
+      let sum = 0;
+      let count = 0;
+      for (const row of chunk) {
+        if (row[key] != null && Number.isFinite(row[key])) {
+          sum += row[key];
+          count += 1;
+        }
+      }
+      avg[key] = count ? sum / count : null;
+    }
+    // Keep last cumulative energy in the bucket (monotonic), not the average.
+    avg.energy_kwh_cumulative =
+      chunk[chunk.length - 1].energy_kwh_cumulative;
+    avg.ts = chunk[Math.floor(chunk.length / 2)].ts;
+    out.push(avg);
+  }
+  return out;
 }
 
 export function getHistory(db, range = "24h") {
@@ -157,11 +202,13 @@ export function getHistory(db, range = "24h") {
     .prepare(`SELECT * FROM samples ORDER BY ts DESC LIMIT 1`)
     .get();
 
+  const reduced = downsampleRows(rows, 1500);
+
   return {
     range,
     energyKwhTotal: getEnergyTotal(db),
     latest: latest ? { ...sampleToApi(latest), energyKwhTotal: getEnergyTotal(db) } : null,
-    samples: rows.map(sampleToApi),
+    samples: reduced.map(sampleToApi),
   };
 }
 

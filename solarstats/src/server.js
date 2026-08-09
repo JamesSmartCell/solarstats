@@ -78,8 +78,15 @@ function broadcast(message) {
 }
 
 wss.on("connection", (socket) => {
-  const history = getHistory(db, "24h");
-  socket.send(JSON.stringify({ type: "history", ...history }));
+  // Client loads its own selected range via /api/history; WS only streams new samples.
+  const history = getHistory(db, "1h");
+  socket.send(
+    JSON.stringify({
+      type: "hello",
+      energyKwhTotal: history.energyKwhTotal,
+      latest: history.latest,
+    }),
+  );
 });
 
 setInterval(() => {

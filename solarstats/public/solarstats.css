@@ -156,6 +156,55 @@ body {
   color: var(--accent);
 }
 
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--bg1);
+  border: 1px solid var(--line);
+}
+
+.range-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.range-select,
+.toolbar-btn {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  padding: 0.4rem 0.65rem;
+}
+
+.range-select:focus,
+.toolbar-btn:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.toolbar-btn {
+  cursor: pointer;
+}
+
+.toolbar-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.toolbar-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+}
+
 .charts {
   display: grid;
   gap: 1rem;
