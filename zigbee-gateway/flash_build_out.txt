@@ -1,0 +1,233 @@
+Executing action: all (aliases: build)
+Running ninja in directory D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build
+Executing "ninja all"...
+[1/9] Performing build step for 'bootloader'
+
+[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\bootloader\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/bootloader/bootloader.bin"
+
+
+Bootloader binary size 0x57b0 bytes. 0x2850 bytes (31%) free.
+
+
+
+[2/9] No install step for 'bootloader'
+
+[3/9] Completed 'bootloader'
+
+[4/9] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/zigbee_coordinator.c.obj
+
+[5/9] Linking C static library esp-idf\main\libmain.a
+
+[6/9] Generating esp-idf/esp_system/ld/sections.ld
+
+[7/9] Linking CXX executable zigbee-gateway.elf
+
+[8/9] Generating binary image from built executable
+
+esptool.py v4.12.0
+
+
+Creating esp32c6 image...
+
+
+Merged 1 ELF section
+
+
+Successfully created esp32c6 image.
+
+
+Generated D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin
+
+[9/9] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 partition --type app D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/partition_table/partition-table.bin D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin"
+
+zigbee-gateway.bin binary size 0x11f150 bytes. Smallest app partition is 0x177000 bytes. 0x57eb0 bytes (23%) free.
+
+
+Executing action: flash
+Running ninja in directory D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build
+Executing "ninja flash"...
+[1/5] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 partition --type app D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/partition_table/partition-table.bin D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin"
+
+zigbee-gateway.bin binary size 0x11f150 bytes. Smallest app partition is 0x177000 bytes. 0x57eb0 bytes (23%) free.
+
+
+[2/5] Performing build step for 'bootloader'
+
+[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\bootloader\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/bootloader/bootloader.bin"
+
+
+Bootloader binary size 0x57b0 bytes. 0x2850 bytes (31%) free.
+
+
+
+[3/5] No install step for 'bootloader'
+
+[4/5] Completed 'bootloader'
+
+[4/5] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Espressif\frameworks\esp-idf-v5.5.4\components\esptool_py && D:\Espressif\tools\cmake\3.30.2\bin\cmake.exe -D IDF_PATH=D:/Espressif/frameworks/esp-idf-v5.5.4 -D SERIAL_TOOL=D:/Espressif/python_env/idf5.5_py3.12_env/Scripts/python.exe;;D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/esptool/esptool.py;--chip;esp32c6 -D SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args -D WORKING_DIRECTORY=D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build -P D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/run_serial_tool.cmake"
+
+esptool.py --chip esp32c6 -p COM20 -b 460800 --before=default_reset --after=hard_reset write_flash --flash_mode dio --flash_freq 80m --flash_size 4MB 0x0 bootloader/bootloader.bin 0x20000 zigbee-gateway.bin 0x8000 partition_table/partition-table.bin 0xf000 ota_data_initial.bin
+
+esptool.py v4.12.0
+
+Serial port COM20
+
+Connecting...
+
+Chip is ESP32-C6FH4 (QFN32) (revision v0.1)
+
+Features: Wi-Fi 6, BT 5 (LE), IEEE802.15.4, Single Core + LP Core, 160MHz, Embedded Flash 4MB
+
+Crystal is 40MHz
+
+USB mode: USB-Serial/JTAG
+
+MAC: 54:32:04:ff:fe:3e:98:ac
+
+BASE MAC: 54:32:04:3e:98:ac
+
+MAC_EXT: ff:fe
+
+Uploading stub...
+
+Running stub...
+
+Stub running...
+
+Changing baud rate to 460800
+
+Changed.
+
+Configuring flash size...
+
+Flash will be erased from 0x00000000 to 0x00005fff...
+
+Flash will be erased from 0x00020000 to 0x0013ffff...
+
+Flash will be erased from 0x00008000 to 0x00008fff...
+
+Flash will be erased from 0x0000f000 to 0x00010fff...
+
+SHA digest in image updated
+
+Compressed 22448 bytes to 13987...
+
+Writing at 0x00000000... (100 %)
+
+Wrote 22448 bytes (13987 compressed) at 0x00000000 in 0.4 seconds (effective 501.5 kbit/s)...
+
+Hash of data verified.
+
+Compressed 1175888 bytes to 682743...
+
+Writing at 0x00020000... (2 %)
+
+Writing at 0x0002c022... (4 %)
+
+Writing at 0x00037a94... (7 %)
+
+Writing at 0x000417ca... (9 %)
+
+Writing at 0x0004863e... (11 %)
+
+Writing at 0x0004f88b... (14 %)
+
+Writing at 0x000567bc... (16 %)
+
+Writing at 0x0005e2df... (19 %)
+
+Writing at 0x0006595c... (21 %)
+
+Writing at 0x0006be59... (23 %)
+
+Writing at 0x00071dd4... (26 %)
+
+Writing at 0x0007815b... (28 %)
+
+Writing at 0x0007eb34... (30 %)
+
+Writing at 0x00084ed9... (33 %)
+
+Writing at 0x0008b15a... (35 %)
+
+Writing at 0x000918be... (38 %)
+
+Writing at 0x000989ec... (40 %)
+
+Writing at 0x0009f7d6... (42 %)
+
+Writing at 0x000a6230... (45 %)
+
+Writing at 0x000ad54f... (47 %)
+
+Writing at 0x000b4680... (50 %)
+
+Writing at 0x000bb6e3... (52 %)
+
+Writing at 0x000c20ff... (54 %)
+
+Writing at 0x000c8978... (57 %)
+
+Writing at 0x000cf461... (59 %)
+
+Writing at 0x000d6028... (61 %)
+
+Writing at 0x000dc87c... (64 %)
+
+Writing at 0x000e312a... (66 %)
+
+Writing at 0x000e8a27... (69 %)
+
+Writing at 0x000ef3f6... (71 %)
+
+Writing at 0x000f54d6... (73 %)
+
+Writing at 0x000fb2b2... (76 %)
+
+Writing at 0x0010129d... (78 %)
+
+Writing at 0x0010736e... (80 %)
+
+Writing at 0x0010d337... (83 %)
+
+Writing at 0x0011380c... (85 %)
+
+Writing at 0x00119ae4... (88 %)
+
+Writing at 0x0011fcd4... (90 %)
+
+Writing at 0x00125ec3... (92 %)
+
+Writing at 0x0012d179... (95 %)
+
+Writing at 0x00132a5a... (97 %)
+
+Writing at 0x00138831... (100 %)
+
+Wrote 1175888 bytes (682743 compressed) at 0x00020000 in 8.6 seconds (effective 1088.0 kbit/s)...
+
+Hash of data verified.
+
+Compressed 3072 bytes to 155...
+
+Writing at 0x00008000... (100 %)
+
+Wrote 3072 bytes (155 compressed) at 0x00008000 in 0.0 seconds (effective 506.7 kbit/s)...
+
+Hash of data verified.
+
+Compressed 8192 bytes to 31...
+
+Writing at 0x0000f000... (100 %)
+
+Wrote 8192 bytes (31 compressed) at 0x0000f000 in 0.1 seconds (effective 688.2 kbit/s)...
+
+Hash of data verified.
+
+
+
+Leaving...
+
+Hard resetting via RTS pin...
+
+Done

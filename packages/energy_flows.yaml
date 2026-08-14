@@ -1,0 +1,226 @@
+# Energy flow helpers for Home Assistant
+#
+# Include from configuration.yaml:
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# Then restart HA. Wire Energy dashboard in UI:
+#   Solar production → sensor.solar_production_energy_daily (or the raw integral)
+#   Individual devices → the *_energy sensors below (optional)
+#
+# Power sensors only → this package integrates W → kWh, then daily utility meters.
+
+# ---------------------------------------------------------------------------
+# Instantaneous power (W)
+# ---------------------------------------------------------------------------
+template:
+  - sensor:
+      - name: "Solar production power"
+        unique_id: energy_solar_production_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ states('sensor.garden_powmr_inverter_pv_power') | float(0) }}"
+
+      - name: "Inverter supply power"
+        unique_id: energy_inverter_supply_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ states('sensor.garden_powmr_inverter_output_power') | float(0) }}"
+
+      # Washer W ≈ d(kWh)/dt over ~1 min (derivative is kW → ×1000).
+      # 0 when energy sensor unavailable; clamped to a realistic washer range.
+      - name: "Laundry room washer power approx"
+        unique_id: energy_washer_power_approx
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set src = 'sensor.laundry_room_washer_power_derived' %}
+          {% set energy = 'sensor.laundry_room_washer_energy' %}
+          {% if has_value(energy) and has_value(src) %}
+            {% set w = (states(src) | float(0) * 1000) | round(0) %}
+            {{ [[w, 0] | max, 3500] | min }}
+          {% else %}
+            0
+          {% endif %}
+
+      - name: "Inverter loads power"
+        unique_id: energy_inverter_loads_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ states('sensor.laundry_room_washer_power_approx') | float(0) }}"
+
+      - name: "Inverter unmetered power"
+        unique_id: energy_inverter_unmetered_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set supply = states('sensor.garden_powmr_inverter_output_power') | float(0) %}
+          {% set metered = states('sensor.inverter_loads_power') | float(0) %}
+          {{ [supply - metered, 0] | max }}
+
+      - name: "Grid loads power"
+        unique_id: energy_grid_loads_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set ids = [
+            'sensor.smart_socket_2_power',
+            'sensor.smart_socket_power',
+            'sensor.ts011f_power',
+            'sensor.zigbeesensor_power',
+            'sensor.kitchen_refrigerator_power',
+          ] %}
+          {% set ns = namespace(t=0) %}
+          {% for id in ids %}
+            {% if has_value(id) %}
+              {% set ns.t = ns.t + (states(id) | float(0)) %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.t }}
+
+      - name: "House metered loads power"
+        unique_id: energy_house_metered_loads_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {{
+            states('sensor.grid_loads_power') | float(0)
+            + states('sensor.inverter_loads_power') | float(0)
+          }}
+
+# ---------------------------------------------------------------------------
+# Cumulative energy (kWh) — Riemann left sum for inverter/solar only.
+# Grid plugs already expose lifetime kWh → use those with utility_meter below.
+# Washer power: derivative of energy (kWh/h ≈ kW) over a 1‑minute window.
+# Only meaningful while laundry_room_washer_energy is available (template → 0 otherwise).
+# ---------------------------------------------------------------------------
+sensor:
+  - platform: derivative
+    source: sensor.laundry_room_washer_energy
+    name: Laundry room washer power derived
+    unique_id: energy_washer_power_derived
+    round: 3
+    unit_time: h
+    time_window: "00:01:00"
+
+  - platform: integration
+    source: sensor.solar_production_power
+    name: Solar production energy
+    unique_id: energy_solar_production_energy
+    unit_prefix: k
+    round: 3
+    method: left
+
+  - platform: integration
+    source: sensor.inverter_supply_power
+    name: Inverter supply energy
+    unique_id: energy_inverter_supply_energy
+    unit_prefix: k
+    round: 3
+    method: left
+
+  - platform: integration
+    source: sensor.inverter_loads_power
+    name: Inverter loads energy
+    unique_id: energy_inverter_loads_energy
+    unit_prefix: k
+    round: 3
+    method: left
+
+  - platform: integration
+    source: sensor.inverter_unmetered_power
+    name: Inverter unmetered energy
+    unique_id: energy_inverter_unmetered_energy
+    unit_prefix: k
+    round: 3
+    method: left
+
+  - platform: integration
+    source: sensor.grid_loads_power
+    name: Grid loads energy
+    unique_id: energy_grid_loads_energy
+    unit_prefix: k
+    round: 3
+    method: left
+
+  - platform: integration
+    source: sensor.house_metered_loads_power
+    name: House metered loads energy
+    unique_id: energy_house_metered_loads_energy
+    unit_prefix: k
+    round: 3
+    method: left
+
+# ---------------------------------------------------------------------------
+# Daily totals (reset at midnight local)
+#
+# Grid devices: source = plug lifetime kWh (does not reset).
+# utility_meter tracks the delta and resets daily — no YAML "zero" needed.
+# Manual reset: Developer Tools → Actions → utility_meter.reset
+#
+# If an entity_id is wrong, fix the source: line (Developer Tools → States,
+# search "energy" next to each plug).
+# ---------------------------------------------------------------------------
+utility_meter:
+  solar_production_energy_daily:
+    source: sensor.solar_production_energy
+    name: Solar production energy daily
+    cycle: daily
+
+  inverter_supply_energy_daily:
+    source: sensor.inverter_supply_energy
+    name: Inverter supply energy daily
+    cycle: daily
+
+  inverter_loads_energy_daily:
+    source: sensor.laundry_room_washer_energy
+    name: Inverter loads energy daily
+    cycle: daily
+
+  inverter_unmetered_energy_daily:
+    source: sensor.inverter_unmetered_energy
+    name: Inverter unmetered energy daily
+    cycle: daily
+
+  grid_loads_energy_daily:
+    source: sensor.grid_loads_energy
+    name: Grid loads energy daily
+    cycle: daily
+
+  house_metered_loads_energy_daily:
+    source: sensor.house_metered_loads_energy
+    name: House metered loads energy daily
+    cycle: daily
+
+  # Lifetime kWh from plugs → daily slice for the pie chart
+  office_pc_energy_daily:
+    source: sensor.smart_socket_2_energy
+    name: Office PC energy daily
+    cycle: daily
+
+  front_room_pc_energy_daily:
+    source: sensor.smart_socket_energy
+    name: Front Room PC energy daily
+    cycle: daily
+
+  pi5_server_energy_daily:
+    source: sensor.ts011f_energy
+    name: Pi5 Server energy daily
+    cycle: daily
+
+  motorbike_charger_energy_daily:
+    source: sensor.zigbeesensor_energy
+    name: Motorbike charger energy daily
+    cycle: daily
+
+  fridge_energy_daily:
+    source: sensor.kitchen_refrigerator_energy
+    name: Fridge energy daily
+    cycle: daily

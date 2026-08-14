@@ -16,6 +16,7 @@ PowMr inverter ──RS232/TTL──► ESP32 (ESPHome) ──Wi‑Fi──► H
 | [`powMr.yaml`](powMr.yaml) | ESPHome config — Modbus sensors on the inverter |
 | [`solarstatsapi/`](solarstatsapi/) | Polls HA every 15s, forwards JSON snapshots |
 | [`solarstats/`](solarstats/) | Ingest + SQLite history + live dashboard |
+| [`zigbee-gateway/`](zigbee-gateway/) | ESP32-C6 Zigbee coordinator → MQTT → Home Assistant |
 
 Register decoding is based on [leodesigner/powmr_comm](https://github.com/leodesigner/powmr_comm).
 

@@ -4,3 +4,10 @@
 **/*.db
 **/*.log
 .DS_Store
+.cache/
+zigbee-gateway/build/
+zigbee-gateway/sdkconfig
+zigbee-gateway/sdkconfig.old
+zigbee-gateway/dependencies.lock
+zigbee-gateway/managed_components/
+rivermillsolar/

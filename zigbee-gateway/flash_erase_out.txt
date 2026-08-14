@@ -1,0 +1,40 @@
+Executing action: erase-flash
+Running esptool.py in directory D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build
+Executing "D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:\Espressif\frameworks\esp-idf-v5.5.4\components/esptool_py/esptool/esptool.py -p COM20 -b 460800 --before default_reset --after hard_reset --chip esp32c6 erase_flash"...
+esptool.py v4.12.0
+
+Serial port COM20
+
+Connecting...
+
+Chip is ESP32-C6FH4 (QFN32) (revision v0.1)
+
+Features: Wi-Fi 6, BT 5 (LE), IEEE802.15.4, Single Core + LP Core, 160MHz, Embedded Flash 4MB
+
+Crystal is 40MHz
+
+USB mode: USB-Serial/JTAG
+
+MAC: 54:32:04:ff:fe:3e:98:ac
+
+BASE MAC: 54:32:04:3e:98:ac
+
+MAC_EXT: ff:fe
+
+Uploading stub...
+
+Running stub...
+
+Stub running...
+
+Changing baud rate to 460800
+
+Changed.
+
+Erasing flash (this may take a while)...
+
+Chip erase completed successfully in 15.6 seconds.
+
+Hard resetting via RTS pin...
+
+Done

@@ -1,0 +1,288 @@
+# Split power-flow dashboard (Solar/Inverter vs Grid).
+#
+# Pie/donut charts need HACS → "ApexCharts Card" (custom:apexcharts-card).
+# Tiles / entities / history-graph work without it.
+#
+# configuration.yaml:
+#
+#   lovelace:
+#     dashboards:
+#       power-flow:
+#         mode: yaml
+#         title: Power Flow
+#         icon: mdi:transmission-tower
+#         show_in_sidebar: true
+#         filename: dashboards/power_flow.yaml
+
+title: Power Flow
+views:
+  - title: Now
+    path: now
+    icon: mdi:flash
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        title: Solar / inverter
+        cards:
+          - type: tile
+            entity: sensor.solar_production_power
+            name: Solar production
+            icon: mdi:solar-power
+            color: amber
+
+          - type: tile
+            entity: sensor.inverter_supply_power
+            name: Inverter supply
+            icon: mdi:current-ac
+            color: green
+
+          - type: tile
+            entity: sensor.inverter_loads_power
+            name: Metered inverter loads
+            icon: mdi:washing-machine
+            color: green
+
+          - type: tile
+            entity: sensor.inverter_unmetered_power
+            name: Other inverter loads
+            icon: mdi:help-circle-outline
+            color: green
+
+          - type: entities
+            title: Inverter devices
+            show_header_toggle: false
+            entities:
+              - entity: sensor.laundry_room_washer_power_approx
+                name: Washing machine
+                icon: mdi:washing-machine
+
+          - type: entities
+            title: Today (inverter / solar)
+            show_header_toggle: false
+            entities:
+              - entity: sensor.solar_production_energy_daily
+                name: Solar produced
+              - entity: sensor.inverter_supply_energy_daily
+                name: Inverter supplied
+              - entity: sensor.inverter_loads_energy_daily
+                name: Metered inverter loads
+              - entity: sensor.inverter_unmetered_energy_daily
+                name: Other inverter loads
+
+      - type: grid
+        title: Grid
+        cards:
+          - type: tile
+            entity: sensor.grid_loads_power
+            name: Grid loads (metered)
+            icon: mdi:transmission-tower
+            color: blue
+
+          - type: entities
+            title: Grid devices
+            show_header_toggle: false
+            entities:
+              - entity: sensor.smart_socket_2_power
+                name: Office PC
+                icon: mdi:desktop-classic
+              - entity: sensor.smart_socket_power
+                name: Front Room PC
+                icon: mdi:desktop-tower
+              - entity: sensor.ts011f_power
+                name: Pi5 Server
+                icon: mdi:raspberry-pi
+              - entity: sensor.zigbeesensor_power
+                name: Motorbike charger
+                icon: mdi:motorbike
+              - entity: sensor.kitchen_refrigerator_power
+                name: Fridge
+                icon: mdi:fridge
+
+          - type: entities
+            title: Today (grid)
+            show_header_toggle: false
+            entities:
+              - entity: sensor.grid_loads_energy_daily
+                name: Grid loads
+              - entity: sensor.house_metered_loads_energy_daily
+                name: All metered loads
+
+  - title: Charts
+    path: charts
+    icon: mdi:chart-pie
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        title: Right now (W)
+        cards:
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              show: true
+              title: Inverter vs grid
+              show_states: true
+            apex_config:
+              legend:
+                position: bottom
+            series:
+              - entity: sensor.inverter_supply_power
+                name: Inverter
+                color: "#4caf50"
+              - entity: sensor.grid_loads_power
+                name: Grid
+                color: "#2196f3"
+
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              show: true
+              title: Inverter supply split
+              show_states: true
+            apex_config:
+              legend:
+                position: bottom
+            series:
+              - entity: sensor.inverter_loads_power
+                name: Washing machine
+                color: "#8bc34a"
+              - entity: sensor.inverter_unmetered_power
+                name: Other inverter
+                color: "#cddc39"
+
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              show: true
+              title: Grid devices
+              show_states: true
+            apex_config:
+              legend:
+                position: bottom
+            series:
+              - entity: sensor.smart_socket_2_power
+                name: Office PC
+                color: "#42a5f5"
+              - entity: sensor.smart_socket_power
+                name: Front Room PC
+                color: "#5c6bc0"
+              - entity: sensor.ts011f_power
+                name: Pi5 Server
+                color: "#7e57c2"
+              - entity: sensor.zigbeesensor_power
+                name: Motorbike
+                color: "#26a69a"
+              - entity: sensor.kitchen_refrigerator_power
+                name: Fridge
+                color: "#66bb6a"
+
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              show: true
+              title: Solar vs inverter supply
+              show_states: true
+            apex_config:
+              legend:
+                position: bottom
+            series:
+              - entity: sensor.solar_production_power
+                name: Solar PV
+                color: "#ffb300"
+              - entity: sensor.inverter_supply_power
+                name: Inverter output
+                color: "#4caf50"
+
+      - type: grid
+        title: Today (kWh)
+        cards:
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              show: true
+              title: Today — inverter vs grid energy
+              show_states: true
+            apex_config:
+              legend:
+                position: bottom
+            series:
+              - entity: sensor.inverter_supply_energy_daily
+                name: Inverter
+                color: "#4caf50"
+              - entity: sensor.grid_loads_energy_daily
+                name: Grid
+                color: "#2196f3"
+
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              show: true
+              title: Today — inverter energy split
+              show_states: true
+            apex_config:
+              legend:
+                position: bottom
+            series:
+              - entity: sensor.inverter_loads_energy_daily
+                name: Washing machine
+                color: "#8bc34a"
+              - entity: sensor.inverter_unmetered_energy_daily
+                name: Other inverter
+                color: "#cddc39"
+
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              show: true
+              title: Today — grid devices (kWh)
+              show_states: true
+            apex_config:
+              legend:
+                position: bottom
+            series:
+              - entity: sensor.office_pc_energy_daily
+                name: Office PC
+                color: "#42a5f5"
+              - entity: sensor.front_room_pc_energy_daily
+                name: Front Room PC
+                color: "#5c6bc0"
+              - entity: sensor.pi5_server_energy_daily
+                name: Pi5 Server
+                color: "#7e57c2"
+              - entity: sensor.motorbike_charger_energy_daily
+                name: Motorbike
+                color: "#26a69a"
+              - entity: sensor.fridge_energy_daily
+                name: Fridge
+                color: "#66bb6a"
+
+  - title: History
+    path: history
+    icon: mdi:chart-line
+    type: sections
+    max_columns: 1
+    sections:
+      - type: grid
+        cards:
+          - type: history-graph
+            title: Power split (24h)
+            hours_to_show: 24
+            entities:
+              - entity: sensor.solar_production_power
+                name: Solar
+              - entity: sensor.inverter_supply_power
+                name: Inverter supply
+              - entity: sensor.grid_loads_power
+                name: Grid loads
+
+          - type: history-graph
+            title: Inverter vs grid loads (24h)
+            hours_to_show: 24
+            entities:
+              - entity: sensor.inverter_loads_power
+                name: Inverter metered
+              - entity: sensor.inverter_unmetered_power
+                name: Inverter other
+              - entity: sensor.grid_loads_power
+                name: Grid

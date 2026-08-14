@@ -1,0 +1,12 @@
+Transcript: 93ba28bc-9c0e-417f-86f3-ead16f92addb
+Write events for zigbee_coordinator.c:
+  line=28 size=23222 bytes -> _coord_28.c
+
+Reconstructed good_join:
+  zigbee_coordinator_good_join.c size=23851 bytes
+  Basis: Write@L28 + StrReplace through L124 (last edit before user Device announce short=0x8eb4 at L144)
+  Markers: ezb_zha_create_thermostat=yes; on_off_switch=no; ezb_bdb_open_network=yes; NETWORK_STEERING=yes
+  Note: thermostat->on_off switchover begins at L202 StrReplace
+
+Best restore candidate: zigbee_coordinator_good_join.c
+Original Write only: _coord_28.c (pre-announce fixes at L101/L104/L123/L124)

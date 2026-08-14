@@ -1,0 +1,111 @@
+menu "Zigbee Gateway Configuration"
+
+    config ZBGW_WIFI_SSID
+        string "WiFi SSID"
+        default "YOUR_WIFI_SSID"
+        help
+            Home Wi-Fi network SSID (STA mode).
+
+    config ZBGW_WIFI_PASSWORD
+        string "WiFi password"
+        default "YOUR_WIFI_PASSWORD"
+        help
+            Home Wi-Fi password.
+
+    config ZBGW_MQTT_HOST
+        string "MQTT broker hostname or IP"
+        default "homeassistant.local"
+        help
+            Mosquitto / Home Assistant MQTT broker address.
+
+    config ZBGW_MQTT_PORT
+        int "MQTT broker port"
+        range 1 65535
+        default 1883
+
+    config ZBGW_MQTT_USERNAME
+        string "MQTT username"
+        default "zigbee-gw"
+        help
+            MQTT user created in the Mosquitto add-on.
+
+    config ZBGW_MQTT_PASSWORD
+        string "MQTT password"
+        default "change-me"
+        help
+            MQTT password for the gateway user.
+
+    config ZBGW_MQTT_TOPIC_PREFIX
+        string "MQTT topic prefix"
+        default "zigbee-gw"
+        help
+            Base topic for bridge status, permit_join, and device state.
+
+    config ZBGW_PRIMARY_CHANNEL
+        int "Zigbee primary channel"
+        range 11 26
+        default 15
+        help
+            Prefer channels that do not overlap your 2.4 GHz Wi-Fi
+            (avoid Zigbee 11-14 near Wi-Fi 1, 16-19 near Wi-Fi 6, 21-24 near Wi-Fi 11).
+            Channel 15 or 25 is often a good starting point.
+
+    config ZBGW_SECONDARY_CHANNEL_MASK
+        hex "Zigbee secondary channel mask"
+        default 0x07FFF800
+        help
+            Fallback channel mask if formation on the primary channel fails.
+
+    config ZBGW_PERMIT_JOIN_SECONDS
+        int "Permit-join window (seconds)"
+        range 1 254
+        default 180
+
+    config ZBGW_LED_GPIO
+        int "Status LED GPIO"
+        default 15
+        help
+            FireBeetle 2 ESP32-C6 onboard LED is GPIO15.
+
+    config ZBGW_BOOT_GPIO
+        int "BOOT / permit-join button GPIO"
+        default 9
+        help
+            FireBeetle 2 ESP32-C6 BOOT button is GPIO9 (active low).
+
+    config ZBGW_MAX_CHILDREN
+        int "Max Zigbee children"
+        range 1 32
+        default 16
+
+    config ZBGW_ZIGBEE_ONLY_DIAG
+        bool "Zigbee-only join diagnostic (no WiFi/MQTT)"
+        default n
+        help
+            Never start WiFi or MQTT. Form the Zigbee network, open permit-join,
+            and wait for Device announce. Use to test whether the 802.15.4 radio
+            can hear plugs at all.
+
+    config ZBGW_PAIR_BEFORE_WIFI
+        bool "Open permit-join before WiFi on boot"
+        default n
+        depends on !ZBGW_ZIGBEE_ONLY_DIAG
+        help
+            After Zigbee forms, open a pairing window with WiFi still down so
+            the C6 RF is exclusive. Best for stubborn plugs. Disable once
+            pairing is reliable.
+
+    config ZBGW_PAIR_BEFORE_WIFI_SECONDS
+        int "Pre-WiFi pairing window (seconds)"
+        depends on ZBGW_PAIR_BEFORE_WIFI
+        range 30 254
+        default 180
+
+    config ZBGW_DEV_PAIR_TEST
+        bool "Run pair+toggle soak test before WiFi"
+        default n
+        help
+            After Zigbee forms, pause and open permit-join, wait for an On/Off
+            plug, then toggle it. Keep off for normal gateway use.
+
+endmenu
