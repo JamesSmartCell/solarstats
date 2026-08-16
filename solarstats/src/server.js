@@ -282,13 +282,15 @@ app.post("/auth/passkey/enroll/options", async (req, res) => {
     }
 
     const existing = getUserByEmail(db, email);
-    // Don't let strangers attach a passkey to an already-approved account.
+    // Don't let strangers attach a passkey to an approved account that already has one.
+    // First passkey is allowed even when approved (bootstrap without OAuth).
     if (existing?.status === "approved") {
+      const passkeys = listPasskeysForUser(db, existing.id);
       const loggedIn = currentUser(req);
-      if (!loggedIn || loggedIn.id !== existing.id) {
+      if (passkeys.length > 0 && (!loggedIn || loggedIn.id !== existing.id)) {
         return res.status(403).json({
           error:
-            "This account is already approved. Sign in first, then add a passkey from the dashboard.",
+            "This account already has a passkey. Sign in with passkey or MS Authenticator, then add another from the dashboard.",
         });
       }
     }
