@@ -15,7 +15,8 @@ import {
   webauthnConfig,
 } from "./auth.js";
 import {
-  ADMIN_EMAIL,
+  getAdminEmail,
+  isAdminEmail,
   getAuthSettings,
   getHistory,
   getUserById,
@@ -173,8 +174,7 @@ function requireApproved(req, res, next) {
 
 function requireAdmin(req, res, next) {
   requireApproved(req, res, () => {
-    const email = String(req.user.email || "").toLowerCase();
-    if (email !== ADMIN_EMAIL) {
+    if (!isAdminEmail(req.user.email)) {
       return res.status(403).json({ error: "admin_only" });
     }
     return next();
@@ -325,7 +325,7 @@ app.get("/api/me", (req, res) => {
     role: user.role,
     status: user.status,
     displayName: user.display_name,
-    isAdmin: String(user.email || "").toLowerCase() === ADMIN_EMAIL,
+    isAdmin: isAdminEmail(user.email),
     hasPasskeyCookie: hasPasskeyCookie(req) || listPasskeysForUser(db, user.id).length > 0,
     settings: {
       allowPasskeyEnrollment: settings.allowPasskeyEnrollment,
@@ -607,4 +607,9 @@ server.listen(PORT, () => {
       : "Microsoft auth: NOT configured (set AZURE_* / AUTH_REDIRECT_URI / SESSION_SECRET)",
   );
   console.log(`WebAuthn RP: ${JSON.stringify(webauthnConfig())}`);
+  console.log(
+    getAdminEmail()
+      ? `Admin email: ${getAdminEmail()}`
+      : "Admin email: NOT set (ADMIN_EMAIL in .env)",
+  );
 });

@@ -42,7 +42,7 @@ Configure at least one IdP in `.env` (see `.env.example`).
 
 **Passkeys** are stored by the **device** (Apple Passwords / Google Password Manager / Windows Hello), not Microsoft Authenticator. iPhone: Settings → General → Autofill & Passwords → enable **Passwords**.
 
-Admin **`manticorenettle@gmail.com`** is seeded approved on first DB open.
+Admin email is set via **`ADMIN_EMAIL`** in `.env` (seeded as approved admin on first DB open).
 
 ### Account management (`/admin`)
 

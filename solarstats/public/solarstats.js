@@ -433,9 +433,8 @@ async function loadMe() {
   const res = await fetch("/api/me");
   if (!res.ok) return;
   const me = await res.json();
-  if (me.email === "manticorenettle@gmail.com" || me.isAdmin) {
-    els.adminLink.hidden = false;
-  }
+  if (!els.adminLink) return;
+  els.adminLink.hidden = !me.isAdmin;
 }
 
 els.rangeSelect.addEventListener("change", () => {

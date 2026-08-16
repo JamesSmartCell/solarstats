@@ -3,7 +3,19 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 const MAX_GAP_MS = 5 * 60 * 1000;
-export const ADMIN_EMAIL = "manticorenettle@gmail.com";
+
+/** Admin email from ADMIN_EMAIL in the site .env (lowercased). */
+export function getAdminEmail() {
+  return String(process.env.ADMIN_EMAIL || "")
+    .trim()
+    .toLowerCase();
+}
+
+export function isAdminEmail(email) {
+  const admin = getAdminEmail();
+  if (!admin) return false;
+  return String(email || "").trim().toLowerCase() === admin;
+}
 
 const LOAD_KEYS = [
   "officePc",
@@ -85,6 +97,13 @@ function ensureColumn(db, table, column, type) {
 }
 
 function seedAdmin(db) {
+  const adminEmail = getAdminEmail();
+  if (!adminEmail) {
+    console.warn(
+      "ADMIN_EMAIL is not set — no admin user will be seeded. Set it in .env.",
+    );
+    return;
+  }
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO users (email, role, status, display_name, created_at, approved_at)
@@ -93,7 +112,7 @@ function seedAdmin(db) {
        role = 'admin',
        status = 'approved',
        approved_at = COALESCE(users.approved_at, excluded.approved_at)`,
-  ).run(ADMIN_EMAIL, now, now);
+  ).run(adminEmail, now, now);
 }
 
 function toNumber(value) {
@@ -190,7 +209,7 @@ export function upsertMicrosoftUser(db, { email, displayName }) {
     return { user: getUserById(db, existing.id), outcome: existing.status };
   }
 
-  if (e === ADMIN_EMAIL) {
+  if (isAdminEmail(e)) {
     seedAdmin(db);
     const admin = getUserByEmail(db, e);
     if (displayName) {

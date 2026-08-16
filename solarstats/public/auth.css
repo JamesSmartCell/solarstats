@@ -240,6 +240,10 @@
   display: inline-block;
 }
 
+.nav-links a.toolbar-btn[hidden] {
+  display: none !important;
+}
+
 .pie-wrap {
   height: 280px;
   max-width: 420px;
