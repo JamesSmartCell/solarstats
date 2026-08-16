@@ -22,8 +22,18 @@ function bufferToB64url(buf) {
   return Buffer.from(buf).toString("base64url");
 }
 
-export async function registrationOptions(db, user) {
-  if (user.status !== "approved") {
+export async function registrationOptions(db, user, { allowPending = false } = {}) {
+  if (user.status === "denied") {
+    const err = new Error("Account access denied");
+    err.status = 403;
+    throw err;
+  }
+  if (user.status === "pending" && !allowPending) {
+    const err = new Error("Account not approved");
+    err.status = 403;
+    throw err;
+  }
+  if (user.status !== "approved" && user.status !== "pending") {
     const err = new Error("Account not approved");
     err.status = 403;
     throw err;
@@ -31,7 +41,7 @@ export async function registrationOptions(db, user) {
 
   const existing = listPasskeysForUser(db, user.id);
   const settings = getAuthSettings(db);
-  // First passkey is always allowed for approved users; further ones need the admin toggle.
+  // First passkey is always allowed; further ones need the admin toggle.
   if (!settings.allowPasskeyEnrollment && existing.length > 0) {
     const err = new Error("Passkey enrollment is disabled");
     err.status = 403;
@@ -62,8 +72,24 @@ export async function registrationOptions(db, user) {
   return options;
 }
 
-export async function verifyRegistration(db, user, response, expectedChallenge) {
-  if (user.status !== "approved") {
+export async function verifyRegistration(
+  db,
+  user,
+  response,
+  expectedChallenge,
+  { allowPending = false } = {},
+) {
+  if (user.status === "denied") {
+    const err = new Error("Account access denied");
+    err.status = 403;
+    throw err;
+  }
+  if (user.status === "pending" && !allowPending) {
+    const err = new Error("Account not approved");
+    err.status = 403;
+    throw err;
+  }
+  if (user.status !== "approved" && user.status !== "pending") {
     const err = new Error("Account not approved");
     err.status = 403;
     throw err;

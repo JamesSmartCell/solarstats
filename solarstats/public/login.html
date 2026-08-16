@@ -20,19 +20,23 @@
 
       <p class="auth-error" id="errorBox" hidden></p>
 
-      <p class="auth-hint" style="margin-top: 1rem">Sign in with an account</p>
-      <div id="providerButtons"></div>
+      <a class="auth-btn microsoft" id="msBtn" href="/auth/microsoft">
+        Use MS Authenticator
+      </a>
+      <p class="auth-hint">
+        Microsoft sign-in with Authenticator number matching.
+      </p>
 
       <button type="button" class="auth-btn secondary" id="passkeyBtn">
         Sign in with passkey
       </button>
       <p class="auth-hint" id="passkeyHint" hidden>
-        Uses a passkey saved on this device (Apple Passwords, Google Password Manager, Windows Hello — not Microsoft Authenticator).
+        Use a passkey already saved for this site.
       </p>
 
-      <a class="auth-btn secondary" href="/create-passkey">Create a passkey</a>
+      <a class="auth-btn secondary" href="/create-passkey">Create passkey</a>
       <p class="auth-hint">
-        Verify with Google, Apple, or Microsoft, then save a device passkey for next time.
+        Email + device passkey (Apple Passwords / Google Password Manager / Windows Hello).
       </p>
     </main>
     <script type="module" src="/login.js"></script>

@@ -17,6 +17,7 @@ import {
   getAuthSettings,
   getHistory,
   getUserById,
+  getUserByEmail,
   insertSample,
   listPasskeysForUser,
   listUsers,
@@ -230,9 +231,6 @@ app.get("/auth/:provider", async (req, res) => {
 });
 
 app.get("/create-passkey", (req, res) => {
-  const user = currentUser(req);
-  if (user?.status === "approved") return res.redirect("/setup-passkey");
-  if (user?.status === "pending") return res.redirect("/pending");
   res.sendFile(path.join(publicDir, "create-passkey.html"));
 });
 
@@ -272,6 +270,77 @@ app.get("/api/me", (req, res) => {
 });
 
 // --- Passkeys ---
+
+/** Public: email + device passkey (no Google/Apple OAuth). */
+app.post("/auth/passkey/enroll/options", async (req, res) => {
+  try {
+    const email = String(req.body?.email || "")
+      .trim()
+      .toLowerCase();
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "Valid email required" });
+    }
+
+    const existing = getUserByEmail(db, email);
+    // Don't let strangers attach a passkey to an already-approved account.
+    if (existing?.status === "approved") {
+      const loggedIn = currentUser(req);
+      if (!loggedIn || loggedIn.id !== existing.id) {
+        return res.status(403).json({
+          error:
+            "This account is already approved. Sign in first, then add a passkey from the dashboard.",
+        });
+      }
+    }
+
+    const { user, outcome } = upsertMicrosoftUser(db, { email, displayName: null });
+    if (outcome === "registration_closed" || !user) {
+      return res.status(403).json({ error: "New account registration is closed" });
+    }
+    if (user.status === "denied") {
+      return res.status(403).json({ error: "Account access denied" });
+    }
+
+    const options = await registrationOptions(db, user, { allowPending: true });
+    req.session.passkeyChallenge = options.challenge;
+    req.session.passkeyEnrollUserId = user.id;
+    res.json({
+      options,
+      status: user.status,
+      email: user.email,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/passkey/enroll/verify", async (req, res) => {
+  try {
+    const challenge = req.session.passkeyChallenge;
+    const userId = req.session.passkeyEnrollUserId;
+    if (!challenge || !userId) {
+      return res.status(400).json({ error: "missing enrollment session" });
+    }
+    const user = getUserById(db, userId);
+    if (!user) return res.status(400).json({ error: "unknown user" });
+
+    const result = await verifyRegistration(db, user, req.body, challenge, {
+      allowPending: true,
+    });
+    delete req.session.passkeyChallenge;
+    delete req.session.passkeyEnrollUserId;
+
+    setSessionUser(req, user);
+    res.json({
+      ...result,
+      status: user.status,
+      email: user.email,
+      redirect: user.status === "approved" ? "/" : "/pending",
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
 
 app.post("/auth/passkey/register/options", requireApproved, async (req, res) => {
   try {

@@ -47,12 +47,22 @@
   background: transparent;
 }
 
-.auth-hint,
-.auth-copy {
-  margin: 0.65rem 0 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-  line-height: 1.45;
+.auth-input {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--text);
+  background: var(--bg2);
+  border: 1px solid var(--line);
+}
+
+.auth-input:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .auth-error {
