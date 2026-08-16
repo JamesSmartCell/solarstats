@@ -6,7 +6,13 @@
 #include "config.h"
 #include "device_registry.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "ha_discovery.h"
+#include "lwip/inet.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
+#include "mdns.h"
 #include "mqtt_client.h"
 #include "sdkconfig.h"
 
@@ -18,13 +24,133 @@ static mqtt_bridge_permit_join_cb_t s_permit_cb;
 static mqtt_bridge_switch_cb_t s_switch_cb;
 static mqtt_bridge_remove_cb_t s_remove_cb;
 static mqtt_bridge_rediscover_cb_t s_rediscover_cb;
+static TaskHandle_t s_discovery_task;
+static uint32_t s_discovery_gen;
+static bool s_discovery_pending;
+/* Resolved once at start so reconnects do not re-hit flaky .local DNS. */
+static char s_broker_host[64];
 
-static void rediscover_device_cb(zbgw_device_t *dev, void *ctx)
+typedef struct {
+    uint32_t gen;
+} discovery_pace_ctx_t;
+
+static bool host_looks_like_ipv4(const char *s)
 {
-    (void)ctx;
-    if (dev) {
-        ha_discovery_publish_device(dev);
-        dev->discovery_published = true;
+    int a = 0, b = 0, c = 0, d = 0;
+    char tail = 0;
+    return s && sscanf(s, "%d.%d.%d.%d%c", &a, &b, &c, &d, &tail) == 4 && a >= 0 && a <= 255 && b >= 0 &&
+           b <= 255 && c >= 0 && c <= 255 && d >= 0 && d <= 255;
+}
+
+static esp_err_t resolve_broker_host(void)
+{
+    const char *cfg = CONFIG_ZBGW_MQTT_HOST;
+    snprintf(s_broker_host, sizeof(s_broker_host), "%s", cfg);
+    if (host_looks_like_ipv4(cfg)) {
+        ESP_LOGI(TAG, "MQTT broker IP %s", s_broker_host);
+        return ESP_OK;
+    }
+
+    size_t len = strlen(cfg);
+    if (len > 6 && strcmp(cfg + len - 6, ".local") == 0) {
+        char name[64];
+        size_t nlen = len - 6;
+        if (nlen >= sizeof(name)) {
+            nlen = sizeof(name) - 1;
+        }
+        memcpy(name, cfg, nlen);
+        name[nlen] = '\0';
+
+        esp_err_t mdns_err = mdns_init();
+        if (mdns_err != ESP_OK && mdns_err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "mdns_init failed: %s", esp_err_to_name(mdns_err));
+        } else {
+            for (int i = 0; i < 12; ++i) {
+                esp_ip4_addr_t addr = {0};
+                if (mdns_query_a(name, 2500, &addr) == ESP_OK) {
+                    snprintf(s_broker_host, sizeof(s_broker_host), IPSTR, IP2STR(&addr));
+                    ESP_LOGI(TAG, "mDNS %s -> %s", cfg, s_broker_host);
+                    return ESP_OK;
+                }
+                ESP_LOGW(TAG, "mDNS %s failed, retry %d/12", name, i + 1);
+                vTaskDelay(pdMS_TO_TICKS(750));
+            }
+        }
+    }
+
+    for (int i = 0; i < 8; ++i) {
+        struct addrinfo hints = {0};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        struct addrinfo *res = NULL;
+        int gerr = getaddrinfo(cfg, NULL, &hints, &res);
+        if (gerr == 0 && res && res->ai_addr) {
+            struct sockaddr_in *sa = (struct sockaddr_in *)res->ai_addr;
+            inet_ntoa_r(sa->sin_addr, s_broker_host, sizeof(s_broker_host));
+            freeaddrinfo(res);
+            ESP_LOGI(TAG, "DNS %s -> %s", cfg, s_broker_host);
+            return ESP_OK;
+        }
+        if (res) {
+            freeaddrinfo(res);
+        }
+        ESP_LOGW(TAG, "DNS %s failed (%d), retry %d/8", cfg, gerr, i + 1);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    ESP_LOGW(TAG, "Keeping unresolved hostname %s (MQTT may fail until DNS works)", cfg);
+    return ESP_ERR_NOT_FOUND;
+}
+
+static void rediscover_device_paced(zbgw_device_t *dev, void *ctx)
+{
+    discovery_pace_ctx_t *pace = ctx;
+    if (!dev || !pace || !s_connected || pace->gen != s_discovery_gen) {
+        return;
+    }
+    (void)ha_discovery_publish_device(dev);
+    dev->discovery_published = true;
+    vTaskDelay(pdMS_TO_TICKS(120));
+}
+
+static void discovery_task(void *arg)
+{
+    (void)arg;
+    do {
+        s_discovery_pending = false;
+        uint32_t gen = s_discovery_gen;
+        vTaskDelay(pdMS_TO_TICKS(300));
+        if (!s_connected || gen != s_discovery_gen) {
+            continue;
+        }
+
+        ESP_LOGI(TAG, "Publishing HA discovery (paced)");
+        (void)ha_discovery_publish_bridge();
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        discovery_pace_ctx_t pace = {.gen = gen};
+        device_registry_foreach(rediscover_device_paced, &pace);
+
+        if (s_connected && gen == s_discovery_gen) {
+            ESP_LOGI(TAG, "HA discovery publish complete");
+        }
+    } while (s_discovery_pending && s_connected);
+
+    s_discovery_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static void schedule_discovery(void)
+{
+    s_discovery_gen++;
+    s_discovery_pending = true;
+    if (s_discovery_task) {
+        return;
+    }
+    if (xTaskCreate(discovery_task, "mqtt_disc", 4096, NULL, 5, &s_discovery_task) != pdPASS) {
+        ESP_LOGW(TAG, "Failed to start discovery task");
+        s_discovery_task = NULL;
+        s_discovery_pending = false;
     }
 }
 
@@ -59,7 +185,6 @@ static bool parse_ieee_payload(const char *data, int len, uint64_t *ieee)
     char buf[24] = {0};
     int n = len < (int)sizeof(buf) - 1 ? len : (int)sizeof(buf) - 1;
     memcpy(buf, data, n);
-    /* Trim whitespace/newlines */
     while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ')) {
         buf[--n] = '\0';
     }
@@ -89,7 +214,6 @@ static void handle_switch_set_topic(const char *topic, int topic_len, const char
         return;
     }
 
-    /* Expected: <prefix>/<16-hex-ieee>/switch/set */
     const char *prefix = ZBGW_TOPIC_PREFIX;
     size_t prefix_len = strlen(prefix);
     if ((size_t)topic_len < prefix_len + 1 + 16 + strlen("/switch/set")) {
@@ -128,7 +252,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT connected - publishing HA discovery");
+        ESP_LOGI(TAG, "MQTT connected");
         s_connected = true;
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_PERMIT_JOIN, 1);
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_SWITCH_SET_WILDCARD, 1);
@@ -136,13 +260,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_REDISCOVER, 1);
         mqtt_bridge_publish_status("online");
         mqtt_bridge_publish_permit_state(false);
-        /* Announce bridge immediately so HA shows the device even before Zigbee is ready */
-        ha_discovery_publish_bridge();
-        device_registry_foreach(rediscover_device_cb, NULL);
+        schedule_discovery();
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "MQTT disconnected");
         s_connected = false;
+        s_discovery_gen++;
         break;
     case MQTT_EVENT_DATA:
         if (event->topic_len == (int)strlen(ZBGW_TOPIC_PERMIT_JOIN) &&
@@ -153,7 +276,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             if (!s_remove_cb) {
                 break;
             }
-            /* Payloads: "<16-hex-ieee>" | "all" | "switches" */
             char buf[24] = {0};
             int n = event->data_len < (int)sizeof(buf) - 1 ? event->data_len : (int)sizeof(buf) - 1;
             if (n > 0) {
@@ -198,6 +320,7 @@ void mqtt_bridge_suspend(void)
     }
     ESP_LOGW(TAG, "Suspending MQTT during Zigbee pairing");
     s_connected = false;
+    s_discovery_gen++;
     (void)esp_mqtt_client_stop(s_client);
 }
 
@@ -218,8 +341,12 @@ esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_
     s_remove_cb = remove_cb;
     s_rediscover_cb = rediscover_cb;
 
+    /* Let DHCP/DNS settle; Zigbee RF also contends for the radio right after boot. */
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    (void)resolve_broker_host();
+
     char uri[128];
-    snprintf(uri, sizeof(uri), "mqtt://%s:%d", CONFIG_ZBGW_MQTT_HOST, CONFIG_ZBGW_MQTT_PORT);
+    snprintf(uri, sizeof(uri), "mqtt://%s:%d", s_broker_host, CONFIG_ZBGW_MQTT_PORT);
 
     esp_mqtt_client_config_t cfg = {
         .broker.address.uri = uri,
@@ -233,7 +360,11 @@ esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_
                 .qos = 1,
                 .retain = true,
             },
-        .session.keepalive = 30,
+        .session.keepalive = 60,
+        .network.timeout_ms = 20000,
+        .network.reconnect_timeout_ms = 5000,
+        .buffer.size = 4096,
+        .buffer.out_size = 4096,
     };
 
     s_client = esp_mqtt_client_init(&cfg);
@@ -256,6 +387,9 @@ esp_err_t mqtt_bridge_publish(const char *topic, const char *payload, int qos, b
     if (!s_client || !topic || !payload) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (!s_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
     int msg_id = esp_mqtt_client_publish(s_client, topic, payload, 0, qos, retain ? 1 : 0);
     return msg_id >= 0 ? ESP_OK : ESP_FAIL;
 }
@@ -272,5 +406,5 @@ esp_err_t mqtt_bridge_publish_permit_state(bool open)
 
 esp_err_t mqtt_bridge_publish_info(const char *json)
 {
-    return mqtt_bridge_publish(ZBGW_TOPIC_INFO, json, 1, true);
+    return mqtt_bridge_publish(ZBGW_TOPIC_INFO, json, 0, true);
 }

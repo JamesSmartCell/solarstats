@@ -4,6 +4,8 @@ substitutions:
   inverter_tx_pin: GPIO17   # ESP32 TX → SP3232 RXD (TTL)
   inverter_rx_pin: GPIO16   # ESP32 RX ← SP3232 TXD (TTL)
   update_interval: 15s
+  # If Modbus goes quiet (charge-only / inverter off), clear power to 0 after this.
+  power_stale_timeout: "10min"
   # Sanity caps — out-of-range Modbus glitches are dropped (keep last good value).
   max_inverter_power_w: "3500"
   max_pv_power_w: "2000"
@@ -32,6 +34,7 @@ logger:
 api:
 ota:
   - platform: esphome
+    password: !secret powmr_inverter__ota_password
 
 uart:
   - id: uart_inverter
@@ -133,6 +136,10 @@ sensor:
       - lambda: |-
           if (isnan(x) || x < 0.0f || x > ${max_pv_power_w}) return {};
           return x;
+      # No successful publish (e.g. inverter/Modbus quiet) → 0 W, not last stuck value.
+      - timeout:
+          timeout: ${power_stale_timeout}
+          value: 0
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -224,6 +231,9 @@ sensor:
       - lambda: |-
           if (isnan(x) || x < 0.0f || x > ${max_inverter_power_w}) return {};
           return x;
+      - timeout:
+          timeout: ${power_stale_timeout}
+          value: 0
 
   - platform: modbus_controller
     modbus_controller_id: inverter
@@ -245,19 +255,7 @@ sensor:
 
 select:
   - platform: modbus_controller
-    modbus_controller_id: inverter  # Matches your existing ID
-    id: output_source_priority
-    name: "Charger Source Priority"
-    address: 5017
-    value_type: U_WORD
-    optionsmap:
-      "Utility first (grid priority)": 0
-      "Solar first (solar priority)": 1
-      "Solar and battery (solar priority)": 2
-      "Only solar": 3
-
-  - platform: modbus_controller
-    modbus_controller_id: inverter  # Matches your existing ID
+    modbus_controller_id: inverter
     id: output_source_priority
     name: "Output Source Priority"
     address: 5018
@@ -267,15 +265,6 @@ select:
       "SBU (Solar-Battery-Utility)": 1
       "Utility First": 2
 
-  - platform: modbus_controller
-    modbus_controller_id: inverter
-    id: remote_power_switch
-    name: "Remote Power Switch (Experimental)"
-    address: 420             # Remote switch register
-    value_type: U_WORD
-    optionsmap:
-      "Shutdown": 0
-      "Turn On": 1  
     # The byte-swapping isn't needed for writing, but if the dropdown shows the wrong current value, add:
     # filters:
     #   - lambda: |-

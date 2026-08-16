@@ -25,6 +25,17 @@ const ENTITIES = {
   outputPower: "sensor.garden_powmr_inverter_output_power",
 };
 
+/** Daily kWh meters for All-devices pie (keep HA _2 IDs where renamed). */
+const LOAD_DAILY_ENTITIES = {
+  officePc: "sensor.office_pc_synth_energy_daily",
+  frontRoomPc: "sensor.front_room_pc_synth_energy_daily",
+  pi5: "sensor.pi5_server_energy_daily_2",
+  motorbike: "sensor.motorbike_charger_energy_daily_2",
+  fridge: "sensor.fridge_energy_daily_2",
+  washingMachine: "sensor.inverter_loads_energy_daily",
+  otherInverter: "sensor.inverter_unmetered_energy_daily",
+};
+
 function requireEnv(name, value) {
   if (!value) {
     console.error(`Missing required env var: ${name}`);
@@ -72,17 +83,31 @@ async function fetchEntity(entityId) {
   return parseState(data.state);
 }
 
-async function collectSnapshot() {
+async function collectMap(map) {
   const entries = await Promise.all(
-    Object.entries(ENTITIES).map(async ([key, entityId]) => {
-      const value = await fetchEntity(entityId);
-      return [key, value];
+    Object.entries(map).map(async ([key, entityId]) => {
+      try {
+        const value = await fetchEntity(entityId);
+        return [key, value];
+      } catch (err) {
+        console.warn(`[warn] ${err.message}`);
+        return [key, null];
+      }
     }),
   );
+  return Object.fromEntries(entries);
+}
+
+async function collectSnapshot() {
+  const [core, loadsDailyKwh] = await Promise.all([
+    collectMap(ENTITIES),
+    collectMap(LOAD_DAILY_ENTITIES),
+  ]);
 
   return {
     ts: new Date().toISOString(),
-    ...Object.fromEntries(entries),
+    ...core,
+    loadsDailyKwh,
   };
 }
 
@@ -125,7 +150,7 @@ async function tick() {
     }
     await forwardSnapshot(snapshot);
     console.log(
-      `[${snapshot.ts}] forwarded SoC=${snapshot.batterySoc}% PV=${snapshot.pvPower}W Out=${snapshot.outputPower}W`,
+      `[${snapshot.ts}] forwarded SoC=${snapshot.batterySoc}% PV=${snapshot.pvPower}W Out=${snapshot.outputPower}W loads=${JSON.stringify(snapshot.loadsDailyKwh)}`,
     );
   } catch (err) {
     console.error(`[${new Date().toISOString()}] poll failed:`, err.message);

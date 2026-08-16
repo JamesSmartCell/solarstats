@@ -1,3 +1,7 @@
+import {
+  startRegistration,
+} from "https://unpkg.com/@simplewebauthn/browser@13.1.0/esm/index.js";
+
 const RANGE_LABELS = {
   "1h": "1 hour",
   "6h": "6 hours",
@@ -7,6 +11,16 @@ const RANGE_LABELS = {
   "7d": "7 days",
   "30d": "30 days",
 };
+
+const LOAD_SLICES = [
+  { key: "officePc", label: "Office PC", color: "#42a5f5" },
+  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0" },
+  { key: "pi5", label: "Pi5 Server", color: "#7e57c2" },
+  { key: "motorbike", label: "Motorbike", color: "#26a69a" },
+  { key: "fridge", label: "Fridge", color: "#66bb6a" },
+  { key: "washingMachine", label: "Washing machine", color: "#8bc34a" },
+  { key: "otherInverter", label: "Other inverter", color: "#cddc39" },
+];
 
 const els = {
   connection: document.getElementById("connection"),
@@ -24,6 +38,8 @@ const els = {
   resetZoom: document.getElementById("resetZoom"),
   footNote: document.getElementById("footNote"),
   socHint: document.getElementById("socHint"),
+  adminLink: document.getElementById("adminLink"),
+  passkeyRegisterBtn: document.getElementById("passkeyRegisterBtn"),
 };
 
 const state = {
@@ -31,6 +47,7 @@ const state = {
   samples: [],
   energyKwhTotal: 0,
   rangeStartMs: 0,
+  loadsDailyKwh: null,
 };
 
 function rangeToMs(range) {
@@ -67,6 +84,7 @@ const zoomOptions = {
   },
   limits: {
     x: { min: "original", max: "original" },
+    y: undefined,
   },
 };
 
@@ -206,6 +224,42 @@ const outChart = new Chart(document.getElementById("outChart"), {
   },
 });
 
+const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
+  type: "doughnut",
+  data: {
+    labels: LOAD_SLICES.map((s) => s.label),
+    datasets: [
+      {
+        data: LOAD_SLICES.map(() => 0),
+        backgroundColor: LOAD_SLICES.map((s) => s.color),
+        borderColor: "#12181e",
+        borderWidth: 2,
+      },
+    ],
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: "bottom",
+        labels: { color: "#8b9aab", boxWidth: 12, font: { size: 11 } },
+      },
+      tooltip: {
+        backgroundColor: "#12181e",
+        borderColor: "#2a3540",
+        borderWidth: 1,
+        callbacks: {
+          label(ctx) {
+            const v = Number(ctx.raw);
+            return `${ctx.label}: ${Number.isFinite(v) ? v.toFixed(3) : "—"} kWh`;
+          },
+        },
+      },
+    },
+  },
+});
+
 const charts = [socChart, pvChart, outChart];
 
 function fmt(value, digits = 1) {
@@ -217,6 +271,16 @@ function flash(el) {
   el.classList.remove("flash");
   void el.offsetWidth;
   el.classList.add("flash");
+}
+
+function updateLoadsPie(loads) {
+  if (loads) state.loadsDailyKwh = loads;
+  const src = state.loadsDailyKwh || {};
+  loadsPieChart.data.datasets[0].data = LOAD_SLICES.map((s) => {
+    const n = Number(src[s.key]);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  });
+  loadsPieChart.update("none");
 }
 
 function updateTiles(sample) {
@@ -245,6 +309,10 @@ function updateTiles(sample) {
   els.lastUpdate.textContent = sample.ts
     ? new Date(sample.ts).toLocaleString()
     : "—";
+
+  if (sample.loadsDailyKwh) {
+    updateLoadsPie(sample.loadsDailyKwh);
+  }
 }
 
 function updateChrome() {
@@ -267,7 +335,6 @@ function syncCharts() {
     energy.push({ x, y: s.energyKwhCumulative });
   }
 
-  // Slightly stronger smoothing on noisier power series; SoC milder; energy almost raw.
   socChart.data.datasets[0].data = smoothSeries(soc, 0.28);
   pvChart.data.datasets[0].data = smoothSeries(pv, 0.2);
   outChart.data.datasets[0].data = smoothSeries(out, 0.2);
@@ -295,6 +362,7 @@ function applyHistory(payload) {
       ? { ...payload.latest, energyKwhTotal: state.energyKwhTotal }
       : null,
   );
+  updateLoadsPie(payload.loadsDailyKwh || payload.latest?.loadsDailyKwh || null);
   updateChrome();
 }
 
@@ -324,6 +392,10 @@ function applySample(sample) {
 
 async function loadHistory() {
   const res = await fetch(`/api/history?range=${encodeURIComponent(state.range)}`);
+  if (res.status === 401) {
+    location.href = "/login";
+    return;
+  }
   if (!res.ok) throw new Error(`history HTTP ${res.status}`);
   applyHistory(await res.json());
 }
@@ -350,10 +422,10 @@ function connectWs() {
         if (msg.latest) {
           updateTiles({ ...msg.latest, energyKwhTotal: state.energyKwhTotal });
         }
+        if (msg.loadsDailyKwh) updateLoadsPie(msg.loadsDailyKwh);
       } else if (msg.type === "sample") {
         applySample(msg.sample);
       } else if (msg.type === "history") {
-        // Older servers; ignore if we already drive range from the dropdown.
         applyHistory(msg);
       }
     } catch (err) {
@@ -361,6 +433,43 @@ function connectWs() {
     }
   });
 }
+
+async function loadMe() {
+  const res = await fetch("/api/me");
+  if (!res.ok) return;
+  const me = await res.json();
+  if (me.role === "admin") {
+    els.adminLink.hidden = false;
+  }
+  if (me.settings?.allowPasskeyEnrollment && window.PublicKeyCredential) {
+    els.passkeyRegisterBtn.hidden = false;
+  }
+}
+
+els.passkeyRegisterBtn?.addEventListener("click", async () => {
+  els.passkeyRegisterBtn.disabled = true;
+  try {
+    const optRes = await fetch("/auth/passkey/register/options", { method: "POST" });
+    if (!optRes.ok) {
+      throw new Error((await optRes.json().catch(() => ({}))).error || "options failed");
+    }
+    const options = await optRes.json();
+    const credential = await startRegistration({ optionsJSON: options });
+    const verifyRes = await fetch("/auth/passkey/register/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(credential),
+    });
+    if (!verifyRes.ok) {
+      throw new Error((await verifyRes.json().catch(() => ({}))).error || "verify failed");
+    }
+    alert("Passkey registered. You can use it on the sign-in page next time.");
+  } catch (err) {
+    alert(err.message || "Passkey registration failed");
+  } finally {
+    els.passkeyRegisterBtn.disabled = false;
+  }
+});
 
 els.rangeSelect.addEventListener("change", () => {
   state.range = els.rangeSelect.value;
@@ -370,6 +479,7 @@ els.rangeSelect.addEventListener("change", () => {
 els.resetZoom.addEventListener("click", resetAllZoom);
 
 updateChrome();
+loadMe().catch(() => {});
 loadHistory()
   .catch((err) => console.error(err))
   .finally(connectWs);

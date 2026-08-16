@@ -1,28 +1,7 @@
-Activating ESP-IDF 5.5
-Setting IDF_PATH to 'D:\Espressif\frameworks\esp-idf-v5.5.4'.
-* Checking python version ... 3.12.10
-* Checking python dependencies ... OK
-* Deactivating the current ESP-IDF environment (if any) ... OK
-* Establishing a new ESP-IDF environment ... OK
-* Identifying shell ... cmd.exe
-* Detecting outdated tools in system ... Found tools that are not used by active ESP-IDF version.
-For removing old versions of amazon-corretto-11-x64-windows-jdk, ccache, 
-espressif-ide, idf-driver, openocd-esp32, riscv32-esp-elf, riscv32-esp-elf-gdb, 
-xtensa-esp-elf, xtensa-esp-elf-gdb use command 'python.exe 
-D:\Espressif\frameworks\esp-idf-v5.5.4\tools\idf_tools.py uninstall'
-To free up even more space, remove installation packages of those tools.
-Use option python.exe D:\Espressif\frameworks\esp-idf-v5.5.4\tools\idf_tools.py 
-uninstall --remove-archives.
-
-Done! You can now compile ESP-IDF projects.
-Go to the project directory and run:
-
-  idf.py build
-
-Executing action: all (aliases: build)
+Executing action: flash
 Running ninja in directory D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build
-Executing "ninja all"...
-[1/9] Performing build step for 'bootloader'
+Executing "ninja flash"...
+[1/14] Performing build step for 'bootloader'
 
 [1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\bootloader\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/bootloader/bootloader.bin"
 
@@ -31,19 +10,27 @@ Bootloader binary size 0x57b0 bytes. 0x2850 bytes (31%) free.
 
 
 
-[2/9] No install step for 'bootloader'
+[2/14] No install step for 'bootloader'
 
-[3/9] Completed 'bootloader'
+[3/14] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/device_registry.c.obj
 
-[4/9] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/zigbee_coordinator.c.obj
+[4/14] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/ha_discovery.c.obj
 
-[5/9] Linking C static library esp-idf\main\libmain.a
+[5/14] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/app_main.c.obj
 
-[6/9] Generating esp-idf/esp_system/ld/sections.ld
+[6/14] Completed 'bootloader'
 
-[7/9] Linking CXX executable zigbee-gateway.elf
+[7/14] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/mqtt_bridge.c.obj
 
-[8/9] Generating binary image from built executable
+[8/14] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/zigbee_coordinator.c.obj
+
+[9/14] Linking C static library esp-idf\main\libmain.a
+
+[10/14] Generating esp-idf/esp_system/ld/sections.ld
+
+[11/14] Linking CXX executable zigbee-gateway.elf
+
+[12/14] Generating binary image from built executable
 
 esptool.py v4.12.0
 
@@ -59,33 +46,12 @@ Successfully created esp32c6 image.
 
 Generated D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin
 
-[9/9] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 partition --type app D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/partition_table/partition-table.bin D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin"
+[13/14] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 partition --type app D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/partition_table/partition-table.bin D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin"
 
-zigbee-gateway.bin binary size 0x119fb0 bytes. Smallest app partition is 0x177000 bytes. 0x5d050 bytes (25%) free.
-
-
-Executing action: flash
-Running ninja in directory D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build
-Executing "ninja flash"...
-[1/5] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 partition --type app D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/partition_table/partition-table.bin D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin"
-
-zigbee-gateway.bin binary size 0x119fb0 bytes. Smallest app partition is 0x177000 bytes. 0x5d050 bytes (25%) free.
+zigbee-gateway.bin binary size 0x1210d0 bytes. Smallest app partition is 0x177000 bytes. 0x55f30 bytes (23%) free.
 
 
-[2/5] Performing build step for 'bootloader'
-
-[1/1] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\bootloader\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/bootloader/bootloader.bin"
-
-
-Bootloader binary size 0x57b0 bytes. 0x2850 bytes (31%) free.
-
-
-
-[3/5] No install step for 'bootloader'
-
-[4/5] Completed 'bootloader'
-
-[4/5] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Espressif\frameworks\esp-idf-v5.5.4\components\esptool_py && D:\Espressif\tools\cmake\3.30.2\bin\cmake.exe -D IDF_PATH=D:/Espressif/frameworks/esp-idf-v5.5.4 -D SERIAL_TOOL=D:/Espressif/python_env/idf5.5_py3.12_env/Scripts/python.exe;;D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/esptool/esptool.py;--chip;esp32c6 -D SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args -D WORKING_DIRECTORY=D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build -P D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/run_serial_tool.cmake"
+[13/14] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Espressif\frameworks\esp-idf-v5.5.4\components\esptool_py && D:\Espressif\tools\cmake\3.30.2\bin\cmake.exe -D IDF_PATH=D:/Espressif/frameworks/esp-idf-v5.5.4 -D SERIAL_TOOL=D:/Espressif/python_env/idf5.5_py3.12_env/Scripts/python.exe;;D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/esptool/esptool.py;--chip;esp32c6 -D SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args -D WORKING_DIRECTORY=D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build -P D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/run_serial_tool.cmake"
 
 esptool.py --chip esp32c6 -p COM20 -b 460800 --before=default_reset --after=hard_reset write_flash --flash_mode dio --flash_freq 80m --flash_size 4MB 0x0 bootloader/bootloader.bin 0x20000 zigbee-gateway.bin 0x8000 partition_table/partition-table.bin 0xf000 ota_data_initial.bin
 
@@ -93,160 +59,29 @@ esptool.py v4.12.0
 
 Serial port COM20
 
-Connecting...
 
-Chip is ESP32-C6FH4 (QFN32) (revision v0.1)
 
-Features: Wi-Fi 6, BT 5 (LE), IEEE802.15.4, Single Core + LP Core, 160MHz, Embedded Flash 4MB
+A fatal error occurred: Could not open COM20, the port is busy or doesn't exist.
 
-Crystal is 40MHz
+(could not open port 'COM20': PermissionError(13, 'Access is denied.', None, 5))
 
-USB mode: USB-Serial/JTAG
 
-MAC: 54:32:04:ff:fe:3e:98:ac
 
-BASE MAC: 54:32:04:3e:98:ac
+Hint: Check if the port is not used by another task
 
-MAC_EXT: ff:fe
 
-Uploading stub...
 
-Running stub...
+CMake Error at run_serial_tool.cmake:67 (message):
+  
+  D:/Espressif/python_env/idf5.5_py3.12_env/Scripts/python.exe;;D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/esptool/esptool.py;--chip;esp32c6
+  failed.
 
-Stub running...
 
-Changing baud rate to 460800
 
-Changed.
+FAILED: CMakeFiles/flash D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/CMakeFiles/flash 
 
-Configuring flash size...
+C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Espressif\frameworks\esp-idf-v5.5.4\components\esptool_py && D:\Espressif\tools\cmake\3.30.2\bin\cmake.exe -D IDF_PATH=D:/Espressif/frameworks/esp-idf-v5.5.4 -D SERIAL_TOOL=D:/Espressif/python_env/idf5.5_py3.12_env/Scripts/python.exe;;D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/esptool/esptool.py;--chip;esp32c6 -D SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args -D WORKING_DIRECTORY=D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build -P D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py/run_serial_tool.cmake"
 
-Flash will be erased from 0x00000000 to 0x00005fff...
+ninja: build stopped: subcommand failed.
 
-Flash will be erased from 0x00020000 to 0x00139fff...
-
-Flash will be erased from 0x00008000 to 0x00008fff...
-
-Flash will be erased from 0x0000f000 to 0x00010fff...
-
-SHA digest in image updated
-
-Compressed 22448 bytes to 13987...
-
-Writing at 0x00000000... (100 %)
-
-Wrote 22448 bytes (13987 compressed) at 0x00000000 in 0.4 seconds (effective 501.8 kbit/s)...
-
-Hash of data verified.
-
-Compressed 1154992 bytes to 670699...
-
-Writing at 0x00020000... (2 %)
-
-Writing at 0x0002bf3f... (4 %)
-
-Writing at 0x000377db... (7 %)
-
-Writing at 0x000415ae... (9 %)
-
-Writing at 0x000481b8... (12 %)
-
-Writing at 0x0004f2e6... (14 %)
-
-Writing at 0x00056222... (17 %)
-
-Writing at 0x0005dceb... (19 %)
-
-Writing at 0x00065241... (21 %)
-
-Writing at 0x0006b4f7... (24 %)
-
-Writing at 0x000713a0... (26 %)
-
-Writing at 0x0007808a... (29 %)
-
-Writing at 0x0007e256... (31 %)
-
-Writing at 0x000843ec... (34 %)
-
-Writing at 0x0008aaaa... (36 %)
-
-Writing at 0x0009183f... (39 %)
-
-Writing at 0x00098907... (41 %)
-
-Writing at 0x0009f31e... (43 %)
-
-Writing at 0x000a6517... (46 %)
-
-Writing at 0x000ad216... (48 %)
-
-Writing at 0x000b47c7... (51 %)
-
-Writing at 0x000bb753... (53 %)
-
-Writing at 0x000c1b89... (56 %)
-
-Writing at 0x000c867d... (58 %)
-
-Writing at 0x000cf3a6... (60 %)
-
-Writing at 0x000d5d24... (63 %)
-
-Writing at 0x000dc25b... (65 %)
-
-Writing at 0x000e228d... (68 %)
-
-Writing at 0x000e84e7... (70 %)
-
-Writing at 0x000ee8da... (73 %)
-
-Writing at 0x000f47a1... (75 %)
-
-Writing at 0x000fa791... (78 %)
-
-Writing at 0x00100774... (80 %)
-
-Writing at 0x0010683f... (82 %)
-
-Writing at 0x0010cb79... (85 %)
-
-Writing at 0x00112df4... (87 %)
-
-Writing at 0x0011921b... (90 %)
-
-Writing at 0x0011f021... (92 %)
-
-Writing at 0x001260d6... (95 %)
-
-Writing at 0x0012c0b5... (97 %)
-
-Writing at 0x00131d27... (100 %)
-
-Wrote 1154992 bytes (670699 compressed) at 0x00020000 in 8.6 seconds (effective 1070.7 kbit/s)...
-
-Hash of data verified.
-
-Compressed 3072 bytes to 155...
-
-Writing at 0x00008000... (100 %)
-
-Wrote 3072 bytes (155 compressed) at 0x00008000 in 0.0 seconds (effective 542.8 kbit/s)...
-
-Hash of data verified.
-
-Compressed 8192 bytes to 31...
-
-Writing at 0x0000f000... (100 %)
-
-Wrote 8192 bytes (31 compressed) at 0x0000f000 in 0.1 seconds (effective 673.7 kbit/s)...
-
-Hash of data verified.
-
-
-
-Leaving...
-
-Hard resetting via RTS pin...
-
-Done
+ninja failed with exit code 1, output of the command is in the D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\log\idf_py_stderr_output_117636 and D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\log\idf_py_stdout_output_117636

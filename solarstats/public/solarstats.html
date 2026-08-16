@@ -11,6 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/solarstats.css" />
+    <link rel="stylesheet" href="/auth.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
@@ -29,6 +30,15 @@
             <span id="connection">Connecting…</span>
           </div>
           <div>Last update: <span id="lastUpdate">—</span></div>
+          <div class="nav-links">
+            <a class="toolbar-btn" href="/admin" id="adminLink" hidden>Admin</a>
+            <button type="button" class="toolbar-btn" id="passkeyRegisterBtn" hidden>
+              Add passkey
+            </button>
+            <form method="post" action="/logout" style="display: inline">
+              <button type="submit" class="toolbar-btn">Sign out</button>
+            </form>
+          </div>
         </div>
       </header>
 
@@ -88,6 +98,12 @@
 
       <section class="charts">
         <article class="panel">
+          <h2>All devices today</h2>
+          <p class="hint">Daily kWh by device (inverter + grid) · resets at midnight</p>
+          <div class="chart-wrap pie-wrap"><canvas id="loadsPieChart"></canvas></div>
+        </article>
+
+        <article class="panel">
           <h2>Battery charge</h2>
           <p class="hint" id="socHint">State of charge</p>
           <div class="chart-wrap"><canvas id="socChart"></canvas></div>
@@ -109,6 +125,6 @@
       <p class="foot" id="footNote">Window: 24h · ingest interval 15s · smoothed series · trapezoid kWh</p>
     </div>
 
-    <script src="/solarstats.js"></script>
+    <script type="module" src="/solarstats.js"></script>
   </body>
 </html>

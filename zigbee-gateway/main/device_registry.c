@@ -11,6 +11,9 @@
 static const char *TAG = "dev_reg";
 static const char *NVS_NS = "zbgw_devs";
 static const char *NVS_KEY = "table";
+static const char *NVS_VER_KEY = "ver";
+/* Bump when zbgw_device_t layout changes. Mismatched blobs must not be reinterpreted. */
+static const uint32_t ZBGW_DEV_REG_VERSION = 3;
 
 static zbgw_device_t s_devices[ZBGW_MAX_DEVICES];
 
@@ -26,14 +29,18 @@ esp_err_t device_registry_init(void)
     }
     ESP_RETURN_ON_ERROR(err, TAG, "nvs_open failed");
 
+    uint32_t ver = 0;
+    (void)nvs_get_u32(handle, NVS_VER_KEY, &ver);
+
     size_t size = sizeof(s_devices);
     err = nvs_get_blob(handle, NVS_KEY, s_devices, &size);
     nvs_close(handle);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         return ESP_OK;
     }
-    if (err == ESP_ERR_NVS_INVALID_LENGTH) {
-        ESP_LOGW(TAG, "Device table layout changed - clearing NVS table");
+    if (err == ESP_ERR_NVS_INVALID_LENGTH || size != sizeof(s_devices)) {
+        ESP_LOGW(TAG, "Device table layout mismatch (ver=%lu size=%u want=%u) - clearing", (unsigned long)ver,
+                 (unsigned)size, (unsigned)sizeof(s_devices));
         memset(s_devices, 0, sizeof(s_devices));
         return device_registry_save();
     }
@@ -46,7 +53,11 @@ esp_err_t device_registry_init(void)
             count++;
         }
     }
-    ESP_LOGI(TAG, "Loaded %d devices from NVS", count);
+    ESP_LOGI(TAG, "Loaded %d devices from NVS (ver=%lu)", count, (unsigned long)ver);
+    (void)device_registry_sanitize();
+    if (ver != ZBGW_DEV_REG_VERSION) {
+        (void)device_registry_save();
+    }
     return ESP_OK;
 }
 
@@ -54,7 +65,10 @@ esp_err_t device_registry_save(void)
 {
     nvs_handle_t handle;
     ESP_RETURN_ON_ERROR(nvs_open(NVS_NS, NVS_READWRITE, &handle), TAG, "nvs_open failed");
-    esp_err_t err = nvs_set_blob(handle, NVS_KEY, s_devices, sizeof(s_devices));
+    esp_err_t err = nvs_set_u32(handle, NVS_VER_KEY, ZBGW_DEV_REG_VERSION);
+    if (err == ESP_OK) {
+        err = nvs_set_blob(handle, NVS_KEY, s_devices, sizeof(s_devices));
+    }
     if (err == ESP_OK) {
         err = nvs_commit(handle);
     }
@@ -140,17 +154,97 @@ void device_registry_set_identity(zbgw_device_t *dev, const char *manufacturer, 
     device_registry_save();
 }
 
-void device_registry_add_capability(zbgw_device_t *dev, uint8_t cap)
+void device_registry_add_capability(zbgw_device_t *dev, uint32_t cap)
 {
-    if (!dev) {
+    if (!dev || !cap) {
         return;
     }
-    uint8_t before = dev->capabilities;
+    uint32_t before = dev->capabilities;
     dev->capabilities |= cap;
     if (dev->capabilities != before) {
         dev->discovery_published = false;
         device_registry_save();
     }
+}
+
+void device_registry_clear_capabilities(zbgw_device_t *dev, uint32_t cap_mask)
+{
+    if (!dev || !cap_mask) {
+        return;
+    }
+    uint32_t before = dev->capabilities;
+    dev->capabilities &= ~cap_mask;
+    if (dev->capabilities != before) {
+        dev->discovery_published = false;
+        device_registry_save();
+    }
+}
+
+bool device_registry_sanitize(void)
+{
+    bool changed = false;
+    const uint32_t plug_bits = ZBGW_CAP_ON_OFF | ZBGW_CAP_POWER | ZBGW_CAP_ENERGY;
+    const uint32_t junk_bits = ZBGW_CAP_TEMPERATURE | ZBGW_CAP_HUMIDITY | ZBGW_CAP_CONTACT | ZBGW_CAP_OCCUPANCY |
+                               ZBGW_CAP_TAMPER | ZBGW_CAP_SMOKE_TEST | ZBGW_CAP_BATTERY_LOW | ZBGW_CAP_BATTERY;
+    /* Zone-type mapping picks one alarm class — never both contact and occupancy. */
+    const uint32_t exclusive_alarms = ZBGW_CAP_CONTACT | ZBGW_CAP_OCCUPANCY | ZBGW_CAP_SMOKE;
+
+    for (int i = 0; i < ZBGW_MAX_DEVICES; ++i) {
+        zbgw_device_t *dev = &s_devices[i];
+        if (!dev->in_use) {
+            continue;
+        }
+        uint32_t before_caps = dev->capabilities;
+        uint8_t before_ias_ep = dev->ias_ep;
+
+        const bool has_plug_caps = (dev->capabilities & plug_bits) != 0;
+        const bool has_on_off_eps = dev->on_off_eps != 0;
+        const bool has_smoke = (dev->capabilities & ZBGW_CAP_SMOKE) != 0;
+        const uint32_t alarms = dev->capabilities & exclusive_alarms;
+        const bool multiple_alarms = alarms && (alarms & (alarms - 1)) != 0;
+        const bool orphan_junk = !dev->ias_ep && !has_smoke && (dev->capabilities & junk_bits) != 0;
+
+        if (has_plug_caps || has_on_off_eps || multiple_alarms) {
+            uint32_t cleaned = plug_bits;
+            /* Reject ASCII/garbage on_off_eps from NVS layout shifts (e.g. 0x5f303031). */
+            const bool bad_eps = dev->on_off_eps != 0 && (dev->on_off_eps & ~0xFFFFu) != 0;
+            if (cleaned != before_caps || dev->ias_ep || dev->ias_zone_id || dev->ias_zone_type || bad_eps) {
+                ESP_LOGW(TAG, "Sanitized plug caps 0x%lx -> 0x%lx (cleared ias_ep=%u on_off_eps=0x%lx) ieee=%016llx",
+                         (unsigned long)before_caps, (unsigned long)cleaned, before_ias_ep,
+                         (unsigned long)dev->on_off_eps, (unsigned long long)dev->ieee);
+                dev->capabilities = cleaned;
+                dev->ias_ep = 0;
+                dev->ias_zone_id = 0;
+                dev->ias_zone_type = 0;
+                if (bad_eps) {
+                    dev->on_off_eps = 0;
+                }
+                dev->discovery_published = false;
+                changed = true;
+            }
+        } else if (orphan_junk) {
+            uint32_t cleaned = before_caps & ~junk_bits;
+            ESP_LOGW(TAG, "Sanitized orphan sensor caps 0x%lx -> 0x%lx ieee=%016llx", (unsigned long)before_caps,
+                     (unsigned long)cleaned, (unsigned long long)dev->ieee);
+            dev->capabilities = cleaned;
+            dev->discovery_published = false;
+            changed = true;
+        } else if (dev->ias_ep && has_smoke) {
+            uint32_t cleaned = dev->capabilities & ~plug_bits;
+            cleaned &= ~(ZBGW_CAP_TEMPERATURE | ZBGW_CAP_HUMIDITY);
+            if (cleaned != before_caps) {
+                ESP_LOGW(TAG, "Sanitized IAS caps 0x%lx -> 0x%lx ieee=%016llx", (unsigned long)before_caps,
+                         (unsigned long)cleaned, (unsigned long long)dev->ieee);
+                dev->capabilities = cleaned;
+                dev->discovery_published = false;
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        device_registry_save();
+    }
+    return changed;
 }
 
 void device_registry_add_on_off_ep(zbgw_device_t *dev, uint8_t ep)

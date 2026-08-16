@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in — Solarstats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/solarstats.css" />
+    <link rel="stylesheet" href="/auth.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-card">
+      <h1 class="brand">Solar<span>stats</span></h1>
+      <p class="sub">Private dashboard — Microsoft sign-in required</p>
+
+      <p class="auth-error" id="errorBox" hidden></p>
+
+      <a class="auth-btn microsoft" href="/auth/microsoft">Sign in with Microsoft</a>
+      <p class="auth-hint">
+        Uses Microsoft Authenticator number matching when MFA is enabled on your account.
+      </p>
+
+      <button type="button" class="auth-btn secondary" id="passkeyBtn">
+        Sign in with passkey
+      </button>
+      <p class="auth-hint" id="passkeyHint" hidden>
+        Use a passkey you previously registered on this site.
+      </p>
+    </main>
+    <script type="module" src="/login.js"></script>
+  </body>
+</html>

@@ -1,0 +1,172 @@
+.auth-body {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  background: var(--bg1);
+  border: 1px solid var(--line);
+  padding: 1.75rem 1.5rem 1.5rem;
+}
+
+.auth-card .brand {
+  font-size: 2rem;
+}
+
+.auth-btn {
+  display: block;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  text-decoration: none;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 0.95rem;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  color: var(--text);
+  background: var(--bg2);
+}
+
+.auth-btn.microsoft {
+  background: #2f2f2f;
+  border-color: #555;
+}
+
+.auth-btn.microsoft:hover,
+.auth-btn.secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.auth-btn.secondary {
+  background: transparent;
+}
+
+.auth-hint,
+.auth-copy {
+  margin: 0.65rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.auth-error {
+  margin: 1rem 0 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(226, 109, 109, 0.45);
+  background: rgba(226, 109, 109, 0.12);
+  color: #f0b0b0;
+  font-size: 0.85rem;
+}
+
+.toggle-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin: 0.75rem 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.toggle-row input {
+  margin-top: 0.2rem;
+}
+
+.admin-panel {
+  margin-bottom: 1rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 0.55rem 0.45rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.admin-table th {
+  color: var(--muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.admin-actions button {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.5rem;
+  color: var(--text);
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.admin-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+}
+
+.status-pill.pending {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.status-pill.approved {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status-pill.denied {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.nav-links a.toolbar-btn {
+  text-decoration: none;
+  display: inline-block;
+}
+
+.pie-wrap {
+  height: 280px;
+  max-width: 420px;
+  margin: 0 auto;
+}

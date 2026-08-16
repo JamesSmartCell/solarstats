@@ -39,7 +39,7 @@ static esp_err_t publish_config(const char *component, const char *object_id, cJ
         return ESP_ERR_NO_MEM;
     }
 
-    esp_err_t err = mqtt_bridge_publish(topic, payload, 1, true);
+    esp_err_t err = mqtt_bridge_publish(topic, payload, 0, true);
     ESP_LOGI(TAG, "Discovery %s", topic);
     cJSON_free(payload);
     return err;
@@ -144,6 +144,14 @@ static esp_err_t publish_switch(const zbgw_device_t *dev)
     return publish_config("switch", object_id, root);
 }
 
+static esp_err_t unpublish_config(const char *component, const char *object_id)
+{
+    char topic[160];
+    snprintf(topic, sizeof(topic), "%s/%s/%s/config", ZBGW_HA_DISCOVERY_PREFIX, component, object_id);
+    /* Empty retained payload removes the entity from Home Assistant. */
+    return mqtt_bridge_publish(topic, "", 1, true);
+}
+
 esp_err_t ha_discovery_publish_device(const zbgw_device_t *dev)
 {
     if (!dev || !dev->in_use) {
@@ -163,6 +171,21 @@ esp_err_t ha_discovery_publish_device(const zbgw_device_t *dev)
     if (dev->capabilities & ZBGW_CAP_OCCUPANCY) {
         err |= publish_binary(dev, "occupancy", "Occupancy", "occupancy");
     }
+    if (dev->capabilities & ZBGW_CAP_SMOKE) {
+        err |= publish_binary(dev, "smoke", "Smoke", "smoke");
+    }
+    if (dev->capabilities & ZBGW_CAP_TAMPER) {
+        err |= publish_binary(dev, "tamper", "Tamper", "tamper");
+    }
+    if (dev->capabilities & ZBGW_CAP_SMOKE_TEST) {
+        err |= publish_binary(dev, "test", "Self-test", NULL);
+    }
+    if (dev->capabilities & ZBGW_CAP_BATTERY_LOW) {
+        err |= publish_binary(dev, "battery_low", "Battery low", "battery");
+    }
+    if (dev->capabilities & ZBGW_CAP_BATTERY) {
+        err |= publish_sensor(dev, "battery", "Battery", "battery", "%", "measurement");
+    }
     if (dev->capabilities & ZBGW_CAP_ON_OFF) {
         err |= publish_switch(dev);
     }
@@ -173,14 +196,6 @@ esp_err_t ha_discovery_publish_device(const zbgw_device_t *dev)
         err |= publish_sensor(dev, "energy", "Energy", "energy", "kWh", "total_increasing");
     }
     return err;
-}
-
-static esp_err_t unpublish_config(const char *component, const char *object_id)
-{
-    char topic[160];
-    snprintf(topic, sizeof(topic), "%s/%s/%s/config", ZBGW_HA_DISCOVERY_PREFIX, component, object_id);
-    /* Empty retained payload removes the entity from Home Assistant. */
-    return mqtt_bridge_publish(topic, "", 1, true);
 }
 
 esp_err_t ha_discovery_unpublish_device(uint64_t ieee)
@@ -200,6 +215,16 @@ esp_err_t ha_discovery_unpublish_device(uint64_t ieee)
     err |= unpublish_config("binary_sensor", object_id);
     snprintf(object_id, sizeof(object_id), "zbgw_%s_occupancy", ieee_str);
     err |= unpublish_config("binary_sensor", object_id);
+    snprintf(object_id, sizeof(object_id), "zbgw_%s_smoke", ieee_str);
+    err |= unpublish_config("binary_sensor", object_id);
+    snprintf(object_id, sizeof(object_id), "zbgw_%s_tamper", ieee_str);
+    err |= unpublish_config("binary_sensor", object_id);
+    snprintf(object_id, sizeof(object_id), "zbgw_%s_test", ieee_str);
+    err |= unpublish_config("binary_sensor", object_id);
+    snprintf(object_id, sizeof(object_id), "zbgw_%s_battery_low", ieee_str);
+    err |= unpublish_config("binary_sensor", object_id);
+    snprintf(object_id, sizeof(object_id), "zbgw_%s_battery", ieee_str);
+    err |= unpublish_config("sensor", object_id);
     snprintf(object_id, sizeof(object_id), "zbgw_%s_switch", ieee_str);
     err |= unpublish_config("switch", object_id);
     snprintf(object_id, sizeof(object_id), "zbgw_%s_power", ieee_str);
@@ -208,8 +233,8 @@ esp_err_t ha_discovery_unpublish_device(uint64_t ieee)
     err |= unpublish_config("sensor", object_id);
 
     /* Clear retained state topics so HA does not revive stale values. */
-    static const char *suffixes[] = {"temperature", "humidity", "contact", "occupancy", "switch", "power",
-                                     "energy"};
+    static const char *suffixes[] = {"temperature", "humidity", "contact", "occupancy", "smoke", "tamper",
+                                     "test",        "battery_low", "battery", "switch",  "power", "energy"};
     for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
         snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee_str, suffixes[i]);
         err |= mqtt_bridge_publish(state_topic, "", 1, true);
@@ -254,7 +279,7 @@ esp_err_t ha_discovery_publish_sensor_state(const zbgw_device_t *dev, const char
     device_registry_ieee_to_str(dev->ieee, ieee, sizeof(ieee));
     char topic[96];
     snprintf(topic, sizeof(topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee, suffix);
-    return mqtt_bridge_publish(topic, value, 1, true);
+    return mqtt_bridge_publish(topic, value, 0, true);
 }
 
 esp_err_t ha_discovery_publish_binary_state(const zbgw_device_t *dev, const char *suffix, bool on)

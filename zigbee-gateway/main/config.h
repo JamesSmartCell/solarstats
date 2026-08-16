@@ -35,6 +35,11 @@
 #define ZBGW_CAP_ON_OFF      (1U << 4)
 #define ZBGW_CAP_POWER       (1U << 5)
 #define ZBGW_CAP_ENERGY      (1U << 6)
+#define ZBGW_CAP_SMOKE       (1U << 7)
+#define ZBGW_CAP_BATTERY     (1U << 8)
+#define ZBGW_CAP_TAMPER      (1U << 9)
+#define ZBGW_CAP_SMOKE_TEST  (1U << 10)
+#define ZBGW_CAP_BATTERY_LOW (1U << 11)
 
 #define ZBGW_TOPIC_SWITCH_SET_WILDCARD ZBGW_TOPIC_PREFIX "/+/switch/set"
 

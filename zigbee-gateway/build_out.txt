@@ -1,0 +1,223 @@
+Executing action: all (aliases: build)
+Running cmake in directory D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build
+Executing "cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe -DESP_PLATFORM=1 -DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32c6 -DCCACHE_ENABLE=1 D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway"...
+-- Minimal build - OFF
+-- ccache will be used for faster recompilation
+-- Building ESP-IDF components for target esp32c6
+NOTICE: 
+
+Following dependencies have new versions available:
+
+Dependency "espressif/esp-zigbee-lib": "2.0.3" -> "2.0.4"
+
+Consider running "idf.py update-dependencies" to update your lock file.
+
+NOTICE: Processing 2 dependencies:
+
+NOTICE: [1/2] espressif/esp-zigbee-lib (2.0.3)
+
+NOTICE: [2/2] idf (5.5.4)
+
+-- Project sdkconfig file D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/sdkconfig
+Loading defaults file D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/sdkconfig.defaults...
+
+Loading defaults file D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/sdkconfig.defaults.esp32c6...
+
+Loading defaults file D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/sdkconfig.defaults...
+
+Loading defaults file D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/sdkconfig.defaults.esp32c6...
+
+Loading defaults file D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/sdkconfig.defaults.esp32c6...
+
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/riscv/ld/rom.api.ld
+-- Found Python3: D:/Espressif/python_env/idf5.5_py3.12_env/Scripts/python.exe (found version "3.12.10") found components: Interpreter
+-- USING O3
+-- App "zigbee-gateway" version: 043bd49-dirty
+-- Adding linker script D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/esp-idf/esp_system/ld/memory.ld
+-- Adding linker script D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/esp-idf/esp_system/ld/sections.ld.in
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.api.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.rvfp.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.wdt.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.systimer.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.version.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.phy.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.coexist.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.net80211.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.pp.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.libc.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.newlib.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.newlib-normal.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.heap.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/soc/esp32c6/ld/esp32c6.peripherals.ld
+-- Component idf::espressif__esp-zigbee-lib will be linked with -Wl,--whole-archive
+-- Components: app_update bootloader bootloader_support console cxx driver efuse esp-tls esp_app_format esp_bootloader_format esp_coex esp_common esp_driver_ana_cmpr esp_driver_bitscrambler esp_driver_dac esp_driver_gpio esp_driver_gptimer esp_driver_i2c esp_driver_i2s esp_driver_ledc esp_driver_mcpwm esp_driver_parlio esp_driver_pcnt esp_driver_rmt esp_driver_sdio esp_driver_sdm esp_driver_sdmmc esp_driver_sdspi esp_driver_spi esp_driver_tsens esp_driver_twai esp_driver_uart esp_driver_usb_serial_jtag esp_event esp_hal_ieee802154 esp_hw_support esp_mm esp_netif esp_netif_stack esp_partition esp_phy esp_pm esp_psram esp_ringbuf esp_rom esp_security esp_system esp_timer esp_vfs_console esp_wifi espressif__esp-zigbee-lib esptool_py freertos hal heap http_parser ieee802154 json log lwip main mbedtls mqtt newlib nvs_flash openthread partition_table pthread riscv sdmmc soc spi_flash tcp_transport vfs wpa_supplicant
+-- Component paths: D:/Espressif/frameworks/esp-idf-v5.5.4/components/app_update D:/Espressif/frameworks/esp-idf-v5.5.4/components/bootloader D:/Espressif/frameworks/esp-idf-v5.5.4/components/bootloader_support D:/Espressif/frameworks/esp-idf-v5.5.4/components/console D:/Espressif/frameworks/esp-idf-v5.5.4/components/cxx D:/Espressif/frameworks/esp-idf-v5.5.4/components/driver D:/Espressif/frameworks/esp-idf-v5.5.4/components/efuse D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp-tls D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_app_format D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_bootloader_format D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_coex D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_common D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_ana_cmpr D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_bitscrambler D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_dac D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_gpio D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_gptimer D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_i2c D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_i2s D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_ledc D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_mcpwm D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_parlio D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_pcnt D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_rmt D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_sdio D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_sdm D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_sdmmc D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_sdspi D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_spi D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_tsens D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_twai D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_uart D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_driver_usb_serial_jtag D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_event D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_hal_ieee802154 D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_hw_support D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_mm D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_netif D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_netif_stack D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_partition D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_phy D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_pm D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_psram D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_ringbuf D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_security D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_system D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_timer D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_vfs_console D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_wifi D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/managed_components/espressif__esp-zigbee-lib D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py D:/Espressif/frameworks/esp-idf-v5.5.4/components/freertos D:/Espressif/frameworks/esp-idf-v5.5.4/components/hal D:/Espressif/frameworks/esp-idf-v5.5.4/components/heap D:/Espressif/frameworks/esp-idf-v5.5.4/components/http_parser D:/Espressif/frameworks/esp-idf-v5.5.4/components/ieee802154 D:/Espressif/frameworks/esp-idf-v5.5.4/components/json D:/Espressif/frameworks/esp-idf-v5.5.4/components/log D:/Espressif/frameworks/esp-idf-v5.5.4/components/lwip D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/main D:/Espressif/frameworks/esp-idf-v5.5.4/components/mbedtls D:/Espressif/frameworks/esp-idf-v5.5.4/components/mqtt D:/Espressif/frameworks/esp-idf-v5.5.4/components/newlib D:/Espressif/frameworks/esp-idf-v5.5.4/components/nvs_flash D:/Espressif/frameworks/esp-idf-v5.5.4/components/openthread D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table D:/Espressif/frameworks/esp-idf-v5.5.4/components/pthread D:/Espressif/frameworks/esp-idf-v5.5.4/components/riscv D:/Espressif/frameworks/esp-idf-v5.5.4/components/sdmmc D:/Espressif/frameworks/esp-idf-v5.5.4/components/soc D:/Espressif/frameworks/esp-idf-v5.5.4/components/spi_flash D:/Espressif/frameworks/esp-idf-v5.5.4/components/tcp_transport D:/Espressif/frameworks/esp-idf-v5.5.4/components/vfs D:/Espressif/frameworks/esp-idf-v5.5.4/components/wpa_supplicant
+-- Configuring done (16.6s)
+-- Generating done (1.1s)
+-- Build files have been written to: D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build
+Running ninja in directory D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build
+Executing "ninja all"...
+[1/16] Generating ../../ota_data_initial.bin
+
+[2/16] Generating ../../partition_table/partition-table.bin
+
+Partition table binary generated. Contents:
+
+*******************************************************************************
+
+# ESP-IDF Partition Table
+
+
+# Name, Type, SubType, Offset, Size, Flags
+
+
+nvs,data,nvs,0x9000,24K,
+
+
+otadata,data,ota,0xf000,8K,
+
+
+phy_init,data,phy,0x11000,4K,
+
+
+factory,app,factory,0x20000,1500K,
+
+
+zb_storage,data,nvs,0x197000,16K,
+
+
+zb_fct,data,fat,0x19b000,1K,
+
+
+*******************************************************************************
+
+[3/16] Generating x509_crt_bundle
+
+[4/16] Generating ../../x509_crt_bundle.S
+
+[5/16] Building ASM object esp-idf/mbedtls/CMakeFiles/__idf_mbedtls.dir/__/__/x509_crt_bundle.S.obj
+
+[6/16] Linking C static library esp-idf\mbedtls\libmbedtls.a
+
+[7/16] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/zigbee_coordinator.c.obj
+
+[8/16] Linking C static library esp-idf\main\libmain.a
+
+[9/16] Performing configure step for 'bootloader'
+
+-- Minimal build - OFF
+-- Building ESP-IDF components for target esp32c6
+-- Project sdkconfig file D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/sdkconfig
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/riscv/ld/rom.api.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/soc/esp32c6/ld/esp32c6.peripherals.ld
+-- Bootloader project name: "bootloader" version: 1
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.api.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.rvfp.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.wdt.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.systimer.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.version.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.libc.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.libc-suboptimal_for_misaligned_mem.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom/esp32c6/ld/esp32c6.rom.newlib.ld
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/bootloader/subproject/main/ld/esp32c6/bootloader.rom.ld
+-- Components: bootloader bootloader_support efuse esp_app_format esp_bootloader_format esp_common esp_hw_support esp_rom esp_security esp_system esp_tee esptool_py freertos hal log main micro-ecc newlib partition_table riscv soc spi_flash
+-- Component paths: D:/Espressif/frameworks/esp-idf-v5.5.4/components/bootloader D:/Espressif/frameworks/esp-idf-v5.5.4/components/bootloader_support D:/Espressif/frameworks/esp-idf-v5.5.4/components/efuse D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_app_format D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_bootloader_format D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_common D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_hw_support D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_rom D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_security D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_system D:/Espressif/frameworks/esp-idf-v5.5.4/components/esp_tee D:/Espressif/frameworks/esp-idf-v5.5.4/components/esptool_py D:/Espressif/frameworks/esp-idf-v5.5.4/components/freertos D:/Espressif/frameworks/esp-idf-v5.5.4/components/hal D:/Espressif/frameworks/esp-idf-v5.5.4/components/log D:/Espressif/frameworks/esp-idf-v5.5.4/components/bootloader/subproject/main D:/Espressif/frameworks/esp-idf-v5.5.4/components/bootloader/subproject/components/micro-ecc D:/Espressif/frameworks/esp-idf-v5.5.4/components/newlib D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table D:/Espressif/frameworks/esp-idf-v5.5.4/components/riscv D:/Espressif/frameworks/esp-idf-v5.5.4/components/soc D:/Espressif/frameworks/esp-idf-v5.5.4/components/spi_flash
+
+-- Adding linker script D:/Espressif/frameworks/esp-idf-v5.5.4/components/bootloader/subproject/main/ld/esp32c6/bootloader.ld
+
+-- Configuring done (14.8s)
+
+-- Generating done (0.2s)
+
+-- Build files have been written to: D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/bootloader
+
+[10/16] Performing build step for 'bootloader'
+
+[1/2] Generating binary image from built executable
+
+esptool.py v4.12.0
+
+
+Creating esp32c6 image...
+
+
+Merged 2 ELF sections
+
+
+Successfully created esp32c6 image.
+
+
+Generated D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/bootloader/bootloader.bin
+
+[2/2] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\bootloader\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/bootloader/bootloader.bin"
+
+
+Bootloader binary size 0x57b0 bytes. 0x2850 bytes (31%) free.
+
+
+
+[11/16] No install step for 'bootloader'
+
+[12/16] Completed 'bootloader'
+
+[13/16] Generating esp-idf/esp_system/ld/sections.ld
+
+[14/16] Linking CXX executable zigbee-gateway.elf
+
+[15/16] Generating binary image from built executable
+
+esptool.py v4.12.0
+
+
+Creating esp32c6 image...
+
+
+Merged 1 ELF section
+
+
+Successfully created esp32c6 image.
+
+
+Generated D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin
+
+[16/16] C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build\esp-idf\esptool_py && D:\Espressif\python_env\idf5.5_py3.12_env\Scripts\python.exe D:/Espressif/frameworks/esp-idf-v5.5.4/components/partition_table/check_sizes.py --offset 0x8000 partition --type app D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/partition_table/partition-table.bin D:/Users/soyle/Dev/HomeAssistant/zigbee-gateway/build/zigbee-gateway.bin"
+
+zigbee-gateway.bin binary size 0x120cd0 bytes. Smallest app partition is 0x177000 bytes. 0x56330 bytes (23%) free.
+
+
+
+
+Project build complete. To flash, run:
+ idf.py flash
+or
+ idf.py -p PORT flash
+or
+ python -m esptool --chip esp32c6 -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 4MB --flash_freq 80m 0x0 build\bootloader\bootloader.bin 0x8000 build\partition_table\partition-table.bin 0xf000 build\ota_data_initial.bin 0x20000 build\zigbee-gateway.bin
+or from the "D:\Users\soyle\Dev\HomeAssistant\zigbee-gateway\build" directory
+ python -m esptool --chip esp32c6 -b 460800 --before default_reset --after hard_reset write_flash "@flash_args"

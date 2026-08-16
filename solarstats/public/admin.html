@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin — Solarstats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/solarstats.css" />
+    <link rel="stylesheet" href="/auth.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <div>
+          <h1 class="brand">Solar<span>stats</span> admin</h1>
+          <p class="sub">Approve logins and registration options</p>
+        </div>
+        <div class="status">
+          <a class="toolbar-btn" href="/">Dashboard</a>
+          <form method="post" action="/logout" style="display: inline">
+            <button type="submit" class="toolbar-btn">Sign out</button>
+          </form>
+        </div>
+      </header>
+
+      <section class="panel admin-panel">
+        <h2>Registration settings</h2>
+        <label class="toggle-row">
+          <input type="checkbox" id="allowNewAccounts" />
+          <span>Allow new accounts (unknown Microsoft emails become pending)</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="allowPasskeyEnrollment" />
+          <span>Allow passkey enrollment (approved users can create a site passkey)</span>
+        </label>
+        <p class="hint" id="settingsSaved" hidden>Settings saved</p>
+      </section>
+
+      <section class="panel admin-panel">
+        <h2>Users</h2>
+        <div class="table-wrap">
+          <table class="admin-table" id="usersTable">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    <script src="/admin.js"></script>
+  </body>
+</html>

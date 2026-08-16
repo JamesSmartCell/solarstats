@@ -25,6 +25,8 @@ static const char *TAG = "zb_coord";
 static bool s_network_ready;
 static bool s_permit_join_pending;
 static esp_timer_handle_t s_commission_timer;
+static esp_timer_handle_t s_ias_enroll_timer;
+static uint16_t s_ias_enroll_short;
 static uint8_t s_pending_commission_mode;
 
 #define ZBGW_DEV_ANNCE_BIT BIT0
@@ -39,8 +41,11 @@ typedef enum {
     MATCH_ON_OFF,
     MATCH_ELECTRICAL,
     MATCH_METERING,
+    MATCH_POWER_CONFIG,
     MATCH_COUNT,
 } match_kind_t;
+
+static uint8_t s_next_ias_zone_id = 1;
 
 /* Scaling for electrical / metering (defaults = raw watts / Wh→kWh). */
 typedef struct {
@@ -155,6 +160,13 @@ static void interview_timer_cb(void *arg);
 static void interview_request_active_eps(void);
 static void interview_request_next_simple_desc(void);
 static void read_on_off_attr(uint16_t short_addr, uint8_t endpoint);
+static void read_ias_zone_status(uint16_t short_addr, uint8_t endpoint);
+static void read_battery_percentage(uint16_t short_addr, uint8_t endpoint);
+static void ias_write_cie_address(uint16_t short_addr, uint8_t endpoint);
+static void ias_send_enroll_response(uint16_t short_addr, uint8_t endpoint, uint8_t zone_id);
+static void ias_apply_zone_type(zbgw_device_t *dev, uint16_t zone_type);
+static void ias_publish_status(zbgw_device_t *dev, uint16_t status);
+static void schedule_ias_enroll_retry(uint16_t short_addr, uint64_t delay_us);
 
 static uint16_t cluster_for_kind(match_kind_t kind)
 {
@@ -173,12 +185,14 @@ static uint16_t cluster_for_kind(match_kind_t kind)
         return EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT;
     case MATCH_METERING:
         return EZB_ZCL_CLUSTER_ID_METERING;
+    case MATCH_POWER_CONFIG:
+        return EZB_ZCL_CLUSTER_ID_POWER_CONFIG;
     default:
         return 0;
     }
 }
 
-static uint8_t capability_for_kind(match_kind_t kind)
+static uint32_t capability_for_kind(match_kind_t kind)
 {
     switch (kind) {
     case MATCH_TEMP:
@@ -186,15 +200,18 @@ static uint8_t capability_for_kind(match_kind_t kind)
     case MATCH_HUMIDITY:
         return ZBGW_CAP_HUMIDITY;
     case MATCH_OCCUPANCY:
-    case MATCH_IAS_ZONE:
-        /* Presence sensors commonly use IAS Zone Alarm1 as occupancy. */
         return ZBGW_CAP_OCCUPANCY;
+    case MATCH_IAS_ZONE:
+        /* Resolved from ZoneType after read/enroll (smoke / contact / occupancy). */
+        return 0;
     case MATCH_ON_OFF:
         return ZBGW_CAP_ON_OFF;
     case MATCH_ELECTRICAL:
         return ZBGW_CAP_POWER;
     case MATCH_METERING:
         return ZBGW_CAP_ENERGY | ZBGW_CAP_POWER;
+    case MATCH_POWER_CONFIG:
+        return ZBGW_CAP_BATTERY;
     default:
         return 0;
     }
@@ -217,6 +234,8 @@ static const char *kind_name(match_kind_t kind)
         return "electrical";
     case MATCH_METERING:
         return "metering";
+    case MATCH_POWER_CONFIG:
+        return "power_config";
     default:
         return "?";
     }
@@ -255,6 +274,10 @@ static uint64_t ieee_from_extended(const ezb_extaddr_t *addr)
 static void ensure_discovery(zbgw_device_t *dev)
 {
     if (!dev || dev->discovery_published || !dev->capabilities) {
+        return;
+    }
+    /* Avoid discovery storms before MQTT is up (also blocks permit_join). */
+    if (!mqtt_bridge_is_connected()) {
         return;
     }
     if (ha_discovery_publish_device(dev) == ESP_OK) {
@@ -360,7 +383,11 @@ static void bind_result_cb(const ezb_zdp_bind_req_result_t *result, void *user_c
             /* Force a fresh read so HA is not stuck on a retained MQTT ON. */
             read_occupancy_attr(ctx->short_addr, ctx->endpoint);
         } else if (ctx->kind == MATCH_IAS_ZONE) {
+            /* CIE write triggers Zone Enroll Request on most IAS devices (Heiman smoke, etc.).
+             * May fail until TC auth completes (APS 0x13); DEVICE_AUTHORIZED retries sooner. */
+            ias_write_cie_address(ctx->short_addr, ctx->endpoint);
             read_ias_zone_status(ctx->short_addr, ctx->endpoint);
+            schedule_ias_enroll_retry(ctx->short_addr, 20000 * 1000ULL);
         } else if (ctx->kind == MATCH_ON_OFF) {
             config_reporting(ctx->short_addr, ctx->endpoint, EZB_ZCL_CLUSTER_ID_ON_OFF, EZB_ZCL_ATTR_ON_OFF_ON_OFF_ID,
                              EZB_ZCL_ATTR_TYPE_BOOL, 0, 1, false);
@@ -386,6 +413,11 @@ static void bind_result_cb(const ezb_zdp_bind_req_result_t *result, void *user_c
                              false);
             /* InstantaneousDemand is often 0/unsupported on Tuya; ActivePower is preferred. */
             read_metering_attrs(ctx->short_addr, ctx->endpoint);
+        } else if (ctx->kind == MATCH_POWER_CONFIG) {
+            config_reporting(ctx->short_addr, ctx->endpoint, EZB_ZCL_CLUSTER_ID_POWER_CONFIG,
+                             EZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID, EZB_ZCL_ATTR_TYPE_UINT8, 0, 2,
+                             false);
+            read_battery_percentage(ctx->short_addr, ctx->endpoint);
         }
     } else {
         ESP_LOGW(TAG, "Bind failed kind=%d err=0x%04x", (int)ctx->kind, result->error);
@@ -490,7 +522,11 @@ static void read_occupancy_attr(uint16_t short_addr, uint8_t endpoint)
 
 static void read_ias_zone_status(uint16_t short_addr, uint8_t endpoint)
 {
-    static uint16_t attr_field[] = {EZB_ZCL_ATTR_IAS_ZONE_ZONE_STATUS_ID};
+    static uint16_t attr_field[] = {
+        EZB_ZCL_ATTR_IAS_ZONE_ZONE_TYPE_ID,
+        EZB_ZCL_ATTR_IAS_ZONE_ZONE_STATUS_ID,
+        EZB_ZCL_ATTR_IAS_ZONE_ZONE_STATE_ID,
+    };
     ezb_zcl_read_attr_cmd_t read_attr_cmd = {
         .cmd_ctrl =
             {
@@ -500,11 +536,210 @@ static void read_ias_zone_status(uint16_t short_addr, uint8_t endpoint)
                 .dst_ep = endpoint,
                 .cluster_id = EZB_ZCL_CLUSTER_ID_IAS_ZONE,
             },
+        .payload.attr_number = 3,
+        .payload.attr_field = attr_field,
+    };
+    ESP_LOGI(TAG, "Reading IAS zone type/status/state short=0x%04x ep=%u", short_addr, endpoint);
+    ezb_zcl_read_attr_cmd_req(&read_attr_cmd);
+}
+
+static void read_battery_percentage(uint16_t short_addr, uint8_t endpoint)
+{
+    static uint16_t attr_field[] = {EZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID};
+    ezb_zcl_read_attr_cmd_t read_attr_cmd = {
+        .cmd_ctrl =
+            {
+                .dst_addr.addr_mode = EZB_ADDR_MODE_SHORT,
+                .src_ep = ZBGW_HA_GATEWAY_EP_ID,
+                .dst_addr.u.short_addr = short_addr,
+                .dst_ep = endpoint,
+                .cluster_id = EZB_ZCL_CLUSTER_ID_POWER_CONFIG,
+            },
         .payload.attr_number = 1,
         .payload.attr_field = attr_field,
     };
-    ESP_LOGI(TAG, "Reading IAS zone status short=0x%04x ep=%u", short_addr, endpoint);
+    ESP_LOGI(TAG, "Reading battery %% short=0x%04x ep=%u", short_addr, endpoint);
     ezb_zcl_read_attr_cmd_req(&read_attr_cmd);
+}
+
+static void ias_write_cie_address(uint16_t short_addr, uint8_t endpoint)
+{
+    ezb_extaddr_t local = {0};
+    ezb_nwk_get_extended_address(&local);
+    static uint64_t cie_ieee;
+    cie_ieee = local.u64;
+
+    ezb_zcl_attribute_t attr = {
+        .id = EZB_ZCL_ATTR_IAS_ZONE_IAS_CIE_ADDRESS_ID,
+        .data =
+            {
+                .type = EZB_ZCL_ATTR_TYPE_EUI64,
+                .size = sizeof(cie_ieee),
+                .value = &cie_ieee,
+            },
+    };
+    ezb_zcl_write_attr_cmd_t cmd = {
+        .cmd_ctrl =
+            {
+                .dst_addr.addr_mode = EZB_ADDR_MODE_SHORT,
+                .src_ep = ZBGW_HA_GATEWAY_EP_ID,
+                .dst_addr.u.short_addr = short_addr,
+                .dst_ep = endpoint,
+                .cluster_id = EZB_ZCL_CLUSTER_ID_IAS_ZONE,
+            },
+        .payload.attr_number = 1,
+        .payload.attr_field = &attr,
+    };
+    ESP_LOGI(TAG, "Writing IAS CIE ieee=0x%llx -> short=0x%04x ep=%u", (unsigned long long)cie_ieee, short_addr,
+             endpoint);
+    ezb_zcl_write_attr_cmd_req(&cmd);
+}
+
+static void ias_send_enroll_response(uint16_t short_addr, uint8_t endpoint, uint8_t zone_id)
+{
+    ezb_zcl_ias_zone_enroll_rsp_cmd_t rsp = {
+        .cmd_ctrl =
+            {
+                .dst_addr.addr_mode = EZB_ADDR_MODE_SHORT,
+                .src_ep = ZBGW_HA_GATEWAY_EP_ID,
+                .dst_addr.u.short_addr = short_addr,
+                .dst_ep = endpoint,
+                .dis_default_rsp = false,
+            },
+        .payload =
+            {
+                .enroll_rsp_code = EZB_ZCL_IAS_ZONE_ENROLL_RESPONSE_CODE_SUCCESS,
+                .zone_id = zone_id,
+            },
+    };
+    ESP_LOGI(TAG, "IAS enroll response short=0x%04x ep=%u zone_id=%u", short_addr, endpoint, zone_id);
+    ezb_zcl_ias_zone_enroll_cmd_resp(&rsp);
+}
+
+static uint32_t ias_cap_for_zone_type(uint16_t zone_type)
+{
+    switch (zone_type) {
+    case EZB_ZCL_IAS_ZONE_ZONE_TYPE_FIRE_SENSOR:
+    case EZB_ZCL_IAS_ZONE_ZONE_TYPE_CARBON_MONOXIDE_SENSOR:
+        return ZBGW_CAP_SMOKE;
+    case EZB_ZCL_IAS_ZONE_ZONE_TYPE_CONTACT_SWITCH:
+    case EZB_ZCL_IAS_ZONE_ZONE_TYPE_DOOR_WINDOW_HANDLE:
+        return ZBGW_CAP_CONTACT;
+    case EZB_ZCL_IAS_ZONE_ZONE_TYPE_MOTION_SENSOR:
+        return ZBGW_CAP_OCCUPANCY;
+    default:
+        return ZBGW_CAP_OCCUPANCY;
+    }
+}
+
+static const char *ias_alarm_suffix(uint32_t cap)
+{
+    if (cap & ZBGW_CAP_SMOKE) {
+        return "smoke";
+    }
+    if (cap & ZBGW_CAP_CONTACT) {
+        return "contact";
+    }
+    return "occupancy";
+}
+
+static void ias_apply_zone_type(zbgw_device_t *dev, uint16_t zone_type)
+{
+    if (!dev) {
+        return;
+    }
+    if (dev->ias_zone_type == zone_type &&
+        (dev->capabilities & (ZBGW_CAP_SMOKE | ZBGW_CAP_CONTACT | ZBGW_CAP_OCCUPANCY))) {
+        return;
+    }
+    dev->ias_zone_type = zone_type;
+    uint32_t alarm_cap = ias_cap_for_zone_type(zone_type);
+    /* Drop the other alarm-style caps so HA does not keep a wrong entity. */
+    uint32_t clear = ZBGW_CAP_SMOKE | ZBGW_CAP_CONTACT | ZBGW_CAP_OCCUPANCY;
+    if ((dev->capabilities & clear) != alarm_cap) {
+        dev->capabilities = (dev->capabilities & ~clear) | alarm_cap;
+        dev->discovery_published = false;
+        device_registry_save();
+    } else {
+        device_registry_add_capability(dev, alarm_cap);
+    }
+    ESP_LOGI(TAG, "IAS zone type=0x%04x -> %s ieee=%016llx", zone_type, ias_alarm_suffix(alarm_cap),
+             (unsigned long long)dev->ieee);
+    ensure_discovery(dev);
+}
+
+static void ias_publish_status(zbgw_device_t *dev, uint16_t status)
+{
+    if (!dev || !dev->ias_ep) {
+        return;
+    }
+    uint32_t alarm_cap = ias_cap_for_zone_type(dev->ias_zone_type);
+    if (!(dev->capabilities & (ZBGW_CAP_SMOKE | ZBGW_CAP_CONTACT | ZBGW_CAP_OCCUPANCY))) {
+        device_registry_add_capability(dev, alarm_cap);
+    }
+    bool alarm = (status & EZB_ZCL_IAS_ZONE_ZONE_STATUS_ALARM1) != 0;
+    bool tamper = (status & EZB_ZCL_IAS_ZONE_ZONE_STATUS_TAMPER) != 0;
+    bool batt_low = (status & EZB_ZCL_IAS_ZONE_ZONE_STATUS_BATTERY) != 0;
+    bool test = (status & EZB_ZCL_IAS_ZONE_ZONE_STATUS_TEST) != 0;
+
+    const char *suffix = ias_alarm_suffix(dev->capabilities);
+    ESP_LOGI(TAG, "IAS status=0x%04x %s=%s tamper=%d batt_low=%d test=%d", status, suffix, alarm ? "ON" : "OFF",
+             (int)tamper, (int)batt_low, (int)test);
+    ha_discovery_publish_binary_state(dev, suffix, alarm);
+
+    device_registry_add_capability(dev, ZBGW_CAP_TAMPER | ZBGW_CAP_BATTERY_LOW | ZBGW_CAP_SMOKE_TEST);
+    ha_discovery_publish_binary_state(dev, "tamper", tamper);
+    ha_discovery_publish_binary_state(dev, "battery_low", batt_low);
+    ha_discovery_publish_binary_state(dev, "test", test);
+    ensure_discovery(dev);
+}
+
+static void ias_enroll_retry_timer_cb(void *arg)
+{
+    (void)arg;
+    uint16_t short_addr = s_ias_enroll_short;
+    zbgw_device_t *dev = device_registry_find_short(short_addr);
+    if (!dev || !dev->in_use) {
+        ESP_LOGW(TAG, "IAS enroll retry: no device short=0x%04x", short_addr);
+        return;
+    }
+    if (!dev->ias_ep) {
+        return;
+    }
+    uint8_t ep = dev->ias_ep;
+    if (!dev->ias_zone_id) {
+        dev->ias_zone_id = s_next_ias_zone_id++;
+        if (s_next_ias_zone_id == 0 || s_next_ias_zone_id == 0xff) {
+            s_next_ias_zone_id = 1;
+        }
+        device_registry_save();
+    }
+    ESP_LOGI(TAG, "Post-auth IAS enroll retry short=0x%04x ep=%u zone_id=%u", short_addr, ep, dev->ias_zone_id);
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+    ias_write_cie_address(short_addr, ep);
+    /* Proactive enroll response: Heiman often never re-sends the enroll request. */
+    ias_send_enroll_response(short_addr, ep, dev->ias_zone_id);
+    read_ias_zone_status(short_addr, ep);
+    read_battery_percentage(short_addr, ep);
+    esp_zigbee_lock_release();
+}
+
+static void schedule_ias_enroll_retry(uint16_t short_addr, uint64_t delay_us)
+{
+    s_ias_enroll_short = short_addr;
+    if (!s_ias_enroll_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &ias_enroll_retry_timer_cb,
+            .name = "zb_ias_enroll",
+        };
+        if (esp_timer_create(&args, &s_ias_enroll_timer) != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to create IAS enroll timer");
+            return;
+        }
+    }
+    esp_timer_stop(s_ias_enroll_timer);
+    ESP_LOGI(TAG, "IAS enroll retry in %llu ms short=0x%04x", (unsigned long long)(delay_us / 1000ULL), short_addr);
+    esp_timer_start_once(s_ias_enroll_timer, delay_us);
 }
 
 static void read_on_off_attr(uint16_t short_addr, uint8_t endpoint)
@@ -613,6 +848,16 @@ static void apply_cluster_on_endpoint(uint16_t short_addr, uint8_t ep, uint16_t 
     device_registry_add_capability(dev, capability_for_kind(kind));
     if (kind == MATCH_ON_OFF) {
         device_registry_add_on_off_ep(dev, ep);
+    }
+    if (kind == MATCH_IAS_ZONE) {
+        dev->ias_ep = ep;
+        if (!dev->ias_zone_id) {
+            dev->ias_zone_id = s_next_ias_zone_id++;
+            if (s_next_ias_zone_id == 0 || s_next_ias_zone_id == 0xff) {
+                s_next_ias_zone_id = 1;
+            }
+            device_registry_save();
+        }
     }
     power_scale_t *scale = power_scale_for_dev(dev, true);
     if (scale) {
@@ -801,9 +1046,9 @@ static void find_clusters_on_device(uint16_t short_addr)
         ESP_ERROR_CHECK(esp_timer_create(&args, &s_interview_timer));
     }
     esp_timer_stop(s_interview_timer);
-    /* Give the device time to finish joining before Active_EP / Simple_Desc. */
-    ESP_LOGI(TAG, "Interview starting in 1.5s short=0x%04x (active_ep path)", short_addr);
-    ESP_ERROR_CHECK(esp_timer_start_once(s_interview_timer, 1500 * 1000ULL));
+    /* Sleepy IAS devices (smoke) often need longer before APS keys are ready. */
+    ESP_LOGI(TAG, "Interview starting in 4s short=0x%04x (active_ep path)", short_addr);
+    ESP_ERROR_CHECK(esp_timer_start_once(s_interview_timer, 4000 * 1000ULL));
 }
 
 static void power_poll_one(zbgw_device_t *dev, void *ctx)
@@ -997,6 +1242,22 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
         ha_discovery_unpublish_device(leave->device_addr.u64);
         device_registry_remove_ieee(leave->device_addr.u64);
     } break;
+    case EZB_ZDO_SIGNAL_DEVICE_AUTHORIZED: {
+        const ezb_zdo_signal_device_authorized_params_t *auth = ezb_app_signal_get_params(app_signal);
+        ESP_LOGI(TAG, "Device authorized short=0x%04x status=%u type=%u", auth->short_addr, auth->status, auth->type);
+        if (auth->status != EZB_ZDO_AUTH_STATUS_SUCCESS) {
+            break;
+        }
+        zbgw_device_t *dev = device_registry_find_short(auth->short_addr);
+        if (!dev) {
+            device_registry_upsert(auth->device_addr.u64, auth->short_addr, 0);
+            dev = device_registry_find_short(auth->short_addr);
+        }
+        /* CIE/bind often race APS key install; retry IAS enroll after auth settles. */
+        if (dev && dev->ias_ep) {
+            schedule_ias_enroll_retry(auth->short_addr, 2500 * 1000ULL);
+        }
+    } break;
     case EZB_NWK_SIGNAL_PERMIT_JOIN_STATUS: {
         uint8_t duration = *(uint8_t *)ezb_app_signal_get_params(app_signal);
         mqtt_bridge_publish_permit_state(duration != 0);
@@ -1066,13 +1327,29 @@ static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16
         ESP_LOGI(TAG, "Occupancy short=0x%04x -> %s", short_addr, occupied ? "ON" : "OFF");
         ha_discovery_publish_binary_state(dev, "occupancy", occupied);
         device_registry_add_capability(dev, ZBGW_CAP_OCCUPANCY);
+    } else if (cluster_id == EZB_ZCL_CLUSTER_ID_IAS_ZONE && attr_id == EZB_ZCL_ATTR_IAS_ZONE_ZONE_TYPE_ID) {
+        ias_apply_zone_type(dev, *(const uint16_t *)value);
     } else if (cluster_id == EZB_ZCL_CLUSTER_ID_IAS_ZONE && attr_id == EZB_ZCL_ATTR_IAS_ZONE_ZONE_STATUS_ID) {
-        uint16_t status = *(const uint16_t *)value;
-        bool occupied = (status & 0x0001) != 0;
-        ESP_LOGI(TAG, "IAS zone status short=0x%04x status=0x%04x -> occupancy %s", short_addr, status,
-                 occupied ? "ON" : "OFF");
-        ha_discovery_publish_binary_state(dev, "occupancy", occupied);
-        device_registry_add_capability(dev, ZBGW_CAP_OCCUPANCY);
+        ias_publish_status(dev, *(const uint16_t *)value);
+    } else if (cluster_id == EZB_ZCL_CLUSTER_ID_IAS_ZONE && attr_id == EZB_ZCL_ATTR_IAS_ZONE_ZONE_STATE_ID) {
+        uint8_t state = *(const uint8_t *)value;
+        ESP_LOGI(TAG, "IAS zone state short=0x%04x -> %s", short_addr,
+                 state == EZB_ZCL_IAS_ZONE_ZONE_STATE_ENROLLED ? "enrolled" : "not_enrolled");
+        if (state != EZB_ZCL_IAS_ZONE_ZONE_STATE_ENROLLED && dev->ias_ep) {
+            ias_write_cie_address(short_addr, dev->ias_ep ? dev->ias_ep : 1);
+        }
+    } else if (cluster_id == EZB_ZCL_CLUSTER_ID_POWER_CONFIG &&
+               attr_id == EZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID) {
+        /* Spec: 0–200 in 0.5% units. */
+        uint8_t raw = *(const uint8_t *)value;
+        unsigned pct = (unsigned)raw / 2U;
+        if (pct > 100) {
+            pct = 100;
+        }
+        snprintf(buf, sizeof(buf), "%u", pct);
+        ESP_LOGI(TAG, "Battery short=0x%04x raw=%u -> %s%%", short_addr, raw, buf);
+        ha_discovery_publish_sensor_state(dev, "battery", buf);
+        device_registry_add_capability(dev, ZBGW_CAP_BATTERY);
     } else if (cluster_id == EZB_ZCL_CLUSTER_ID_ON_OFF && attr_id == EZB_ZCL_ATTR_ON_OFF_ON_OFF_ID) {
         bool on = (*(const uint8_t *)value) != 0;
         ESP_LOGI(TAG, "On/Off short=0x%04x -> %s", short_addr, on ? "ON" : "OFF");
@@ -1280,13 +1557,47 @@ static void zcl_action_handler(ezb_zcl_core_action_callback_id_t callback_id, vo
             }
         }
         if (dev) {
-            bool occupied =
-                (ias->in.payload.zone_status & EZB_ZCL_IAS_ZONE_ZONE_STATUS_ALARM1) != 0;
-            ESP_LOGI(TAG, "IAS status change short=0x%04x status=0x%04x -> occupancy %s", short_addr,
-                     ias->in.payload.zone_status, occupied ? "ON" : "OFF");
-            device_registry_add_capability(dev, ZBGW_CAP_OCCUPANCY);
-            ha_discovery_publish_binary_state(dev, "occupancy", occupied);
-            ensure_discovery(dev);
+            if (!dev->ias_ep) {
+                dev->ias_ep = src_ep;
+            }
+            ias_publish_status(dev, ias->in.payload.zone_status);
+        }
+    } break;
+    case EZB_ZCL_CORE_IAS_ZONE_ENROLL_CB_ID: {
+        ezb_zcl_ias_zone_enroll_req_message_t *req = message;
+        if (!req || !req->in.header) {
+            break;
+        }
+        uint16_t short_addr = req->in.header->src_addr.u.short_addr;
+        uint8_t src_ep = req->in.header->src_ep;
+        zbgw_device_t *dev = device_registry_find_short(short_addr);
+        if (!dev) {
+            ezb_extaddr_t ieee_addr = {0};
+            if (ezb_address_extended_by_short(short_addr, &ieee_addr) == EZB_ERR_NONE) {
+                dev = device_registry_upsert(ieee_from_extended(&ieee_addr), short_addr, src_ep);
+            }
+        }
+        uint8_t zone_id = 1;
+        if (dev) {
+            if (!dev->ias_ep) {
+                dev->ias_ep = src_ep;
+            }
+            if (!dev->ias_zone_id) {
+                dev->ias_zone_id = s_next_ias_zone_id++;
+                if (s_next_ias_zone_id == 0 || s_next_ias_zone_id == 0xff) {
+                    s_next_ias_zone_id = 1;
+                }
+            }
+            zone_id = dev->ias_zone_id;
+            ias_apply_zone_type(dev, req->in.payload.zone_type);
+            device_registry_save();
+        }
+        ESP_LOGI(TAG, "IAS enroll request short=0x%04x ep=%u zone_type=0x%04x manuf=0x%04x", short_addr, src_ep,
+                 req->in.payload.zone_type, req->in.payload.manuf_code);
+        ias_send_enroll_response(short_addr, src_ep, zone_id);
+        req->out.result = EZB_ZCL_STATUS_SUCCESS;
+        if (dev) {
+            read_ias_zone_status(short_addr, src_ep);
         }
     } break;
     default:
@@ -1322,6 +1633,8 @@ static esp_err_t create_gateway_device(void)
         ep_desc, ezb_zcl_electrical_measurement_create_cluster_desc(NULL, EZB_ZCL_CLUSTER_CLIENT)));
     ESP_ERROR_CHECK(
         ezb_af_endpoint_add_cluster_desc(ep_desc, ezb_zcl_metering_create_cluster_desc(NULL, EZB_ZCL_CLUSTER_CLIENT)));
+    ESP_ERROR_CHECK(ezb_af_endpoint_add_cluster_desc(
+        ep_desc, ezb_zcl_power_config_create_cluster_desc(NULL, EZB_ZCL_CLUSTER_CLIENT)));
 
     ESP_ERROR_CHECK(ezb_af_device_add_endpoint_desc(dev_desc, ep_desc));
     ESP_ERROR_CHECK(ezb_af_device_desc_register(dev_desc));

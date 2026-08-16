@@ -1,0 +1,21 @@
+# Xiaomi S7 MaxV helpers (cloud integration can drop sensors while asleep).
+#
+# Use sensor.s7_maxv_battery_latched on dashboards / alerts instead of the raw
+# sensor.s7_maxv_battery so sleep gaps are not treated as faults.
+
+template:
+  - trigger:
+      - platform: state
+        entity_id: sensor.s7_maxv_battery
+        not_to:
+          - unavailable
+          - unknown
+    sensor:
+      - name: "S7 MaxV battery latched"
+        unique_id: s7_maxv_battery_latched
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+        state: "{{ trigger.to_state.state | float(0) | round(0) }}"
+        attributes:
+          source_last_changed: "{{ trigger.to_state.last_changed.isoformat() }}"

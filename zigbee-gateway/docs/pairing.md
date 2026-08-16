@@ -29,6 +29,22 @@ Matched kind=1 …   # humidity
 
 3. HA should create a MQTT device named from the Zigbee model string (or `ZigbeeSensor`).
 
+## Heiman / IAS smoke alarms
+
+Supported after flash with smoke + enrollment code:
+
+1. Open permit join, then put the Heiman into pairing (usually long-press reset/test per manual).
+2. Serial should show: `Matched ias_zone`, `Writing IAS CIE`, `IAS enroll request`, `IAS enroll response`, then `IAS zone type=0x0028 -> smoke`.
+3. HA MQTT device gets **Smoke** (`binary_sensor`, device class smoke). Optional: **Battery %**, **Battery low**, **Tamper**, **Self-test**.
+
+Press the device **test** button — `smoke` and/or `test` should go ON briefly.
+
+| IAS ZoneType | HA entity |
+|--------------|-----------|
+| Fire (0x0028) | smoke |
+| Motion (0x000d) | occupancy |
+| Contact (0x0015) | contact |
+
 ## Verify
 
 | Check | Where |

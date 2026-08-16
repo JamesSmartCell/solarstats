@@ -110,14 +110,16 @@ On the server that will host the site:
 ```bash
 cd solarstats
 cp .env.example .env
-# set INGEST_SECRET (see below)
+# set INGEST_SECRET, Azure app (AZURE_*), SESSION_SECRET, ORIGIN/RP_ID, COOKIE_SECURE=1
 npm install
 npm start
 ```
 
-Open: `http://<server>:8787/` (or your Caddy HTTPS hostname)
+Open: `https://<your-host>/` after Caddy (or `http://<server>:8787/` locally)
 
 Needs Node **18+**. `better-sqlite3` requires build tools on Linux (`build-essential`, Python).
+
+Auth: Sign in with Microsoft → admin `manticorenettle@gmail.com` is seeded; other users wait for approval at `/admin`. See [`solarstats/README.md`](solarstats/README.md).
 
 ### 2. Shared ingest secret
 

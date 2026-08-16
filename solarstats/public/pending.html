@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pending approval — Solarstats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/solarstats.css" />
+    <link rel="stylesheet" href="/auth.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-card">
+      <h1 class="brand">Solar<span>stats</span></h1>
+      <p class="sub">Waiting for admin approval</p>
+      <p class="auth-copy">
+        Signed in as <strong id="email">…</strong>. An admin must approve your account
+        before you can view the dashboard.
+      </p>
+      <form method="post" action="/logout">
+        <button type="submit" class="auth-btn secondary">Sign out</button>
+      </form>
+    </main>
+    <script>
+      fetch("/api/me")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((me) => {
+          if (me?.email) document.getElementById("email").textContent = me.email;
+        })
+        .catch(() => {});
+    </script>
+  </body>
+</html>

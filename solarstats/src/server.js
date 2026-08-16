@@ -2,27 +2,127 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import "dotenv/config";
+import cookieSession from "cookie-session";
 import express from "express";
+import helmet from "helmet";
 import { WebSocketServer } from "ws";
 import {
+  authConfigured,
+  buildMicrosoftAuthUrl,
+  handleMicrosoftCallback,
+  webauthnConfig,
+} from "./auth.js";
+import {
+  getAuthSettings,
   getHistory,
+  getUserById,
   insertSample,
+  listPasskeysForUser,
+  listUsers,
   openDatabase,
   pruneOldSamples,
+  setAuthSettings,
+  setUserStatus,
+  upsertMicrosoftUser,
+  deletePasskey,
 } from "./db.js";
+import {
+  authenticationOptions,
+  registrationOptions,
+  verifyAuthentication,
+  verifyRegistration,
+} from "./passkeys.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
 const INGEST_SECRET = process.env.INGEST_SECRET || "";
 const DB_PATH = process.env.DB_PATH || "./data/solarstats.db";
 const HISTORY_RETENTION_DAYS = Number(process.env.HISTORY_RETENTION_DAYS || 30);
+const SESSION_SECRET = process.env.SESSION_SECRET || "dev-insecure-session-secret";
 
 const db = openDatabase(DB_PATH);
 const app = express();
-app.use(express.json({ limit: "64kb" }));
-
 const publicDir = path.join(__dirname, "..", "public");
-app.use(express.static(publicDir));
+
+app.set("trust proxy", 1);
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "script-src": [
+          "'self'",
+          "https://cdn.jsdelivr.net",
+          "https://unpkg.com",
+        ],
+        "style-src": ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'"],
+        "font-src": ["'self'", "https://fonts.gstatic.com"],
+        "connect-src": ["'self'", "ws:", "wss:", "https://unpkg.com", "https://cdn.jsdelivr.net"],
+        "img-src": ["'self'", "data:"],
+      },
+    },
+  }),
+);
+app.use(express.json({ limit: "256kb" }));
+
+const sessionMiddleware = cookieSession({
+  name: "solarstats_session",
+  keys: [SESSION_SECRET],
+  maxAge: 30 * 24 * 60 * 60 * 1000,
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.COOKIE_SECURE === "1" || process.env.NODE_ENV === "production",
+});
+app.use(sessionMiddleware);
+
+function currentUser(req) {
+  if (!req.session?.userId) return null;
+  return getUserById(db, req.session.userId);
+}
+
+function setSessionUser(req, user) {
+  req.session.userId = user.id;
+  req.session.email = user.email;
+  req.session.role = user.role;
+  req.session.status = user.status;
+}
+
+function clearSession(req) {
+  req.session = null;
+}
+
+function requireApproved(req, res, next) {
+  const user = currentUser(req);
+  if (!user) {
+    if (req.path.startsWith("/api/")) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    return res.redirect("/login");
+  }
+  if (user.status === "pending") {
+    if (req.path.startsWith("/api/")) {
+      return res.status(403).json({ error: "pending_approval" });
+    }
+    return res.redirect("/pending");
+  }
+  if (user.status !== "approved") {
+    if (req.path.startsWith("/api/")) {
+      return res.status(403).json({ error: "denied" });
+    }
+    return res.redirect("/login?error=denied");
+  }
+  req.user = user;
+  return next();
+}
+
+function requireAdmin(req, res, next) {
+  requireApproved(req, res, () => {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "admin_only" });
+    }
+    return next();
+  });
+}
 
 function authorizeIngest(req, res, next) {
   if (!INGEST_SECRET) {
@@ -36,16 +136,195 @@ function authorizeIngest(req, res, next) {
   return next();
 }
 
-app.get("/", (_req, res) => {
+// --- Public auth pages / routes ---
+
+app.get("/login", (req, res) => {
+  const user = currentUser(req);
+  if (user?.status === "approved") return res.redirect("/");
+  if (user?.status === "pending") return res.redirect("/pending");
+  res.sendFile(path.join(publicDir, "login.html"));
+});
+
+app.get("/pending", (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.redirect("/login");
+  if (user.status === "approved") return res.redirect("/");
+  if (user.status === "denied") return res.redirect("/login?error=denied");
+  res.sendFile(path.join(publicDir, "pending.html"));
+});
+
+app.get("/admin", requireAdmin, (_req, res) => {
+  res.sendFile(path.join(publicDir, "admin.html"));
+});
+
+app.get("/auth/microsoft", async (req, res) => {
+  try {
+    if (!authConfigured()) {
+      return res.status(503).send("Microsoft auth is not configured on the server.");
+    }
+    const url = await buildMicrosoftAuthUrl(req.session);
+    res.redirect(url.href);
+  } catch (err) {
+    console.error("microsoft auth start failed:", err);
+    res.redirect("/login?error=auth_start");
+  }
+});
+
+app.get("/auth/callback", async (req, res) => {
+  try {
+    const profile = await handleMicrosoftCallback(req, req.session);
+    const { user, outcome } = upsertMicrosoftUser(db, {
+      email: profile.email,
+      displayName: profile.displayName,
+    });
+
+    if (outcome === "registration_closed") {
+      clearSession(req);
+      return res.redirect("/login?error=registration_closed");
+    }
+    if (!user || outcome === "denied") {
+      clearSession(req);
+      return res.redirect("/login?error=denied");
+    }
+
+    setSessionUser(req, user);
+    if (user.status === "pending") return res.redirect("/pending");
+    return res.redirect("/");
+  } catch (err) {
+    console.error("microsoft callback failed:", err);
+    clearSession(req);
+    return res.redirect("/login?error=auth_callback");
+  }
+});
+
+app.post("/logout", (req, res) => {
+  clearSession(req);
+  res.redirect("/login");
+});
+
+app.get("/api/me", (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: "unauthorized" });
+  const settings = getAuthSettings(db);
+  res.json({
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    displayName: user.display_name,
+    settings: {
+      allowPasskeyEnrollment: settings.allowPasskeyEnrollment,
+    },
+    passkeys: listPasskeysForUser(db, user.id).map((p) => ({
+      id: p.id,
+      createdAt: p.created_at,
+    })),
+    webauthn: webauthnConfig(),
+    authConfigured: authConfigured(),
+  });
+});
+
+// --- Passkeys ---
+
+app.post("/auth/passkey/register/options", requireApproved, async (req, res) => {
+  try {
+    const options = await registrationOptions(db, req.user);
+    req.session.passkeyChallenge = options.challenge;
+    res.json(options);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/passkey/register/verify", requireApproved, async (req, res) => {
+  try {
+    const challenge = req.session.passkeyChallenge;
+    if (!challenge) {
+      return res.status(400).json({ error: "missing challenge" });
+    }
+    const result = await verifyRegistration(db, req.user, req.body, challenge);
+    delete req.session.passkeyChallenge;
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/passkey/login/options", async (req, res) => {
+  try {
+    const options = await authenticationOptions(db);
+    req.session.passkeyChallenge = options.challenge;
+    res.json(options);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/passkey/login/verify", async (req, res) => {
+  try {
+    const challenge = req.session.passkeyChallenge;
+    if (!challenge) {
+      return res.status(400).json({ error: "missing challenge" });
+    }
+    const { user } = await verifyAuthentication(db, req.body, challenge);
+    delete req.session.passkeyChallenge;
+    setSessionUser(req, user);
+    res.json({ ok: true, email: user.email });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.delete("/auth/passkey/:id", requireApproved, (req, res) => {
+  const id = Number(req.params.id);
+  const changes = deletePasskey(db, id, req.user.id);
+  if (!changes) return res.status(404).json({ error: "not_found" });
+  res.json({ ok: true });
+});
+
+// --- Admin API ---
+
+app.get("/api/admin/users", requireAdmin, (_req, res) => {
+  res.json({
+    users: listUsers(db),
+    settings: getAuthSettings(db),
+  });
+});
+
+app.post("/api/admin/users/:id/status", requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const status = String(req.body?.status || "");
+  if (!["approved", "denied", "pending"].includes(status)) {
+    return res.status(400).json({ error: "invalid_status" });
+  }
+  const target = getUserById(db, id);
+  if (!target) return res.status(404).json({ error: "not_found" });
+  if (target.role === "admin" && status !== "approved") {
+    return res.status(400).json({ error: "cannot_demote_admin" });
+  }
+  const user = setUserStatus(db, id, status);
+  res.json({ user });
+});
+
+app.post("/api/admin/settings", requireAdmin, (req, res) => {
+  const settings = setAuthSettings(db, {
+    allowNewAccounts: req.body?.allowNewAccounts,
+    allowPasskeyEnrollment: req.body?.allowPasskeyEnrollment,
+  });
+  res.json({ settings });
+});
+
+// --- Protected dashboard / data ---
+
+app.get("/", requireApproved, (_req, res) => {
   res.sendFile(path.join(publicDir, "solarstats.html"));
 });
 
-// Back-compat for old bookmarks
 app.get("/solarstats", (_req, res) => {
   res.redirect(301, "/");
 });
 
-app.get("/api/history", (req, res) => {
+app.get("/api/history", requireApproved, (req, res) => {
   const range = String(req.query.range || "24h");
   res.json(getHistory(db, range));
 });
@@ -62,11 +341,16 @@ app.post("/api/ingest", authorizeIngest, (req, res) => {
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    authConfigured: authConfigured(),
+  });
 });
 
+app.use(express.static(publicDir));
+
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
+const wss = new WebSocketServer({ noServer: true });
 
 function broadcast(message) {
   const data = JSON.stringify(message);
@@ -77,14 +361,40 @@ function broadcast(message) {
   }
 }
 
+function runSession(req, res, next) {
+  sessionMiddleware(req, res, next);
+}
+
+server.on("upgrade", (req, socket, head) => {
+  if (req.url?.split("?")[0] !== "/ws") {
+    socket.destroy();
+    return;
+  }
+
+  const res = new http.ServerResponse(req);
+  runSession(req, res, () => {
+    const userId = req.session?.userId;
+    const user = userId ? getUserById(db, userId) : null;
+    if (!user || user.status !== "approved") {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  });
+});
+
 wss.on("connection", (socket) => {
-  // Client loads its own selected range via /api/history; WS only streams new samples.
   const history = getHistory(db, "1h");
   socket.send(
     JSON.stringify({
       type: "hello",
       energyKwhTotal: history.energyKwhTotal,
       latest: history.latest,
+      loadsDailyKwh: history.loadsDailyKwh,
     }),
   );
 });
@@ -100,4 +410,10 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`solarstats listening on http://0.0.0.0:${PORT}`);
   console.log(`dashboard: http://127.0.0.1:${PORT}/`);
+  console.log(
+    authConfigured()
+      ? "Microsoft auth: configured"
+      : "Microsoft auth: NOT configured (set AZURE_* / AUTH_REDIRECT_URI / SESSION_SECRET)",
+  );
+  console.log(`WebAuthn RP: ${JSON.stringify(webauthnConfig())}`);
 });
