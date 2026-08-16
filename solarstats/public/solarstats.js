@@ -441,7 +441,12 @@ async function loadMe() {
   if (me.role === "admin") {
     els.adminLink.hidden = false;
   }
-  if (me.settings?.allowPasskeyEnrollment && window.PublicKeyCredential) {
+  // First passkey always available; extra ones need admin enrollment toggle.
+  const hasPasskey = (me.passkeys || []).length > 0;
+  if (
+    window.PublicKeyCredential &&
+    (!hasPasskey || me.settings?.allowPasskeyEnrollment)
+  ) {
     els.passkeyRegisterBtn.hidden = false;
   }
 }

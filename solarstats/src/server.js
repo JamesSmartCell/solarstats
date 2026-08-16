@@ -162,6 +162,9 @@ app.get("/auth/microsoft", async (req, res) => {
     if (!authConfigured()) {
       return res.status(503).send("Microsoft auth is not configured on the server.");
     }
+    if (req.query.intent === "create_passkey") {
+      req.session.afterLogin = "create_passkey";
+    }
     const url = await buildMicrosoftAuthUrl(req.session);
     res.redirect(url.href);
   } catch (err) {
@@ -189,12 +192,22 @@ app.get("/auth/callback", async (req, res) => {
 
     setSessionUser(req, user);
     if (user.status === "pending") return res.redirect("/pending");
+
+    const afterLogin = req.session.afterLogin;
+    delete req.session.afterLogin;
+    if (afterLogin === "create_passkey") {
+      return res.redirect("/setup-passkey");
+    }
     return res.redirect("/");
   } catch (err) {
     console.error("microsoft callback failed:", err);
     clearSession(req);
     return res.redirect("/login?error=auth_callback");
   }
+});
+
+app.get("/setup-passkey", requireApproved, (_req, res) => {
+  res.sendFile(path.join(publicDir, "setup-passkey.html"));
 });
 
 app.post("/logout", (req, res) => {

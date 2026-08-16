@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Create passkey — Solarstats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/solarstats.css" />
+    <link rel="stylesheet" href="/auth.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-card">
+      <h1 class="brand">Solar<span>stats</span></h1>
+      <p class="sub">Create a passkey for this site</p>
+      <p class="auth-copy">
+        Signed in as <strong id="email">…</strong>. Your browser will prompt you to save a
+        passkey (Face ID, Touch ID, Windows Hello, or a password manager).
+      </p>
+      <p class="auth-error" id="errorBox" hidden></p>
+      <p class="auth-hint" id="okBox" hidden style="color: var(--accent)">
+        Passkey saved. You can use “Sign in with passkey” next time.
+      </p>
+      <button type="button" class="auth-btn microsoft" id="createBtn">Create passkey</button>
+      <a class="auth-btn secondary" href="/">Skip — go to dashboard</a>
+    </main>
+    <script type="module" src="/setup-passkey.js"></script>
+  </body>
+</html>

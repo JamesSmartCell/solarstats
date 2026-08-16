@@ -23,20 +23,22 @@ function bufferToB64url(buf) {
 }
 
 export async function registrationOptions(db, user) {
-  const settings = getAuthSettings(db);
-  if (!settings.allowPasskeyEnrollment) {
-    const err = new Error("Passkey enrollment is disabled");
-    err.status = 403;
-    throw err;
-  }
   if (user.status !== "approved") {
     const err = new Error("Account not approved");
     err.status = 403;
     throw err;
   }
 
-  const { rpID, rpName } = webauthnConfig();
   const existing = listPasskeysForUser(db, user.id);
+  const settings = getAuthSettings(db);
+  // First passkey is always allowed for approved users; further ones need the admin toggle.
+  if (!settings.allowPasskeyEnrollment && existing.length > 0) {
+    const err = new Error("Passkey enrollment is disabled");
+    err.status = 403;
+    throw err;
+  }
+
+  const { rpID, rpName } = webauthnConfig();
 
   const options = await generateRegistrationOptions({
     rpName,
@@ -59,8 +61,15 @@ export async function registrationOptions(db, user) {
 }
 
 export async function verifyRegistration(db, user, response, expectedChallenge) {
+  if (user.status !== "approved") {
+    const err = new Error("Account not approved");
+    err.status = 403;
+    throw err;
+  }
+
+  const existing = listPasskeysForUser(db, user.id);
   const settings = getAuthSettings(db);
-  if (!settings.allowPasskeyEnrollment) {
+  if (!settings.allowPasskeyEnrollment && existing.length > 0) {
     const err = new Error("Passkey enrollment is disabled");
     err.status = 403;
     throw err;

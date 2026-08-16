@@ -23,6 +23,11 @@ const passkeyHint = document.getElementById("passkeyHint");
 if (!window.PublicKeyCredential) {
   passkeyBtn.disabled = true;
   passkeyBtn.textContent = "Passkeys not supported on this browser";
+  const createLink = document.getElementById("createPasskeyLink");
+  if (createLink) {
+    createLink.style.pointerEvents = "none";
+    createLink.style.opacity = "0.5";
+  }
 } else {
   passkeyHint.hidden = false;
 }
@@ -47,7 +52,9 @@ passkeyBtn?.addEventListener("click", async () => {
     location.href = "/";
   } catch (err) {
     errorBox.hidden = false;
-    errorBox.textContent = err.message || "Passkey sign-in failed";
+    errorBox.textContent =
+      err.message ||
+      "Passkey sign-in failed. If you have not created one yet, use Create a passkey.";
     passkeyBtn.disabled = false;
   }
 });
