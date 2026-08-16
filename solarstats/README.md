@@ -94,13 +94,23 @@ Pi `.env`: `SITE_INGEST_URL=http://127.0.0.1:8787/api/ingest` (through the tunne
 
 ## API
 
-- `POST /api/ingest` — Pi snapshot (`Authorization: Bearer <INGEST_SECRET>`); includes optional `loadsDailyKwh`
+- `POST /api/ingest` — Pi snapshot (`Authorization: Bearer <INGEST_SECRET>`); includes optional `loadsDailyKwh` and `devices` (switch/light states)
 - `GET /api/history?range=24h` — chart series + totals (**session required**)
+- `GET /api/devices` — switches/lights visible to the viewer (ACL-filtered)
+- `POST /api/devices/:entityId/toggle` — queue a HA toggle (Pi agent executes)
+- `GET /api/agent/commands` — Pi claims pending toggles; returns `track` entity IDs
+- `POST /api/agent/commands/:id/complete` — Pi reports command result
 - `GET /` — dashboard (**approved session**)
-- `WS /ws` — live sample push (**approved session**)
+- `WS /ws` — live sample + `devices` push (**approved session**)
 - `GET /api/health` — public liveness
 - `GET /login`, `/auth/microsoft`, `/auth/callback`, `POST /logout`
 - Passkey + `/admin` routes as above
+
+## Switches & lights
+
+Dashboard buttons at the bottom show live on/off (yellow fill = on, outline = off). Toggle clicks enqueue a command on solarstats; **solarstatsapi** on the Pi claims and calls Home Assistant `switch`/`light` `toggle`, then the next ingest refreshes state.
+
+Seeded entities (edit ACL later in admin): users see most switches/lights; `switch.smart_socket_2_socket_1` is admin-only. Restart solarstats after DB wipe so seeds reappear; restart solarstatsapi so it polls device states and commands.
 
 ## Energy
 

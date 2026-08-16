@@ -74,6 +74,26 @@ export function openDatabase(dbPath) {
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS ha_devices (
+      entity_id TEXT PRIMARY KEY,
+      domain TEXT NOT NULL,
+      name TEXT NOT NULL,
+      allow_users INTEGER NOT NULL DEFAULT 1,
+      allow_admin INTEGER NOT NULL DEFAULT 1,
+      state TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS device_commands (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_by INTEGER,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
   `);
 
   ensureColumn(db, "samples", "loads_daily_kwh", "TEXT");
@@ -86,6 +106,7 @@ export function openDatabase(dbPath) {
   }
 
   seedAdmin(db);
+  seedDevices(db);
   return db;
 }
 
@@ -113,6 +134,63 @@ function seedAdmin(db) {
        status = 'approved',
        approved_at = COALESCE(users.approved_at, excluded.approved_at)`,
   ).run(adminEmail, now, now);
+}
+
+/** Default HA entities; ACL flags prepare for future admin UI checkboxes. */
+const DEFAULT_HA_DEVICES = [
+  {
+    entity_id: "switch.smart_socket_socket_1",
+    domain: "switch",
+    name: "Smart socket 1",
+    allow_users: 1,
+    allow_admin: 1,
+  },
+  {
+    entity_id: "switch.zigbeesensor_switch_2",
+    domain: "switch",
+    name: "Zigbee switch 2",
+    allow_users: 1,
+    allow_admin: 1,
+  },
+  {
+    entity_id: "switch.smart_socket_2_socket_1",
+    domain: "switch",
+    name: "Office PC socket",
+    allow_users: 0,
+    allow_admin: 1,
+  },
+  {
+    entity_id: "light.office_office",
+    domain: "light",
+    name: "Office",
+    allow_users: 1,
+    allow_admin: 1,
+  },
+  {
+    entity_id: "light.front_bedroom",
+    domain: "light",
+    name: "Front bedroom",
+    allow_users: 1,
+    allow_admin: 1,
+  },
+  {
+    entity_id: "light.living_room_floor_lamp_2",
+    domain: "light",
+    name: "Living room floor lamp",
+    allow_users: 1,
+    allow_admin: 1,
+  },
+];
+
+function seedDevices(db) {
+  const insert = db.prepare(
+    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at)
+     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, NULL, NULL)
+     ON CONFLICT(entity_id) DO NOTHING`,
+  );
+  for (const d of DEFAULT_HA_DEVICES) {
+    insert.run(d);
+  }
 }
 
 function toNumber(value) {
@@ -358,6 +436,9 @@ export function insertSample(db, payload) {
   if (loads) {
     setMeta(db, "loads_daily_kwh_latest", JSON.stringify(loads));
   }
+  if (Array.isArray(payload.devices)) {
+    upsertDeviceStates(db, payload.devices);
+  }
 
   const sample = {
     ts,
@@ -521,4 +602,156 @@ export function pruneOldSamples(db, retentionDays) {
   db.prepare("DELETE FROM samples WHERE ts < ?").run(cutoff);
 }
 
-export { LOAD_KEYS };
+export function listTrackedEntityIds(db) {
+  return db.prepare(`SELECT entity_id FROM ha_devices ORDER BY entity_id`).all().map((r) => r.entity_id);
+}
+
+export function upsertDeviceStates(db, devices) {
+  if (!Array.isArray(devices) || !devices.length) return;
+  const now = new Date().toISOString();
+  const upd = db.prepare(
+    `UPDATE ha_devices
+     SET state = @state,
+         name = COALESCE(@name, name),
+         updated_at = @updated_at
+     WHERE entity_id = @entity_id`,
+  );
+  const tx = db.transaction((rows) => {
+    for (const d of rows) {
+      if (!d?.entity_id) continue;
+      const state = d.state == null ? null : String(d.state).toLowerCase();
+      upd.run({
+        entity_id: d.entity_id,
+        state,
+        name: d.name || null,
+        updated_at: now,
+      });
+    }
+  });
+  tx(devices);
+}
+
+export function listDevicesForViewer(db, { isAdmin }) {
+  const rows = db
+    .prepare(
+      `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at
+       FROM ha_devices
+       ORDER BY domain ASC, name ASC`,
+    )
+    .all();
+  return rows
+    .filter((r) => r.allow_users === 1 || (isAdmin && r.allow_admin === 1))
+    .map((r) => ({
+      entityId: r.entity_id,
+      domain: r.domain,
+      name: r.name,
+      state: r.state,
+      on: r.state === "on",
+      allowUsers: r.allow_users === 1,
+      allowAdmin: r.allow_admin === 1,
+      updatedAt: r.updated_at,
+    }));
+}
+
+export function listAllDevices(db) {
+  return db
+    .prepare(
+      `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at
+       FROM ha_devices ORDER BY domain ASC, name ASC`,
+    )
+    .all()
+    .map((r) => ({
+      entityId: r.entity_id,
+      domain: r.domain,
+      name: r.name,
+      state: r.state,
+      on: r.state === "on",
+      allowUsers: r.allow_users === 1,
+      allowAdmin: r.allow_admin === 1,
+      updatedAt: r.updated_at,
+    }));
+}
+
+export function setDeviceAcl(db, entityId, { allowUsers, allowAdmin }) {
+  const row = db.prepare(`SELECT entity_id FROM ha_devices WHERE entity_id = ?`).get(entityId);
+  if (!row) return null;
+  if (allowUsers != null) {
+    db.prepare(`UPDATE ha_devices SET allow_users = ? WHERE entity_id = ?`).run(
+      allowUsers ? 1 : 0,
+      entityId,
+    );
+  }
+  if (allowAdmin != null) {
+    db.prepare(`UPDATE ha_devices SET allow_admin = ? WHERE entity_id = ?`).run(
+      allowAdmin ? 1 : 0,
+      entityId,
+    );
+  }
+  return listAllDevices(db).find((d) => d.entityId === entityId) || null;
+}
+
+export function getDevice(db, entityId) {
+  return (
+    db.prepare(`SELECT * FROM ha_devices WHERE entity_id = ?`).get(entityId) ||
+    null
+  );
+}
+
+export function enqueueDeviceCommand(db, { entityId, action, userId }) {
+  const now = new Date().toISOString();
+  const info = db
+    .prepare(
+      `INSERT INTO device_commands (entity_id, action, status, requested_by, created_at)
+       VALUES (?, ?, 'pending', ?, ?)`,
+    )
+    .run(entityId, action, userId ?? null, now);
+  return info.lastInsertRowid;
+}
+
+export function claimPendingCommands(db, limit = 20) {
+  const rows = db
+    .prepare(
+      `SELECT id, entity_id, action FROM device_commands
+       WHERE status = 'pending'
+       ORDER BY id ASC
+       LIMIT ?`,
+    )
+    .all(limit);
+  if (!rows.length) return [];
+  const mark = db.prepare(
+    `UPDATE device_commands SET status = 'claimed' WHERE id = ? AND status = 'pending'`,
+  );
+  const claimed = [];
+  const tx = db.transaction((list) => {
+    for (const row of list) {
+      const r = mark.run(row.id);
+      if (r.changes) {
+        claimed.push({
+          id: row.id,
+          entityId: row.entity_id,
+          action: row.action,
+        });
+      }
+    }
+  });
+  tx(rows);
+  return claimed;
+}
+
+export function completeDeviceCommand(db, id, ok) {
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE device_commands
+     SET status = ?, completed_at = ?
+     WHERE id = ?`,
+  ).run(ok ? "done" : "error", now, id);
+}
+
+export function optimisticallySetDeviceState(db, entityId, state) {
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE ha_devices SET state = ?, updated_at = ? WHERE entity_id = ?`,
+  ).run(String(state).toLowerCase(), now, entityId);
+}
+
+export { LOAD_KEYS, DEFAULT_HA_DEVICES };

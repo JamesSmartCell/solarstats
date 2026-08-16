@@ -243,6 +243,72 @@ body {
   font-family: var(--font-mono);
 }
 
+.devices {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.devices-title {
+  margin: 0 0 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.device-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.device-btn {
+  appearance: none;
+  cursor: pointer;
+  min-width: 8.5rem;
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+  border: 2px solid #f5d76e;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.device-btn:hover:not(:disabled) {
+  border-color: #ffe566;
+}
+
+.device-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.device-btn.is-on {
+  background: #f5d76e;
+  border-color: #f5d76e;
+  color: #1a1608;
+}
+
+.device-btn.is-off {
+  background: transparent;
+  color: var(--text);
+}
+
+.device-btn.is-unknown {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
 @media (max-width: 640px) {
   .status {
     align-items: flex-start;

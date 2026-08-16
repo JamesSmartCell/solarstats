@@ -36,6 +36,16 @@ const LOAD_DAILY_ENTITIES = {
   otherInverter: "sensor.inverter_unmetered_energy_daily",
 };
 
+/** Switches/lights mirrored on solarstats (IDs also tracked server-side). */
+const DEVICE_ENTITIES = [
+  "switch.smart_socket_socket_1",
+  "switch.zigbeesensor_switch_2",
+  "switch.smart_socket_2_socket_1",
+  "light.office_office",
+  "light.front_bedroom",
+  "light.living_room_floor_lamp_2",
+];
+
 function requireEnv(name, value) {
   if (!value) {
     console.error(`Missing required env var: ${name}`);
@@ -61,6 +71,19 @@ function formatFetchError(stage, err) {
   return `${stage}: ${detail}`;
 }
 
+function agentHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  if (INGEST_SECRET) {
+    headers.Authorization = `Bearer ${INGEST_SECRET}`;
+  }
+  return headers;
+}
+
+function commandsUrl() {
+  if (!SITE_INGEST_URL) return "";
+  return SITE_INGEST_URL.replace(/\/api\/ingest\/?$/, "/api/agent/commands");
+}
+
 async function fetchEntity(entityId) {
   const url = `${HA_BASE_URL}/api/states/${entityId}`;
   let res;
@@ -83,6 +106,25 @@ async function fetchEntity(entityId) {
   return parseState(data.state);
 }
 
+async function fetchEntityFull(entityId) {
+  const url = `${HA_BASE_URL}/api/states/${entityId}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${HA_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (err) {
+    throw new Error(formatFetchError(`HA GET ${url}`, err));
+  }
+  if (!res.ok) {
+    throw new Error(`HA ${entityId}: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 async function collectMap(map) {
   const entries = await Promise.all(
     Object.entries(map).map(async ([key, entityId]) => {
@@ -98,32 +140,47 @@ async function collectMap(map) {
   return Object.fromEntries(entries);
 }
 
-async function collectSnapshot() {
-  const [core, loadsDailyKwh] = await Promise.all([
+async function collectDevices(entityIds) {
+  const list = entityIds?.length ? entityIds : DEVICE_ENTITIES;
+  const devices = await Promise.all(
+    list.map(async (entityId) => {
+      try {
+        const data = await fetchEntityFull(entityId);
+        return {
+          entity_id: entityId,
+          state: data.state,
+          name: data.attributes?.friendly_name || null,
+        };
+      } catch (err) {
+        console.warn(`[warn] ${err.message}`);
+        return { entity_id: entityId, state: "unavailable", name: null };
+      }
+    }),
+  );
+  return devices;
+}
+
+async function collectSnapshot(trackIds) {
+  const [core, loadsDailyKwh, devices] = await Promise.all([
     collectMap(ENTITIES),
     collectMap(LOAD_DAILY_ENTITIES),
+    collectDevices(trackIds),
   ]);
 
   return {
     ts: new Date().toISOString(),
     ...core,
     loadsDailyKwh,
+    devices,
   };
 }
 
 async function forwardSnapshot(snapshot) {
-  const headers = {
-    "Content-Type": "application/json",
-  };
-  if (INGEST_SECRET) {
-    headers.Authorization = `Bearer ${INGEST_SECRET}`;
-  }
-
   let res;
   try {
     res = await fetch(SITE_INGEST_URL, {
       method: "POST",
-      headers,
+      headers: agentHeaders(),
       body: JSON.stringify(snapshot),
     });
   } catch (err) {
@@ -141,16 +198,77 @@ async function forwardSnapshot(snapshot) {
   }
 }
 
+async function callHaService(domain, service, entityId) {
+  const url = `${HA_BASE_URL}/api/services/${domain}/${service}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${HA_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ entity_id: entityId }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`HA service ${domain}.${service} ${entityId}: HTTP ${res.status} ${body}`);
+  }
+}
+
+async function completeCommand(id, ok) {
+  const base = commandsUrl();
+  if (!base) return;
+  await fetch(`${base}/${id}/complete`, {
+    method: "POST",
+    headers: agentHeaders(),
+    body: JSON.stringify({ ok }),
+  }).catch((err) => console.warn(`[warn] command complete failed: ${err.message}`));
+}
+
+async function processCommands() {
+  const url = commandsUrl();
+  if (!url || DRY_RUN) return [];
+
+  let res;
+  try {
+    res = await fetch(url, { headers: agentHeaders() });
+  } catch (err) {
+    console.warn(`[warn] commands poll: ${err.message}`);
+    return [];
+  }
+  if (!res.ok) {
+    console.warn(`[warn] commands HTTP ${res.status}`);
+    return [];
+  }
+
+  const data = await res.json();
+  const commands = data.commands || [];
+  for (const cmd of commands) {
+    try {
+      const domain = String(cmd.entityId || "").split(".")[0];
+      if (!domain) throw new Error("bad entity");
+      const service = cmd.action === "toggle" ? "toggle" : cmd.action;
+      await callHaService(domain, service, cmd.entityId);
+      await completeCommand(cmd.id, true);
+      console.log(`[cmd] ${service} ${cmd.entityId}`);
+    } catch (err) {
+      console.error(`[cmd] failed ${cmd.entityId}:`, err.message);
+      await completeCommand(cmd.id, false);
+    }
+  }
+  return data.track || [];
+}
+
 async function tick() {
   try {
-    const snapshot = await collectSnapshot();
+    const track = await processCommands();
+    const snapshot = await collectSnapshot(track);
     if (DRY_RUN) {
       console.log(`[${snapshot.ts}] dry-run snapshot:`, JSON.stringify(snapshot));
       return;
     }
     await forwardSnapshot(snapshot);
     console.log(
-      `[${snapshot.ts}] forwarded SoC=${snapshot.batterySoc}% PV=${snapshot.pvPower}W Out=${snapshot.outputPower}W loads=${JSON.stringify(snapshot.loadsDailyKwh)}`,
+      `[${snapshot.ts}] forwarded SoC=${snapshot.batterySoc}% PV=${snapshot.pvPower}W Out=${snapshot.outputPower}W devices=${snapshot.devices?.length ?? 0}`,
     );
   } catch (err) {
     console.error(`[${new Date().toISOString()}] poll failed:`, err.message);

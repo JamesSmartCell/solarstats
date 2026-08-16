@@ -35,6 +35,7 @@ const els = {
   footNote: document.getElementById("footNote"),
   socHint: document.getElementById("socHint"),
   adminLink: document.getElementById("adminLink"),
+  deviceGrid: document.getElementById("deviceGrid"),
 };
 
 const state = {
@@ -43,6 +44,8 @@ const state = {
   energyKwhTotal: 0,
   rangeStartMs: 0,
   loadsDailyKwh: null,
+  devices: [],
+  toggling: new Set(),
 };
 
 function rangeToMs(range) {
@@ -313,7 +316,7 @@ function updateTiles(sample) {
 function updateChrome() {
   const label = RANGE_LABELS[state.range] || state.range;
   els.socHint.textContent = `State of charge · ${label}`;
-  els.footNote.textContent = `Window: ${label} · pinch/wheel zoom · smoothed series · trapezoid kWh`;
+  els.footNote.textContent = `Window: ${label}`;
 }
 
 function syncCharts() {
@@ -400,6 +403,63 @@ function setLive(live) {
   document.getElementById("connDot").classList.toggle("live", live);
 }
 
+function renderDevices(devices) {
+  if (!els.deviceGrid) return;
+  state.devices = Array.isArray(devices) ? devices : [];
+  els.deviceGrid.replaceChildren();
+
+  if (!state.devices.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "No switches or lights available yet.";
+    els.deviceGrid.appendChild(empty);
+    return;
+  }
+
+  for (const d of state.devices) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "device-btn";
+    btn.dataset.entityId = d.entityId;
+    btn.textContent = d.name || d.entityId;
+    const on = d.on === true || d.state === "on";
+    const known = d.state === "on" || d.state === "off";
+    btn.classList.add(known ? (on ? "is-on" : "is-off") : "is-unknown");
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    if (state.toggling.has(d.entityId)) btn.disabled = true;
+    btn.addEventListener("click", () => toggleDevice(d.entityId));
+    els.deviceGrid.appendChild(btn);
+  }
+}
+
+async function loadDevices() {
+  const res = await fetch("/api/devices");
+  if (!res.ok) return;
+  const data = await res.json();
+  renderDevices(data.devices || []);
+}
+
+async function toggleDevice(entityId) {
+  if (!entityId || state.toggling.has(entityId)) return;
+  state.toggling.add(entityId);
+  renderDevices(state.devices);
+  try {
+    const res = await fetch(`/api/devices/${encodeURIComponent(entityId)}/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) throw new Error(`toggle ${res.status}`);
+    const data = await res.json();
+    if (data.devices) renderDevices(data.devices);
+  } catch (err) {
+    console.error(err);
+    await loadDevices().catch(() => {});
+  } finally {
+    state.toggling.delete(entityId);
+    renderDevices(state.devices);
+  }
+}
+
 function connectWs() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -418,10 +478,13 @@ function connectWs() {
           updateTiles({ ...msg.latest, energyKwhTotal: state.energyKwhTotal });
         }
         if (msg.loadsDailyKwh) updateLoadsPie(msg.loadsDailyKwh);
+        if (msg.devices) renderDevices(msg.devices);
       } else if (msg.type === "sample") {
         applySample(msg.sample);
       } else if (msg.type === "history") {
         applyHistory(msg);
+      } else if (msg.type === "devices") {
+        renderDevices(msg.devices);
       }
     } catch (err) {
       console.error("ws message error", err);
@@ -446,6 +509,7 @@ els.resetZoom.addEventListener("click", resetAllZoom);
 
 updateChrome();
 loadMe().catch(() => {});
+loadDevices().catch(() => {});
 loadHistory()
   .catch((err) => console.error(err))
   .finally(connectWs);

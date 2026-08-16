@@ -30,6 +30,15 @@ import {
   setUserStatus,
   upsertMicrosoftUser,
   deletePasskey,
+  listDevicesForViewer,
+  listAllDevices,
+  setDeviceAcl,
+  getDevice,
+  enqueueDeviceCommand,
+  claimPendingCommands,
+  completeDeviceCommand,
+  optimisticallySetDeviceState,
+  listTrackedEntityIds,
 } from "./db.js";
 import {
   authenticationOptions,
@@ -505,6 +514,21 @@ app.post("/api/admin/settings", requireAdmin, (req, res) => {
   res.json({ settings });
 });
 
+app.get("/api/admin/devices", requireAdmin, (_req, res) => {
+  res.json({ devices: listAllDevices(db) });
+});
+
+app.post("/api/admin/devices/:entityId/acl", requireAdmin, (req, res) => {
+  const entityId = decodeURIComponent(req.params.entityId);
+  const device = setDeviceAcl(db, entityId, {
+    allowUsers: req.body?.allowUsers,
+    allowAdmin: req.body?.allowAdmin,
+  });
+  if (!device) return res.status(404).json({ error: "not_found" });
+  broadcastDevices();
+  res.json({ device });
+});
+
 // --- Protected dashboard / data ---
 
 app.get("/", requireApproved, (_req, res) => {
@@ -520,15 +544,60 @@ app.get("/api/history", requireApproved, (req, res) => {
   res.json(getHistory(db, range));
 });
 
+app.get("/api/devices", requireApproved, (req, res) => {
+  res.json({
+    devices: listDevicesForViewer(db, { isAdmin: isAdminEmail(req.user.email) }),
+  });
+});
+
+app.post("/api/devices/:entityId/toggle", requireApproved, (req, res) => {
+  const entityId = decodeURIComponent(req.params.entityId);
+  const device = getDevice(db, entityId);
+  if (!device) return res.status(404).json({ error: "unknown_device" });
+
+  const admin = isAdminEmail(req.user.email);
+  const allowed =
+    device.allow_users === 1 || (admin && device.allow_admin === 1);
+  if (!allowed) return res.status(403).json({ error: "forbidden" });
+
+  enqueueDeviceCommand(db, {
+    entityId,
+    action: "toggle",
+    userId: req.user.id,
+  });
+
+  // Optimistic flip for snappier UI; next poll corrects if HA disagrees.
+  const next = device.state === "on" ? "off" : "on";
+  optimisticallySetDeviceState(db, entityId, next);
+  const devices = listDevicesForViewer(db, { isAdmin: admin });
+  broadcastDevices();
+  res.json({ ok: true, devices });
+});
+
 app.post("/api/ingest", authorizeIngest, (req, res) => {
   try {
     const sample = insertSample(db, req.body || {});
     broadcast({ type: "sample", sample });
+    broadcastDevices();
     res.json({ ok: true, sample });
   } catch (err) {
     console.error("ingest failed:", err);
     res.status(400).json({ error: err.message || "bad request" });
   }
+});
+
+/** Pi agent: pull pending HA commands (Bearer INGEST_SECRET). */
+app.get("/api/agent/commands", authorizeIngest, (_req, res) => {
+  res.json({
+    commands: claimPendingCommands(db, 20),
+    track: listTrackedEntityIds(db),
+  });
+});
+
+app.post("/api/agent/commands/:id/complete", authorizeIngest, (req, res) => {
+  const id = Number(req.params.id);
+  completeDeviceCommand(db, id, req.body?.ok !== false);
+  res.json({ ok: true });
 });
 
 app.get("/api/health", (_req, res) => {
@@ -549,6 +618,22 @@ function broadcast(message) {
     if (client.readyState === 1) {
       client.send(data);
     }
+  }
+}
+
+function broadcastDevices() {
+  for (const client of wss.clients) {
+    if (client.readyState !== 1 || !client.userId) continue;
+    const user = getUserById(db, client.userId);
+    if (!user || user.status !== "approved") continue;
+    client.send(
+      JSON.stringify({
+        type: "devices",
+        devices: listDevicesForViewer(db, {
+          isAdmin: isAdminEmail(user.email),
+        }),
+      }),
+    );
   }
 }
 
@@ -573,6 +658,7 @@ server.on("upgrade", (req, socket, head) => {
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.userId = user.id;
       wss.emit("connection", ws, req);
     });
   });
@@ -580,12 +666,16 @@ server.on("upgrade", (req, socket, head) => {
 
 wss.on("connection", (socket) => {
   const history = getHistory(db, "1h");
+  const user = socket.userId ? getUserById(db, socket.userId) : null;
   socket.send(
     JSON.stringify({
       type: "hello",
       energyKwhTotal: history.energyKwhTotal,
       latest: history.latest,
       loadsDailyKwh: history.loadsDailyKwh,
+      devices: user
+        ? listDevicesForViewer(db, { isAdmin: isAdminEmail(user.email) })
+        : [],
     }),
   );
 });
