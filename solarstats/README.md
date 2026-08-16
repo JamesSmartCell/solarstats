@@ -30,18 +30,19 @@ sudo systemctl enable --now solarstats
 sudo systemctl status solarstats
 ```
 
-## Microsoft Entra app registration
+## Sign-in providers (Microsoft / Google / Apple)
 
-1. Open [Entra app registrations](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps) → **New registration**.
-2. Supported account types: **Personal Microsoft accounts only** (or personal + work if you prefer).
-3. Redirect URI (Web): `https://your-host/auth/callback` — must match `AUTH_REDIRECT_URI`.
-4. Certificates & secrets → create a **client secret**.
-5. Copy **Application (client) ID** → `AZURE_CLIENT_ID`; secret → `AZURE_CLIENT_SECRET`.
-6. Set `AZURE_TENANT=consumers` for personal accounts (use `common` if you also allow work/school).
+Configure at least one IdP in `.env` (see `.env.example`).
 
-Admin account **`manticorenettle@gmail.com`** is seeded as approved admin on first DB open. Sign in with that Microsoft identity first.
+**Microsoft:** Entra app → redirect `https://your-host/auth/callback` → `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT=consumers`.
 
-Enable **Microsoft Authenticator MFA** on each user’s Microsoft account so number matching appears at sign-in ([account security](https://account.microsoft.com/security)).
+**Google:** [Cloud Console credentials](https://console.cloud.google.com/apis/credentials) → OAuth Web client → redirect `https://your-host/auth/callback/google` → `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
+**Apple (optional):** Developer Services ID + `.p8` key → redirect `https://your-host/auth/callback/apple`.
+
+**Passkeys** are stored by the **device** (Apple Passwords / Google Password Manager / Windows Hello), not Microsoft Authenticator. iPhone: Settings → General → Autofill & Passwords → enable **Passwords**.
+
+Admin **`manticorenettle@gmail.com`** is seeded approved on first DB open.
 
 ### Account management (`/admin`)
 

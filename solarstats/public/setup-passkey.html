@@ -16,10 +16,16 @@
   <body class="auth-body">
     <main class="auth-card">
       <h1 class="brand">Solar<span>stats</span></h1>
-      <p class="sub">Create a passkey for this site</p>
+      <p class="sub">Save a device passkey</p>
       <p class="auth-copy">
-        Signed in as <strong id="email">…</strong>. Your browser will prompt you to save a
-        passkey (Face ID, Touch ID, Windows Hello, or a password manager).
+        Signed in as <strong id="email">…</strong>. When prompted, choose
+        <strong>Apple Passwords / iCloud Keychain</strong>,
+        <strong>Google Password Manager</strong>, or
+        <strong>Windows Hello</strong> — not Microsoft Authenticator.
+      </p>
+      <p class="auth-hint">
+        iPhone tip: Settings → General → Autofill &amp; Passwords → enable
+        <em>Passwords</em> (Apple). You can leave Authenticator off for this site.
       </p>
       <p class="auth-error" id="errorBox" hidden></p>
       <p class="auth-hint" id="okBox" hidden style="color: var(--accent)">

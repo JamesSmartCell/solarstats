@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sign in — Solarstats</title>
+    <title>Create passkey — Solarstats</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -16,25 +16,16 @@
   <body class="auth-body">
     <main class="auth-card">
       <h1 class="brand">Solar<span>stats</span></h1>
-      <p class="sub">Private dashboard</p>
-
+      <p class="sub">Create a passkey</p>
+      <p class="auth-copy">
+        Step 1: verify who you are with Google, Apple, or Microsoft.<br />
+        Step 2: save a <strong>device</strong> passkey (iCloud Keychain / Google Password Manager / Windows Hello).
+        That is separate from Microsoft Authenticator.
+      </p>
       <p class="auth-error" id="errorBox" hidden></p>
-
-      <p class="auth-hint" style="margin-top: 1rem">Sign in with an account</p>
       <div id="providerButtons"></div>
-
-      <button type="button" class="auth-btn secondary" id="passkeyBtn">
-        Sign in with passkey
-      </button>
-      <p class="auth-hint" id="passkeyHint" hidden>
-        Uses a passkey saved on this device (Apple Passwords, Google Password Manager, Windows Hello — not Microsoft Authenticator).
-      </p>
-
-      <a class="auth-btn secondary" href="/create-passkey">Create a passkey</a>
-      <p class="auth-hint">
-        Verify with Google, Apple, or Microsoft, then save a device passkey for next time.
-      </p>
+      <a class="auth-btn secondary" href="/login">Back to sign in</a>
     </main>
-    <script type="module" src="/login.js"></script>
+    <script type="module" src="/create-passkey.js"></script>
   </body>
 </html>

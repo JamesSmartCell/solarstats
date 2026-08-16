@@ -1,12 +1,13 @@
 import {
   startAuthentication,
 } from "https://unpkg.com/@simplewebauthn/browser@13.1.0/esm/index.js";
+import { renderProviderButtons } from "./providers.js";
 
 const ERRORS = {
   registration_closed: "New account registration is currently closed.",
   denied: "Your account access was denied.",
-  auth_start: "Could not start Microsoft sign-in. Check server configuration.",
-  auth_callback: "Microsoft sign-in failed. Try again.",
+  auth_start: "Could not start sign-in. Check server configuration.",
+  auth_callback: "Sign-in failed. Try again.",
 };
 
 const params = new URLSearchParams(location.search);
@@ -20,14 +21,14 @@ if (code && ERRORS[code]) {
 const passkeyBtn = document.getElementById("passkeyBtn");
 const passkeyHint = document.getElementById("passkeyHint");
 
+renderProviderButtons(document.getElementById("providerButtons")).catch((err) => {
+  errorBox.hidden = false;
+  errorBox.textContent = err.message || "Could not load sign-in providers";
+});
+
 if (!window.PublicKeyCredential) {
   passkeyBtn.disabled = true;
   passkeyBtn.textContent = "Passkeys not supported on this browser";
-  const createLink = document.getElementById("createPasskeyLink");
-  if (createLink) {
-    createLink.style.pointerEvents = "none";
-    createLink.style.opacity = "0.5";
-  }
 } else {
   passkeyHint.hidden = false;
 }

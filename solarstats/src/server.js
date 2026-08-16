@@ -8,8 +8,9 @@ import helmet from "helmet";
 import { WebSocketServer } from "ws";
 import {
   authConfigured,
-  buildMicrosoftAuthUrl,
-  handleMicrosoftCallback,
+  authProviders,
+  buildAuthUrl,
+  handleAuthCallback,
   webauthnConfig,
 } from "./auth.js";
 import {
@@ -157,25 +158,9 @@ app.get("/admin", requireAdmin, (_req, res) => {
   res.sendFile(path.join(publicDir, "admin.html"));
 });
 
-app.get("/auth/microsoft", async (req, res) => {
+async function finishOidcLogin(provider, req, res) {
   try {
-    if (!authConfigured()) {
-      return res.status(503).send("Microsoft auth is not configured on the server.");
-    }
-    if (req.query.intent === "create_passkey") {
-      req.session.afterLogin = "create_passkey";
-    }
-    const url = await buildMicrosoftAuthUrl(req.session);
-    res.redirect(url.href);
-  } catch (err) {
-    console.error("microsoft auth start failed:", err);
-    res.redirect("/login?error=auth_start");
-  }
-});
-
-app.get("/auth/callback", async (req, res) => {
-  try {
-    const profile = await handleMicrosoftCallback(req, req.session);
+    const profile = await handleAuthCallback(provider, req, req.session);
     const { user, outcome } = upsertMicrosoftUser(db, {
       email: profile.email,
       displayName: profile.displayName,
@@ -200,14 +185,63 @@ app.get("/auth/callback", async (req, res) => {
     }
     return res.redirect("/");
   } catch (err) {
-    console.error("microsoft callback failed:", err);
+    console.error(`${provider} callback failed:`, err);
     clearSession(req);
     return res.redirect("/login?error=auth_callback");
   }
+}
+
+// Callbacks before /auth/:provider so "/auth/callback" is not swallowed.
+app.get("/auth/callback/microsoft", (req, res) => finishOidcLogin("microsoft", req, res));
+app.get("/auth/callback/google", (req, res) => finishOidcLogin("google", req, res));
+app.get("/auth/callback/apple", (req, res) => finishOidcLogin("apple", req, res));
+app.post(
+  "/auth/callback/apple",
+  express.urlencoded({ extended: false }),
+  (req, res) => {
+    const q = new URLSearchParams({ ...req.query, ...req.body });
+    req.url = `/auth/callback/apple?${q.toString()}`;
+    return finishOidcLogin("apple", req, res);
+  },
+);
+app.get("/auth/callback", (req, res) => finishOidcLogin("microsoft", req, res));
+
+app.get("/auth/:provider", async (req, res) => {
+  const provider = String(req.params.provider || "");
+  if (!["microsoft", "google", "apple"].includes(provider)) {
+    return res.status(404).send("Unknown provider");
+  }
+  try {
+    const providers = authProviders();
+    if (!providers[provider]) {
+      return res
+        .status(503)
+        .send(`${provider} sign-in is not configured on the server.`);
+    }
+    if (req.query.intent === "create_passkey") {
+      req.session.afterLogin = "create_passkey";
+    }
+    const url = await buildAuthUrl(provider, req.session);
+    res.redirect(url.href);
+  } catch (err) {
+    console.error(`${provider} auth start failed:`, err);
+    res.redirect("/login?error=auth_start");
+  }
+});
+
+app.get("/create-passkey", (req, res) => {
+  const user = currentUser(req);
+  if (user?.status === "approved") return res.redirect("/setup-passkey");
+  if (user?.status === "pending") return res.redirect("/pending");
+  res.sendFile(path.join(publicDir, "create-passkey.html"));
 });
 
 app.get("/setup-passkey", requireApproved, (_req, res) => {
   res.sendFile(path.join(publicDir, "setup-passkey.html"));
+});
+
+app.get("/api/auth/providers", (_req, res) => {
+  res.json({ configured: authConfigured(), providers: authProviders() });
 });
 
 app.post("/logout", (req, res) => {

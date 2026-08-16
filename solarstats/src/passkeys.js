@@ -52,6 +52,8 @@ export async function registrationOptions(db, user) {
       transports: pk.transports ? JSON.parse(pk.transports) : undefined,
     })),
     authenticatorSelection: {
+      // Prefer this device (Apple Passwords / Google PM / Windows Hello), not roaming Microsoft Authenticator.
+      authenticatorAttachment: "platform",
       residentKey: "preferred",
       userVerification: "preferred",
     },
