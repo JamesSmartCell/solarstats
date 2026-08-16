@@ -13,31 +13,49 @@
     <link rel="stylesheet" href="/solarstats.css" />
     <link rel="stylesheet" href="/auth.css" />
   </head>
-  <body class="auth-body">
+  <body class="auth-body" data-has-passkey="{{HAS_PASSKEY}}">
     <main class="auth-card">
       <h1 class="brand">Solar<span>stats</span></h1>
       <p class="sub">Private dashboard</p>
+      <p class="auth-lead">Sign in with an account</p>
 
       <p class="auth-error" id="errorBox" hidden></p>
+      <p class="auth-status" id="statusBox" hidden>Signing in with passkey…</p>
 
-      <a class="auth-btn microsoft" id="msBtn" href="/auth/microsoft">
-        Use MS Authenticator
-      </a>
-      <p class="auth-hint">
-        Microsoft sign-in with Authenticator number matching.
-      </p>
+      <div id="choices" class="login-choices" hidden>
+        <a class="auth-btn choice" href="/auth/microsoft">
+          <span class="choice-icon" aria-hidden="true">
+            <svg viewBox="0 0 21 21" width="20" height="20">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+              <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+            </svg>
+          </span>
+          <span>Continue with MS Authenticator</span>
+        </a>
 
-      <button type="button" class="auth-btn secondary" id="passkeyBtn">
-        Sign in with passkey
-      </button>
-      <p class="auth-hint" id="passkeyHint" hidden>
-        Use a passkey already saved for this site.
-      </p>
+        <button type="button" class="auth-btn choice" id="passkeyBtn">
+          <span class="choice-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="8" cy="10" r="3.5" />
+              <path d="M11.5 10h9v3h-2v2h-2v-2h-5" />
+            </svg>
+          </span>
+          <span>Sign in with passkey</span>
+        </button>
 
-      <a class="auth-btn secondary" href="/create-passkey">Create passkey</a>
-      <p class="auth-hint">
-        Email + device passkey (Apple Passwords / Google Password Manager / Windows Hello).
-      </p>
+        <a class="auth-btn choice" href="/create-passkey">
+          <span class="choice-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="8" cy="10" r="3.5" />
+              <path d="M11.5 10h9v3h-2v2h-2v-2h-5" />
+              <path d="M18 4v6M15 7h6" />
+            </svg>
+          </span>
+          <span>Create passkey</span>
+        </a>
+      </div>
     </main>
     <script type="module" src="/login.js"></script>
   </body>

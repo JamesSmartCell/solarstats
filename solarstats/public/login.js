@@ -12,23 +12,38 @@ const ERRORS = {
 const params = new URLSearchParams(location.search);
 const code = params.get("error");
 const errorBox = document.getElementById("errorBox");
+const statusBox = document.getElementById("statusBox");
+const choices = document.getElementById("choices");
+const passkeyBtn = document.getElementById("passkeyBtn");
+
+const hasPasskey = document.body.dataset.hasPasskey === "1";
+
 if (code && ERRORS[code]) {
   errorBox.hidden = false;
   errorBox.textContent = ERRORS[code];
 }
 
-const passkeyBtn = document.getElementById("passkeyBtn");
-const passkeyHint = document.getElementById("passkeyHint");
-
-if (!window.PublicKeyCredential) {
-  passkeyBtn.disabled = true;
-  passkeyBtn.textContent = "Passkeys not supported on this browser";
-} else {
-  passkeyHint.hidden = false;
+function showChoices() {
+  statusBox.hidden = true;
+  choices.hidden = false;
 }
 
-passkeyBtn?.addEventListener("click", async () => {
-  passkeyBtn.disabled = true;
+async function signInWithPasskey({ silent = false } = {}) {
+  if (!window.PublicKeyCredential) {
+    if (!silent) {
+      errorBox.hidden = false;
+      errorBox.textContent = "Passkeys are not supported in this browser";
+    }
+    showChoices();
+    return;
+  }
+
+  if (passkeyBtn) passkeyBtn.disabled = true;
+  if (silent) {
+    statusBox.hidden = false;
+    choices.hidden = true;
+  }
+
   try {
     const optRes = await fetch("/auth/passkey/login/options", { method: "POST" });
     if (!optRes.ok) {
@@ -46,10 +61,20 @@ passkeyBtn?.addEventListener("click", async () => {
     }
     location.href = "/";
   } catch (err) {
-    errorBox.hidden = false;
-    errorBox.textContent =
-      err.message ||
-      "Passkey sign-in failed. If you have not created one yet, use Create passkey.";
-    passkeyBtn.disabled = false;
+    if (!silent) {
+      errorBox.hidden = false;
+      errorBox.textContent = err.message || "Passkey sign-in failed";
+    }
+    if (passkeyBtn) passkeyBtn.disabled = false;
+    showChoices();
   }
-});
+}
+
+passkeyBtn?.addEventListener("click", () => signInWithPasskey({ silent: false }));
+
+if (hasPasskey && !code) {
+  // Session gone, but this browser previously enrolled a passkey — prompt immediately.
+  signInWithPasskey({ silent: true });
+} else {
+  showChoices();
+}

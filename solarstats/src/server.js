@@ -1,4 +1,5 @@
 import http from "node:http";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import "dotenv/config";
@@ -14,6 +15,7 @@ import {
   webauthnConfig,
 } from "./auth.js";
 import {
+  ADMIN_EMAIL,
   getAuthSettings,
   getHistory,
   getUserById,
@@ -42,6 +44,10 @@ const DB_PATH = process.env.DB_PATH || "./data/solarstats.db";
 const HISTORY_RETENTION_DAYS = Number(process.env.HISTORY_RETENTION_DAYS || 30);
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-insecure-session-secret";
 
+/** ~4 months — stay signed in + has-passkey UX marker. */
+const LONG_COOKIE_MS = 120 * 24 * 60 * 60 * 1000;
+const HAS_PASSKEY_COOKIE = "solarstats_pk";
+
 const db = openDatabase(DB_PATH);
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -67,15 +73,63 @@ app.use(
 );
 app.use(express.json({ limit: "256kb" }));
 
+function cookieSecure() {
+  return (
+    process.env.COOKIE_SECURE === "1" || process.env.NODE_ENV === "production"
+  );
+}
+
 const sessionMiddleware = cookieSession({
   name: "solarstats_session",
   keys: [SESSION_SECRET],
-  maxAge: 30 * 24 * 60 * 60 * 1000,
+  maxAge: LONG_COOKIE_MS,
   httpOnly: true,
   sameSite: "lax",
-  secure: process.env.COOKIE_SECURE === "1" || process.env.NODE_ENV === "production",
+  secure: cookieSecure(),
 });
 app.use(sessionMiddleware);
+
+function parseCookies(req) {
+  const header = req.headers.cookie || "";
+  const out = {};
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (!k) continue;
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function hasPasskeyCookie(req) {
+  return parseCookies(req)[HAS_PASSKEY_COOKIE] === "1";
+}
+
+/** First-party only: HttpOnly + SameSite=Lax (+ Secure on HTTPS). Other sites cannot read it. */
+function setHasPasskeyCookie(res) {
+  const parts = [
+    `${HAS_PASSKEY_COOKIE}=1`,
+    "Path=/",
+    `Max-Age=${Math.floor(LONG_COOKIE_MS / 1000)}`,
+    "HttpOnly",
+    "SameSite=Lax",
+  ];
+  if (cookieSecure()) parts.push("Secure");
+  res.append("Set-Cookie", parts.join("; "));
+}
+
+function ensureHasPasskeyCookie(req, res, user) {
+  if (!user) return;
+  if (listPasskeysForUser(db, user.id).length > 0) {
+    setHasPasskeyCookie(res);
+  }
+}
 
 function currentUser(req) {
   if (!req.session?.userId) return null;
@@ -119,7 +173,8 @@ function requireApproved(req, res, next) {
 
 function requireAdmin(req, res, next) {
   requireApproved(req, res, () => {
-    if (req.user.role !== "admin") {
+    const email = String(req.user.email || "").toLowerCase();
+    if (email !== ADMIN_EMAIL) {
       return res.status(403).json({ error: "admin_only" });
     }
     return next();
@@ -144,7 +199,11 @@ app.get("/login", (req, res) => {
   const user = currentUser(req);
   if (user?.status === "approved") return res.redirect("/");
   if (user?.status === "pending") return res.redirect("/pending");
-  res.sendFile(path.join(publicDir, "login.html"));
+
+  const hasPk = hasPasskeyCookie(req);
+  const template = fs.readFileSync(path.join(publicDir, "login.html"), "utf8");
+  const html = template.replaceAll("{{HAS_PASSKEY}}", hasPk ? "1" : "0");
+  res.type("html").send(html);
 });
 
 app.get("/pending", (req, res) => {
@@ -178,6 +237,8 @@ async function finishOidcLogin(provider, req, res) {
 
     setSessionUser(req, user);
     if (user.status === "pending") return res.redirect("/pending");
+
+    ensureHasPasskeyCookie(req, res, user);
 
     const afterLogin = req.session.afterLogin;
     delete req.session.afterLogin;
@@ -251,12 +312,21 @@ app.get("/api/me", (req, res) => {
   const user = currentUser(req);
   if (!user) return res.status(401).json({ error: "unauthorized" });
   const settings = getAuthSettings(db);
+  // Existing users who already have a passkey but no marker cookie yet.
+  if (!hasPasskeyCookie(req)) {
+    ensureHasPasskeyCookie(req, res, user);
+  } else if (listPasskeysForUser(db, user.id).length > 0) {
+    // Refresh Max-Age while they use the site.
+    setHasPasskeyCookie(res);
+  }
   res.json({
     id: user.id,
     email: user.email,
     role: user.role,
     status: user.status,
     displayName: user.display_name,
+    isAdmin: String(user.email || "").toLowerCase() === ADMIN_EMAIL,
+    hasPasskeyCookie: hasPasskeyCookie(req) || listPasskeysForUser(db, user.id).length > 0,
     settings: {
       allowPasskeyEnrollment: settings.allowPasskeyEnrollment,
     },
@@ -333,6 +403,7 @@ app.post("/auth/passkey/enroll/verify", async (req, res) => {
     delete req.session.passkeyEnrollUserId;
 
     setSessionUser(req, user);
+    setHasPasskeyCookie(res);
     res.json({
       ...result,
       status: user.status,
@@ -362,6 +433,7 @@ app.post("/auth/passkey/register/verify", requireApproved, async (req, res) => {
     }
     const result = await verifyRegistration(db, req.user, req.body, challenge);
     delete req.session.passkeyChallenge;
+    setHasPasskeyCookie(res);
     res.json(result);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -387,6 +459,7 @@ app.post("/auth/passkey/login/verify", async (req, res) => {
     const { user } = await verifyAuthentication(db, req.body, challenge);
     delete req.session.passkeyChallenge;
     setSessionUser(req, user);
+    setHasPasskeyCookie(res);
     res.json({ ok: true, email: user.email });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });

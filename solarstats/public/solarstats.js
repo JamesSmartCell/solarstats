@@ -1,7 +1,3 @@
-import {
-  startRegistration,
-} from "https://unpkg.com/@simplewebauthn/browser@13.1.0/esm/index.js";
-
 const RANGE_LABELS = {
   "1h": "1 hour",
   "6h": "6 hours",
@@ -39,7 +35,6 @@ const els = {
   footNote: document.getElementById("footNote"),
   socHint: document.getElementById("socHint"),
   adminLink: document.getElementById("adminLink"),
-  passkeyRegisterBtn: document.getElementById("passkeyRegisterBtn"),
 };
 
 const state = {
@@ -438,43 +433,10 @@ async function loadMe() {
   const res = await fetch("/api/me");
   if (!res.ok) return;
   const me = await res.json();
-  if (me.role === "admin") {
+  if (me.email === "manticorenettle@gmail.com" || me.isAdmin) {
     els.adminLink.hidden = false;
   }
-  // First passkey always available; extra ones need admin enrollment toggle.
-  const hasPasskey = (me.passkeys || []).length > 0;
-  if (
-    window.PublicKeyCredential &&
-    (!hasPasskey || me.settings?.allowPasskeyEnrollment)
-  ) {
-    els.passkeyRegisterBtn.hidden = false;
-  }
 }
-
-els.passkeyRegisterBtn?.addEventListener("click", async () => {
-  els.passkeyRegisterBtn.disabled = true;
-  try {
-    const optRes = await fetch("/auth/passkey/register/options", { method: "POST" });
-    if (!optRes.ok) {
-      throw new Error((await optRes.json().catch(() => ({}))).error || "options failed");
-    }
-    const options = await optRes.json();
-    const credential = await startRegistration({ optionsJSON: options });
-    const verifyRes = await fetch("/auth/passkey/register/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(credential),
-    });
-    if (!verifyRes.ok) {
-      throw new Error((await verifyRes.json().catch(() => ({}))).error || "verify failed");
-    }
-    alert("Passkey registered. You can use it on the sign-in page next time.");
-  } catch (err) {
-    alert(err.message || "Passkey registration failed");
-  } finally {
-    els.passkeyRegisterBtn.disabled = false;
-  }
-});
 
 els.rangeSelect.addEventListener("change", () => {
   state.range = els.rangeSelect.value;
