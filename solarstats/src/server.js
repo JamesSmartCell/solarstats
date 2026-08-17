@@ -55,9 +55,10 @@ const DB_PATH = process.env.DB_PATH || "./data/solarstats.db";
 const HISTORY_RETENTION_DAYS = Number(process.env.HISTORY_RETENTION_DAYS || 30);
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-insecure-session-secret";
 
-/** ~4 months — stay signed in + has-passkey UX marker. */
+/** ~4 months — stay signed in + login-method UX markers. */
 const LONG_COOKIE_MS = 120 * 24 * 60 * 60 * 1000;
 const HAS_PASSKEY_COOKIE = "solarstats_pk";
+const HAS_MS_COOKIE = "solarstats_ms";
 
 const db = openDatabase(DB_PATH);
 const app = express();
@@ -118,21 +119,37 @@ function parseCookies(req) {
   return out;
 }
 
-function hasPasskeyCookie(req) {
-  return parseCookies(req)[HAS_PASSKEY_COOKIE] === "1";
-}
-
-/** First-party only: HttpOnly + SameSite=Lax (+ Secure on HTTPS). Other sites cannot read it. */
-function setHasPasskeyCookie(res) {
+function appendCookie(res, name, value, { maxAgeSec } = {}) {
   const parts = [
-    `${HAS_PASSKEY_COOKIE}=1`,
+    `${name}=${value}`,
     "Path=/",
-    `Max-Age=${Math.floor(LONG_COOKIE_MS / 1000)}`,
+    `Max-Age=${maxAgeSec ?? Math.floor(LONG_COOKIE_MS / 1000)}`,
     "HttpOnly",
     "SameSite=Lax",
   ];
   if (cookieSecure()) parts.push("Secure");
   res.append("Set-Cookie", parts.join("; "));
+}
+
+function hasPasskeyCookie(req) {
+  return parseCookies(req)[HAS_PASSKEY_COOKIE] === "1";
+}
+
+function hasMsCookie(req) {
+  return parseCookies(req)[HAS_MS_COOKIE] === "1";
+}
+
+/** First-party only: HttpOnly + SameSite=Lax (+ Secure on HTTPS). Other sites cannot read it. */
+function setHasPasskeyCookie(res) {
+  appendCookie(res, HAS_PASSKEY_COOKIE, "1");
+}
+
+function setHasMsCookie(res) {
+  appendCookie(res, HAS_MS_COOKIE, "1");
+}
+
+function clearHasMsCookie(res) {
+  appendCookie(res, HAS_MS_COOKIE, "0", { maxAgeSec: 0 });
 }
 
 function ensureHasPasskeyCookie(req, res, user) {
@@ -211,8 +228,11 @@ app.get("/login", (req, res) => {
   if (user?.status === "pending") return res.redirect("/pending");
 
   const hasPk = hasPasskeyCookie(req);
+  const hasMs = hasMsCookie(req);
   const template = fs.readFileSync(path.join(publicDir, "login.html"), "utf8");
-  const html = template.replaceAll("{{HAS_PASSKEY}}", hasPk ? "1" : "0");
+  const html = template
+    .replaceAll("{{HAS_PASSKEY}}", hasPk ? "1" : "0")
+    .replaceAll("{{HAS_MS}}", hasMs ? "1" : "0");
   res.type("html").send(html);
 });
 
@@ -246,6 +266,7 @@ async function finishOidcLogin(provider, req, res) {
     }
 
     setSessionUser(req, user);
+    if (provider === "microsoft") setHasMsCookie(res);
     if (user.status === "pending") return res.redirect("/pending");
 
     ensureHasPasskeyCookie(req, res, user);
@@ -470,6 +491,7 @@ app.post("/auth/passkey/login/verify", async (req, res) => {
     delete req.session.passkeyChallenge;
     setSessionUser(req, user);
     setHasPasskeyCookie(res);
+    clearHasMsCookie(res);
     res.json({ ok: true, email: user.email });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });

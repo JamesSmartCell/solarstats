@@ -17,6 +17,7 @@ const choices = document.getElementById("choices");
 const passkeyBtn = document.getElementById("passkeyBtn");
 
 const hasPasskey = document.body.dataset.hasPasskey === "1";
+const hasMs = document.body.dataset.hasMs === "1";
 
 if (code && ERRORS[code]) {
   errorBox.hidden = false;
@@ -26,6 +27,13 @@ if (code && ERRORS[code]) {
 function showChoices() {
   statusBox.hidden = true;
   choices.hidden = false;
+}
+
+function signInWithMicrosoft() {
+  statusBox.hidden = false;
+  statusBox.textContent = "Signing in with MS Authenticator…";
+  choices.hidden = true;
+  location.href = "/auth/microsoft";
 }
 
 async function signInWithPasskey({ silent = false } = {}) {
@@ -41,6 +49,7 @@ async function signInWithPasskey({ silent = false } = {}) {
   if (passkeyBtn) passkeyBtn.disabled = true;
   if (silent) {
     statusBox.hidden = false;
+    statusBox.textContent = "Signing in with passkey…";
     choices.hidden = true;
   }
 
@@ -72,7 +81,10 @@ async function signInWithPasskey({ silent = false } = {}) {
 
 passkeyBtn?.addEventListener("click", () => signInWithPasskey({ silent: false }));
 
-if (hasPasskey && !code) {
+if (!code && hasMs) {
+  // Last Microsoft sign-in on this browser — same as clicking Authenticator.
+  signInWithMicrosoft();
+} else if (!code && hasPasskey) {
   // Session gone, but this browser previously enrolled a passkey — prompt immediately.
   signInWithPasskey({ silent: true });
 } else {

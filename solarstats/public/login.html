@@ -13,14 +13,14 @@
     <link rel="stylesheet" href="/solarstats.css" />
     <link rel="stylesheet" href="/auth.css" />
   </head>
-  <body class="auth-body" data-has-passkey="{{HAS_PASSKEY}}">
+  <body class="auth-body" data-has-passkey="{{HAS_PASSKEY}}" data-has-ms="{{HAS_MS}}">
     <main class="auth-card">
       <h1 class="brand">Solar<span>stats</span></h1>
       <p class="sub">Private dashboard</p>
       <p class="auth-lead">Sign in with an account</p>
 
       <p class="auth-error" id="errorBox" hidden></p>
-      <p class="auth-status" id="statusBox" hidden>Signing in with passkey…</p>
+      <p class="auth-status" id="statusBox" hidden>Signing in…</p>
 
       <div id="choices" class="login-choices" hidden>
         <a class="auth-btn choice" href="/auth/microsoft">
