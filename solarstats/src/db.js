@@ -609,26 +609,39 @@ export function listTrackedEntityIds(db) {
 export function upsertDeviceStates(db, devices) {
   if (!Array.isArray(devices) || !devices.length) return;
   const now = new Date().toISOString();
-  const upd = db.prepare(
-    `UPDATE ha_devices
-     SET state = @state,
-         name = COALESCE(@name, name),
-         updated_at = @updated_at
-     WHERE entity_id = @entity_id`,
+  const defaultsById = new Map(DEFAULT_HA_DEVICES.map((d) => [d.entity_id, d]));
+  const upsert = db.prepare(
+    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at)
+     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at)
+     ON CONFLICT(entity_id) DO UPDATE SET
+       state = excluded.state,
+       name = COALESCE(excluded.name, ha_devices.name),
+       updated_at = excluded.updated_at`,
   );
   const tx = db.transaction((rows) => {
     for (const d of rows) {
       if (!d?.entity_id) continue;
+      const entityId = String(d.entity_id);
+      const seed = defaultsById.get(entityId);
+      const domain = entityId.split(".")[0] || "switch";
       const state = d.state == null ? null : String(d.state).toLowerCase();
-      upd.run({
-        entity_id: d.entity_id,
+      upsert.run({
+        entity_id: entityId,
+        domain: seed?.domain || domain,
+        name: d.name || seed?.name || entityId,
+        // New discoveries stay off the board until Admin ACL is set.
+        allow_users: seed ? seed.allow_users : 0,
+        allow_admin: seed ? seed.allow_admin : 0,
         state,
-        name: d.name || null,
         updated_at: now,
       });
     }
   });
   tx(devices);
+}
+
+export function countDevices(db) {
+  return db.prepare(`SELECT COUNT(*) AS n FROM ha_devices`).get().n;
 }
 
 export function listDevicesForViewer(db, { isAdmin }) {
@@ -668,6 +681,8 @@ export function listAllDevices(db) {
       on: r.state === "on",
       allowUsers: r.allow_users === 1,
       allowAdmin: r.allow_admin === 1,
+      exposure:
+        r.allow_users === 1 ? "user" : r.allow_admin === 1 ? "admin" : "off",
       updatedAt: r.updated_at,
     }));
 }
@@ -675,18 +690,16 @@ export function listAllDevices(db) {
 export function setDeviceAcl(db, entityId, { allowUsers, allowAdmin }) {
   const row = db.prepare(`SELECT entity_id FROM ha_devices WHERE entity_id = ?`).get(entityId);
   if (!row) return null;
-  if (allowUsers != null) {
-    db.prepare(`UPDATE ha_devices SET allow_users = ? WHERE entity_id = ?`).run(
-      allowUsers ? 1 : 0,
-      entityId,
-    );
-  }
-  if (allowAdmin != null) {
-    db.prepare(`UPDATE ha_devices SET allow_admin = ? WHERE entity_id = ?`).run(
-      allowAdmin ? 1 : 0,
-      entityId,
-    );
-  }
+
+  // Modes: user => both audiences; admin => admin only; neither => hidden.
+  let users = allowUsers ? 1 : 0;
+  let admin = allowAdmin ? 1 : 0;
+  if (users) admin = 1;
+
+  db.prepare(
+    `UPDATE ha_devices SET allow_users = ?, allow_admin = ? WHERE entity_id = ?`,
+  ).run(users, admin, entityId);
+
   return listAllDevices(db).find((d) => d.entityId === entityId) || null;
 }
 

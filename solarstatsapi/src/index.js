@@ -36,7 +36,7 @@ const LOAD_DAILY_ENTITIES = {
   otherInverter: "sensor.inverter_unmetered_energy_daily",
 };
 
-/** Switches/lights mirrored on solarstats (IDs also tracked server-side). */
+/** Switches/lights mirrored on solarstats (fallback if /api/states fails). */
 const DEVICE_ENTITIES = [
   "switch.smart_socket_socket_1",
   "switch.zigbeesensor_switch_2",
@@ -45,6 +45,8 @@ const DEVICE_ENTITIES = [
   "light.front_bedroom",
   "light.living_room_floor_lamp_2",
 ];
+
+const CLICKABLE_DOMAINS = new Set(["switch", "light"]);
 
 function requireEnv(name, value) {
   if (!value) {
@@ -84,16 +86,18 @@ function commandsUrl() {
   return SITE_INGEST_URL.replace(/\/api\/ingest\/?$/, "/api/agent/commands");
 }
 
+function haAuthHeaders() {
+  return {
+    Authorization: `Bearer ${HA_TOKEN}`,
+    "Content-Type": "application/json",
+  };
+}
+
 async function fetchEntity(entityId) {
   const url = `${HA_BASE_URL}/api/states/${entityId}`;
   let res;
   try {
-    res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${HA_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-    });
+    res = await fetch(url, { headers: haAuthHeaders() });
   } catch (err) {
     throw new Error(formatFetchError(`HA GET ${url}`, err));
   }
@@ -110,12 +114,7 @@ async function fetchEntityFull(entityId) {
   const url = `${HA_BASE_URL}/api/states/${entityId}`;
   let res;
   try {
-    res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${HA_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-    });
+    res = await fetch(url, { headers: haAuthHeaders() });
   } catch (err) {
     throw new Error(formatFetchError(`HA GET ${url}`, err));
   }
@@ -140,9 +139,32 @@ async function collectMap(map) {
   return Object.fromEntries(entries);
 }
 
-async function collectDevices(entityIds) {
+/** All HA switches & lights (for admin ACL + board state). */
+async function fetchAllClickableDevices() {
+  const url = `${HA_BASE_URL}/api/states`;
+  let res;
+  try {
+    res = await fetch(url, { headers: haAuthHeaders() });
+  } catch (err) {
+    throw new Error(formatFetchError(`HA GET ${url}`, err));
+  }
+  if (!res.ok) {
+    throw new Error(`HA states: HTTP ${res.status}`);
+  }
+  const states = await res.json();
+  if (!Array.isArray(states)) return [];
+  return states
+    .filter((s) => CLICKABLE_DOMAINS.has(String(s.entity_id || "").split(".")[0]))
+    .map((s) => ({
+      entity_id: s.entity_id,
+      state: s.state,
+      name: s.attributes?.friendly_name || null,
+    }));
+}
+
+async function collectDevicesFallback(entityIds) {
   const list = entityIds?.length ? entityIds : DEVICE_ENTITIES;
-  const devices = await Promise.all(
+  return Promise.all(
     list.map(async (entityId) => {
       try {
         const data = await fetchEntityFull(entityId);
@@ -157,14 +179,22 @@ async function collectDevices(entityIds) {
       }
     }),
   );
-  return devices;
 }
 
-async function collectSnapshot(trackIds) {
+async function collectDevices() {
+  try {
+    return await fetchAllClickableDevices();
+  } catch (err) {
+    console.warn(`[warn] full device list failed, fallback: ${err.message}`);
+    return collectDevicesFallback(DEVICE_ENTITIES);
+  }
+}
+
+async function collectSnapshot() {
   const [core, loadsDailyKwh, devices] = await Promise.all([
     collectMap(ENTITIES),
     collectMap(LOAD_DAILY_ENTITIES),
-    collectDevices(trackIds),
+    collectDevices(),
   ]);
 
   return {
@@ -226,18 +256,18 @@ async function completeCommand(id, ok) {
 
 async function processCommands() {
   const url = commandsUrl();
-  if (!url || DRY_RUN) return [];
+  if (!url || DRY_RUN) return;
 
   let res;
   try {
     res = await fetch(url, { headers: agentHeaders() });
   } catch (err) {
     console.warn(`[warn] commands poll: ${err.message}`);
-    return [];
+    return;
   }
   if (!res.ok) {
     console.warn(`[warn] commands HTTP ${res.status}`);
-    return [];
+    return;
   }
 
   const data = await res.json();
@@ -255,13 +285,12 @@ async function processCommands() {
       await completeCommand(cmd.id, false);
     }
   }
-  return data.track || [];
 }
 
 async function tick() {
   try {
-    const track = await processCommands();
-    const snapshot = await collectSnapshot(track);
+    await processCommands();
+    const snapshot = await collectSnapshot();
     if (DRY_RUN) {
       console.log(`[${snapshot.ts}] dry-run snapshot:`, JSON.stringify(snapshot));
       return;

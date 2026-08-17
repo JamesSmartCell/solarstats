@@ -217,6 +217,35 @@
   color: var(--amber);
 }
 
+.status-pill.on {
+  border-color: #f5d76e;
+  color: #f5d76e;
+}
+
+.status-pill.off {
+  border-color: var(--muted);
+  color: var(--muted);
+}
+
+.admin-table .entity-id {
+  font-size: 0.72rem;
+  color: var(--muted);
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-table .acl-cell {
+  text-align: center;
+  width: 4.5rem;
+}
+
+.admin-table .acl-cell input {
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+}
+
 .status-pill.approved {
   border-color: var(--accent);
   color: var(--accent);

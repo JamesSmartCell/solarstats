@@ -434,7 +434,11 @@ function renderDevices(devices) {
 
 async function loadDevices() {
   const res = await fetch("/api/devices");
-  if (!res.ok) return;
+  if (!res.ok) {
+    renderDevices([]);
+    console.warn("devices API", res.status);
+    return;
+  }
   const data = await res.json();
   renderDevices(data.devices || []);
 }

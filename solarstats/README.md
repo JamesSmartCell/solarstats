@@ -110,7 +110,7 @@ Pi `.env`: `SITE_INGEST_URL=http://127.0.0.1:8787/api/ingest` (through the tunne
 
 Dashboard buttons at the bottom show live on/off (yellow fill = on, outline = off). Toggle clicks enqueue a command on solarstats; **solarstatsapi** on the Pi claims and calls Home Assistant `switch`/`light` `toggle`, then the next ingest refreshes state.
 
-Seeded entities (edit ACL later in admin): users see most switches/lights; `switch.smart_socket_2_socket_1` is admin-only. Restart solarstats after DB wipe so seeds reappear; restart solarstatsapi so it polls device states and commands.
+Seeded entities ship with useful defaults; **Admin → Switches & lights** lists every HA `switch`/`light` the Pi discovers. Check **User** (everyone on the board) or **Admin** (admin only); leave both unchecked to hide from the board.
 
 ## Energy
 

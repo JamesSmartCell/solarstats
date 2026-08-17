@@ -58,6 +58,31 @@
           </table>
         </div>
       </section>
+
+      <section class="panel admin-panel">
+        <h2>Switches &amp; lights</h2>
+        <p class="hint">
+          <strong>User</strong> = on the board for everyone ·
+          <strong>Admin</strong> = on the board for admin only ·
+          neither = hidden from the board
+        </p>
+        <div class="table-wrap">
+          <table class="admin-table" id="devicesTable">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Entity</th>
+                <th>State</th>
+                <th>Admin</th>
+                <th>User</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint" id="devicesEmpty" hidden>No switches or lights synced yet. Restart solarstatsapi so it discovers HA entities.</p>
+        <p class="hint" id="devicesSaved" hidden>Saved</p>
+      </section>
     </div>
     <script src="/admin.js"></script>
   </body>

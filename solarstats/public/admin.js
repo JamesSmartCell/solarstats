@@ -1,13 +1,26 @@
 async function load() {
-  const res = await fetch("/api/admin/users");
-  if (res.status === 401 || res.status === 403) {
+  const [usersRes, devicesRes] = await Promise.all([
+    fetch("/api/admin/users"),
+    fetch("/api/admin/devices"),
+  ]);
+
+  if (usersRes.status === 401 || usersRes.status === 403) {
     location.href = "/login";
     return;
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
+  if (!usersRes.ok) throw new Error(`users HTTP ${usersRes.status}`);
+
+  const data = await usersRes.json();
   renderSettings(data.settings);
   renderUsers(data.users);
+
+  if (devicesRes.ok) {
+    const devicesData = await devicesRes.json();
+    renderDevices(devicesData.devices || []);
+  } else {
+    console.warn("devices HTTP", devicesRes.status);
+    renderDevices([]);
+  }
 }
 
 function renderSettings(settings) {
@@ -65,6 +78,84 @@ function renderUsers(users) {
     }
     tbody.appendChild(tr);
   }
+}
+
+function renderDevices(devices) {
+  const tbody = document.querySelector("#devicesTable tbody");
+  const empty = document.getElementById("devicesEmpty");
+  tbody.innerHTML = "";
+  empty.hidden = devices.length > 0;
+
+  for (const d of devices) {
+    const exposure = d.exposure || (d.allowUsers ? "user" : d.allowAdmin ? "admin" : "off");
+    const tr = document.createElement("tr");
+    tr.dataset.entityId = d.entityId;
+
+    const nameTd = document.createElement("td");
+    nameTd.textContent = d.name || d.entityId;
+
+    const entityTd = document.createElement("td");
+    entityTd.className = "entity-id";
+    entityTd.textContent = d.entityId;
+
+    const stateTd = document.createElement("td");
+    stateTd.innerHTML = `<span class="status-pill ${d.state === "on" ? "on" : d.state === "off" ? "off" : ""}">${escapeHtml(d.state || "—")}</span>`;
+
+    const adminTd = document.createElement("td");
+    adminTd.className = "acl-cell";
+    const adminCb = document.createElement("input");
+    adminCb.type = "checkbox";
+    adminCb.title = "Admin only on the board";
+    adminCb.checked = exposure === "admin";
+    adminCb.addEventListener("change", () => {
+      if (adminCb.checked) {
+        userCb.checked = false;
+        setDeviceExposure(d.entityId, "admin");
+      } else if (!userCb.checked) {
+        setDeviceExposure(d.entityId, "off");
+      }
+    });
+    adminTd.appendChild(adminCb);
+
+    const userTd = document.createElement("td");
+    userTd.className = "acl-cell";
+    const userCb = document.createElement("input");
+    userCb.type = "checkbox";
+    userCb.title = "Everyone on the board (admin + users)";
+    userCb.checked = exposure === "user";
+    userCb.addEventListener("change", () => {
+      if (userCb.checked) {
+        adminCb.checked = false;
+        setDeviceExposure(d.entityId, "user");
+      } else if (!adminCb.checked) {
+        setDeviceExposure(d.entityId, "off");
+      }
+    });
+    userTd.appendChild(userCb);
+
+    tr.append(nameTd, entityTd, stateTd, adminTd, userTd);
+    tbody.appendChild(tr);
+  }
+}
+
+async function setDeviceExposure(entityId, exposure) {
+  const allowUsers = exposure === "user";
+  const allowAdmin = exposure === "user" || exposure === "admin";
+  const res = await fetch(`/api/admin/devices/${encodeURIComponent(entityId)}/acl`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ allowUsers, allowAdmin }),
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "ACL update failed");
+    load().catch(console.error);
+    return;
+  }
+  const note = document.getElementById("devicesSaved");
+  note.hidden = false;
+  setTimeout(() => {
+    note.hidden = true;
+  }, 1200);
 }
 
 function actionBtn(label, onClick) {

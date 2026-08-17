@@ -39,6 +39,7 @@ import {
   completeDeviceCommand,
   optimisticallySetDeviceState,
   listTrackedEntityIds,
+  countDevices,
 } from "./db.js";
 import {
   authenticationOptions,
@@ -702,4 +703,5 @@ server.listen(PORT, () => {
       ? `Admin email: ${getAdminEmail()}`
       : "Admin email: NOT set (ADMIN_EMAIL in .env)",
   );
+  console.log(`HA devices in DB: ${countDevices(db)}`);
 });
