@@ -1,0 +1,133 @@
+menu "HALite C6 radio"
+
+    config ZBGW_WIFI_SSID
+        string "WiFi SSID"
+        default "YOUR_WIFI_SSID"
+
+    config ZBGW_WIFI_PASSWORD
+        string "WiFi password"
+        default "YOUR_WIFI_PASSWORD"
+
+    config ZBGW_MQTT_HOST
+        string "MQTT broker hostname or IP (ESPHome ingest)"
+        default ""
+        help
+            LAN broker for ESPHome devices. Empty disables the MQTT client.
+            Zigbee still reports to P4 over UART IPC.
+
+    config ZBGW_MQTT_PORT
+        int "MQTT broker port"
+        range 1 65535
+        default 1883
+
+    config ZBGW_MQTT_USERNAME
+        string "MQTT username"
+        default ""
+
+    config ZBGW_MQTT_PASSWORD
+        string "MQTT password"
+        default ""
+
+    config ZBGW_MQTT_TOPIC_PREFIX
+        string "Legacy topic prefix (unused for HA discovery)"
+        default "halite-c6"
+
+    config ZBGW_PRIMARY_CHANNEL
+        int "Zigbee primary channel"
+        range 11 26
+        default 15
+
+    config ZBGW_SECONDARY_CHANNEL_MASK
+        hex "Zigbee secondary channel mask"
+        default 0x07FFF800
+
+    config ZBGW_PERMIT_JOIN_SECONDS
+        int "Permit-join window (seconds)"
+        range 1 254
+        default 180
+
+    config ZBGW_LED_GPIO
+        int "Status LED GPIO"
+        default 15
+
+    config ZBGW_BOOT_GPIO
+        int "BOOT / permit-join button GPIO"
+        default 9
+
+    config ZBGW_MAX_CHILDREN
+        int "Max Zigbee children"
+        range 1 32
+        default 16
+
+    config ZBGW_ZIGBEE_ONLY_DIAG
+        bool "Zigbee-only diagnostic (unused in HALite app_main)"
+        default n
+
+    config ZBGW_PAIR_BEFORE_WIFI
+        bool "Open permit-join before WiFi on boot"
+        default n
+
+    config ZBGW_PAIR_BEFORE_WIFI_SECONDS
+        int "Pre-WiFi pairing window (seconds)"
+        depends on ZBGW_PAIR_BEFORE_WIFI
+        range 30 254
+        default 180
+
+    config ZBGW_DEV_PAIR_TEST
+        bool "Run pair+toggle soak test before WiFi"
+        default n
+
+    config HALITE_IPC_UART_NUM
+        int "IPC UART number"
+        range 0 2
+        default 1
+        help
+            UART0 is usually USB console. Use UART1 for P4 IPC.
+
+    config HALITE_IPC_TX_GPIO
+        int "IPC UART TX GPIO (C6 -> P4)"
+        default 4
+
+    config HALITE_IPC_RX_GPIO
+        int "IPC UART RX GPIO (P4 -> C6)"
+        default 5
+
+    config HALITE_IPC_BAUD
+        int "IPC UART baud"
+        default 921600
+
+    config HALITE_ESPHOME_1_ENTITY_ID
+        string "ESPHome entity 1 id"
+        default ""
+        help
+            Example: switch.bench_lamp
+
+    config HALITE_ESPHOME_1_NODE
+        string "ESPHome entity 1 node name"
+        default ""
+
+    config HALITE_ESPHOME_1_STATE_TOPIC
+        string "ESPHome entity 1 state topic"
+        default ""
+
+    config HALITE_ESPHOME_1_CMD_TOPIC
+        string "ESPHome entity 1 command topic"
+        default ""
+
+    config HALITE_ESPHOME_2_ENTITY_ID
+        string "ESPHome entity 2 id"
+        default ""
+
+    config HALITE_ESPHOME_2_NODE
+        string "ESPHome entity 2 node name"
+        default ""
+
+    config HALITE_ESPHOME_2_STATE_TOPIC
+        string "ESPHome entity 2 state topic"
+        default ""
+
+    config HALITE_ESPHOME_2_CMD_TOPIC
+        string "ESPHome entity 2 command topic"
+        default ""
+
+endmenu

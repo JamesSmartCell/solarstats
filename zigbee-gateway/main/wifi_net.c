@@ -4,9 +4,11 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/task.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
 
@@ -17,6 +19,30 @@ static int s_retry_count;
 static bool s_connected;
 static bool s_paused;
 static bool s_started;
+
+/* esp_wifi_set_max_tx_power unit is 0.25 dBm (8=2 dBm … 84=20 dBm). */
+#define WIFI_TX_LOW_QDBM  16 /* ~4 dBm — next to the AP */
+#define WIFI_TX_HIGH_QDBM 84 /* ~20 dBm — weaker link */
+#define WIFI_RSSI_LOW_TX  (-55)
+
+static void apply_tx_power_from_rssi(void)
+{
+    wifi_ap_record_t ap = {0};
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        ESP_LOGW(TAG, "No AP info yet - leaving TX at high power");
+        return;
+    }
+
+    int8_t qdbm = (ap.rssi >= WIFI_RSSI_LOW_TX) ? WIFI_TX_LOW_QDBM : WIFI_TX_HIGH_QDBM;
+    const char *mode = (qdbm == WIFI_TX_LOW_QDBM) ? "low" : "high";
+    float dbm = (float)qdbm * 0.25f;
+    esp_err_t err = esp_wifi_set_max_tx_power(qdbm);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "set_max_tx_power failed: %s (RSSI %d)", esp_err_to_name(err), (int)ap.rssi);
+        return;
+    }
+    ESP_LOGI(TAG, "WiFi RSSI %d dBm -> %s TX ~%.0f dBm", (int)ap.rssi, mode, dbm);
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -31,19 +57,21 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             /* Intentional stop for Zigbee pairing — do not reconnect. */
             return;
         }
-        if (s_retry_count < 20) {
-            esp_wifi_connect();
-            s_retry_count++;
-            ESP_LOGW(TAG, "Retry WiFi connect (%d)", s_retry_count);
-        } else {
-            xEventGroupSetBits(s_wifi_events, WIFI_NET_FAIL_BIT);
+        s_retry_count++;
+        if (s_retry_count > 7) {
+            ESP_LOGE(TAG, "WiFi failed %d times - restarting", s_retry_count);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            esp_restart();
         }
+        ESP_LOGW(TAG, "Retry WiFi connect (%d/7)", s_retry_count);
+        esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_count = 0;
         s_connected = true;
         xEventGroupSetBits(s_wifi_events, WIFI_NET_CONNECTED_BIT);
+        apply_tx_power_from_rssi();
     }
 }
 
@@ -71,13 +99,8 @@ esp_err_t wifi_net_start(void)
     /* Prefer modem sleep so IEEE 802.15.4 can share the RF path */
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MAX_MODEM));
     ESP_ERROR_CHECK(esp_wifi_start());
-    /* Cap TX power — board sits next to the AP; unit 0.25 dBm (8≈2 dBm … 84≈20 dBm). */
-    esp_err_t pwr_err = esp_wifi_set_max_tx_power(16); /* ~4 dBm */
-    if (pwr_err != ESP_OK) {
-        ESP_LOGW(TAG, "set_max_tx_power failed: %s", esp_err_to_name(pwr_err));
-    } else {
-        ESP_LOGI(TAG, "WiFi max TX power capped (~4 dBm) — gateway next to router");
-    }
+    /* Associate at high power, then drop to low if RSSI is strong (see GOT_IP). */
+    (void)esp_wifi_set_max_tx_power(WIFI_TX_HIGH_QDBM);
     s_started = true;
 
     ESP_LOGI(TAG, "Connecting to SSID:%s", CONFIG_ZBGW_WIFI_SSID);
@@ -126,6 +149,12 @@ esp_err_t wifi_net_resume(void)
     esp_err_t err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "esp_wifi_start failed: %s", esp_err_to_name(err));
+        s_retry_count++;
+        if (s_retry_count > 7) {
+            ESP_LOGE(TAG, "WiFi resume failed %d times - restarting", s_retry_count);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            esp_restart();
+        }
     }
     return err;
 }

@@ -97,6 +97,8 @@ export function openDatabase(dbPath) {
   `);
 
   ensureColumn(db, "samples", "loads_daily_kwh", "TEXT");
+  ensureColumn(db, "ha_devices", "device_class", "TEXT");
+  ensureColumn(db, "ha_devices", "unit", "TEXT");
 
   if (getMeta(db, "allow_new_accounts") == null) {
     setMeta(db, "allow_new_accounts", "1");
@@ -611,11 +613,13 @@ export function upsertDeviceStates(db, devices) {
   const now = new Date().toISOString();
   const defaultsById = new Map(DEFAULT_HA_DEVICES.map((d) => [d.entity_id, d]));
   const upsert = db.prepare(
-    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at)
-     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at)
+    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit)
+     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at, @device_class, @unit)
      ON CONFLICT(entity_id) DO UPDATE SET
        state = excluded.state,
        name = COALESCE(excluded.name, ha_devices.name),
+       device_class = COALESCE(excluded.device_class, ha_devices.device_class),
+       unit = COALESCE(excluded.unit, ha_devices.unit),
        updated_at = excluded.updated_at`,
   );
   const tx = db.transaction((rows) => {
@@ -624,7 +628,7 @@ export function upsertDeviceStates(db, devices) {
       const entityId = String(d.entity_id);
       const seed = defaultsById.get(entityId);
       const domain = entityId.split(".")[0] || "switch";
-      const state = d.state == null ? null : String(d.state).toLowerCase();
+      const state = d.state == null ? null : String(d.state);
       upsert.run({
         entity_id: entityId,
         domain: seed?.domain || domain,
@@ -634,6 +638,8 @@ export function upsertDeviceStates(db, devices) {
         allow_admin: seed ? seed.allow_admin : 0,
         state,
         updated_at: now,
+        device_class: d.device_class || null,
+        unit: d.unit || null,
       });
     }
   });
@@ -644,46 +650,46 @@ export function countDevices(db) {
   return db.prepare(`SELECT COUNT(*) AS n FROM ha_devices`).get().n;
 }
 
+function mapDeviceRow(r) {
+  const state = r.state == null ? null : String(r.state);
+  return {
+    entityId: r.entity_id,
+    domain: r.domain,
+    name: r.name,
+    state,
+    on: String(state || "").toLowerCase() === "on",
+    deviceClass: r.device_class || null,
+    unit: r.unit || null,
+    allowUsers: r.allow_users === 1,
+    allowAdmin: r.allow_admin === 1,
+    updatedAt: r.updated_at,
+  };
+}
+
 export function listDevicesForViewer(db, { isAdmin }) {
   const rows = db
     .prepare(
-      `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at
+      `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit
        FROM ha_devices
        ORDER BY domain ASC, name ASC`,
     )
     .all();
   return rows
     .filter((r) => r.allow_users === 1 || (isAdmin && r.allow_admin === 1))
-    .map((r) => ({
-      entityId: r.entity_id,
-      domain: r.domain,
-      name: r.name,
-      state: r.state,
-      on: r.state === "on",
-      allowUsers: r.allow_users === 1,
-      allowAdmin: r.allow_admin === 1,
-      updatedAt: r.updated_at,
-    }));
+    .map((r) => mapDeviceRow(r));
 }
 
 export function listAllDevices(db) {
   return db
     .prepare(
-      `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at
+      `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit
        FROM ha_devices ORDER BY domain ASC, name ASC`,
     )
     .all()
     .map((r) => ({
-      entityId: r.entity_id,
-      domain: r.domain,
-      name: r.name,
-      state: r.state,
-      on: r.state === "on",
-      allowUsers: r.allow_users === 1,
-      allowAdmin: r.allow_admin === 1,
+      ...mapDeviceRow(r),
       exposure:
         r.allow_users === 1 ? "user" : r.allow_admin === 1 ? "admin" : "off",
-      updatedAt: r.updated_at,
     }));
 }
 
@@ -764,7 +770,7 @@ export function optimisticallySetDeviceState(db, entityId, state) {
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE ha_devices SET state = ?, updated_at = ? WHERE entity_id = ?`,
-  ).run(String(state).toLowerCase(), now, entityId);
+  ).run(String(state), now, entityId);
 }
 
 export { LOAD_KEYS, DEFAULT_HA_DEVICES };

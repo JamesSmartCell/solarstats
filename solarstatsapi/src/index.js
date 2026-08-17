@@ -36,7 +36,7 @@ const LOAD_DAILY_ENTITIES = {
   otherInverter: "sensor.inverter_unmetered_energy_daily",
 };
 
-/** Switches/lights mirrored on solarstats (fallback if /api/states fails). */
+/** Switches/lights/sensors mirrored on solarstats (fallback if /api/states fails). */
 const DEVICE_ENTITIES = [
   "switch.smart_socket_socket_1",
   "switch.zigbeesensor_switch_2",
@@ -44,9 +44,22 @@ const DEVICE_ENTITIES = [
   "light.office_office",
   "light.front_bedroom",
   "light.living_room_floor_lamp_2",
+  "binary_sensor.ds01_contact",
 ];
 
 const CLICKABLE_DOMAINS = new Set(["switch", "light"]);
+const BOARD_DOMAINS = new Set(["switch", "light", "sensor", "binary_sensor"]);
+
+function mapHaEntity(s, entityId = s.entity_id) {
+  const attrs = s.attributes || {};
+  return {
+    entity_id: entityId,
+    state: s.state,
+    name: attrs.friendly_name || null,
+    device_class: attrs.device_class || null,
+    unit: attrs.unit_of_measurement || null,
+  };
+}
 
 function requireEnv(name, value) {
   if (!value) {
@@ -139,8 +152,8 @@ async function collectMap(map) {
   return Object.fromEntries(entries);
 }
 
-/** All HA switches & lights (for admin ACL + board state). */
-async function fetchAllClickableDevices() {
+/** All HA switches, lights, sensors, and binary sensors (for admin ACL + board). */
+async function fetchAllBoardDevices() {
   const url = `${HA_BASE_URL}/api/states`;
   let res;
   try {
@@ -154,12 +167,8 @@ async function fetchAllClickableDevices() {
   const states = await res.json();
   if (!Array.isArray(states)) return [];
   return states
-    .filter((s) => CLICKABLE_DOMAINS.has(String(s.entity_id || "").split(".")[0]))
-    .map((s) => ({
-      entity_id: s.entity_id,
-      state: s.state,
-      name: s.attributes?.friendly_name || null,
-    }));
+    .filter((s) => BOARD_DOMAINS.has(String(s.entity_id || "").split(".")[0]))
+    .map((s) => mapHaEntity(s));
 }
 
 async function collectDevicesFallback(entityIds) {
@@ -168,14 +177,16 @@ async function collectDevicesFallback(entityIds) {
     list.map(async (entityId) => {
       try {
         const data = await fetchEntityFull(entityId);
-        return {
-          entity_id: entityId,
-          state: data.state,
-          name: data.attributes?.friendly_name || null,
-        };
+        return mapHaEntity(data, entityId);
       } catch (err) {
         console.warn(`[warn] ${err.message}`);
-        return { entity_id: entityId, state: "unavailable", name: null };
+        return {
+          entity_id: entityId,
+          state: "unavailable",
+          name: null,
+          device_class: null,
+          unit: null,
+        };
       }
     }),
   );
@@ -183,7 +194,7 @@ async function collectDevicesFallback(entityIds) {
 
 async function collectDevices() {
   try {
-    return await fetchAllClickableDevices();
+    return await fetchAllBoardDevices();
   } catch (err) {
     console.warn(`[warn] full device list failed, fallback: ${err.message}`);
     return collectDevicesFallback(DEVICE_ENTITIES);
@@ -276,6 +287,7 @@ async function processCommands() {
     try {
       const domain = String(cmd.entityId || "").split(".")[0];
       if (!domain) throw new Error("bad entity");
+      if (!CLICKABLE_DOMAINS.has(domain)) throw new Error("not toggleable");
       const service = cmd.action === "toggle" ? "toggle" : cmd.action;
       await callHaService(domain, service, cmd.entityId);
       await completeCommand(cmd.id, true);

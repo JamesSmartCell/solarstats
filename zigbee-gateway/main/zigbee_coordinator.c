@@ -19,6 +19,7 @@
 #include "mqtt_bridge.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#include "wifi_net.h"
 
 static const char *TAG = "zb_coord";
 
@@ -66,6 +67,9 @@ typedef struct {
     uint32_t meter_mult;
     uint32_t meter_div;
     double last_energy_kwh; /* monotonic guard — ignore spurious drops */
+    uint64_t last_energy_raw;
+    float last_watts;
+    char last_power_source[24];
     bool has_last_energy;
     bool has_electrical;
     bool switch_known; /* true once we have seen On/Off state */
@@ -103,7 +107,7 @@ static power_scale_t *power_scale_get_ieee(uint64_t ieee, uint16_t short_addr, b
     empty->ac_power_mult = 1;
     empty->ac_power_div = 1;
     empty->ac_voltage_mult = 1;
-    empty->ac_voltage_div = 10; /* common: raw/10 = volts */
+    empty->ac_voltage_div = 1; /* Tuya plugs report whole volts (242 = 242 V) */
     empty->ac_current_mult = 1;
     empty->ac_current_div = 1000; /* common: raw/1000 = amps */
     empty->meter_mult = 1;
@@ -124,9 +128,47 @@ static void publish_power_watts(zbgw_device_t *dev, power_scale_t *scale, float 
     }
     /* One decimal so sub-watt standby is not rounded to 0. */
     snprintf(buf, sizeof(buf), "%.1f", watts);
-    ESP_LOGI(TAG, "Power ieee=%016llx via %s -> %s W", (unsigned long long)dev->ieee, source, buf);
+    if (scale) {
+        scale->last_watts = watts;
+        strncpy(scale->last_power_source, source, sizeof(scale->last_power_source) - 1);
+        scale->last_power_source[sizeof(scale->last_power_source) - 1] = '\0';
+    }
     ha_discovery_publish_sensor_state(dev, "power", buf);
     device_registry_add_capability(dev, ZBGW_CAP_POWER);
+}
+
+static float scale_rms_volts(power_scale_t *scale)
+{
+    uint16_t raw = scale->last_rms_voltage;
+    uint16_t div = scale->ac_voltage_div ? scale->ac_voltage_div : 1;
+    float volts = (float)raw * (float)scale->ac_voltage_mult / (float)div;
+    /* Default /10 (or a bad divisor) turns 242 V mains into 24.2 V. */
+    if (volts < 90.0f && raw >= 180 && raw <= 280) {
+        volts = (float)raw;
+        scale->ac_voltage_div = 1;
+    }
+    return volts;
+}
+
+static void log_power_energy(zbgw_device_t *dev, power_scale_t *scale, bool from_energy)
+{
+    if (!dev || !scale) {
+        return;
+    }
+    if ((dev->capabilities & ZBGW_CAP_ENERGY) && !from_energy) {
+        return;
+    }
+    if (scale->last_power_source[0] && scale->has_last_energy) {
+        ESP_LOGI(TAG, "Power ieee=%016llx via %s -> %.1f W, Energy short=0x%04x raw %llu -> %.3f kWh",
+                 (unsigned long long)dev->ieee, scale->last_power_source, scale->last_watts, dev->short_addr,
+                 (unsigned long long)scale->last_energy_raw, scale->last_energy_kwh);
+    } else if (scale->last_power_source[0]) {
+        ESP_LOGI(TAG, "Power ieee=%016llx via %s -> %.1f W", (unsigned long long)dev->ieee, scale->last_power_source,
+                 scale->last_watts);
+    } else if (from_energy && scale->has_last_energy) {
+        ESP_LOGI(TAG, "Energy short=0x%04x raw %llu -> %.3f kWh", dev->short_addr,
+                 (unsigned long long)scale->last_energy_raw, scale->last_energy_kwh);
+    }
 }
 
 static power_scale_t *power_scale_for_dev(zbgw_device_t *dev, bool create)
@@ -687,6 +729,14 @@ static void ias_publish_status(zbgw_device_t *dev, uint16_t status)
              (int)tamper, (int)batt_low, (int)test);
     ha_discovery_publish_binary_state(dev, suffix, alarm);
 
+    if (dev->capabilities & ZBGW_CAP_CONTACT) {
+        device_registry_add_capability(dev, ZBGW_CAP_BATTERY_LOW);
+        device_registry_clear_capabilities(dev, ZBGW_CAP_TAMPER | ZBGW_CAP_SMOKE_TEST | ZBGW_CAP_BATTERY);
+        ha_discovery_publish_binary_state(dev, "battery_low", batt_low);
+        ensure_discovery(dev);
+        return;
+    }
+
     device_registry_add_capability(dev, ZBGW_CAP_TAMPER | ZBGW_CAP_BATTERY_LOW | ZBGW_CAP_SMOKE_TEST);
     ha_discovery_publish_binary_state(dev, "tamper", tamper);
     ha_discovery_publish_binary_state(dev, "battery_low", batt_low);
@@ -788,7 +838,6 @@ static void read_electrical_attrs(uint16_t short_addr, uint8_t endpoint)
         .payload.attr_number = sizeof(attr_field) / sizeof(attr_field[0]),
         .payload.attr_field = attr_field,
     };
-    ESP_LOGI(TAG, "Reading electrical measurement short=0x%04x ep=%u", short_addr, endpoint);
     ezb_zcl_read_attr_cmd_req(&read_attr_cmd);
 }
 
@@ -812,7 +861,6 @@ static void read_metering_attrs(uint16_t short_addr, uint8_t endpoint)
         .payload.attr_number = sizeof(attr_field) / sizeof(attr_field[0]),
         .payload.attr_field = attr_field,
     };
-    ESP_LOGI(TAG, "Reading metering short=0x%04x ep=%u", short_addr, endpoint);
     ezb_zcl_read_attr_cmd_req(&read_attr_cmd);
 }
 
@@ -846,6 +894,9 @@ static void apply_cluster_on_endpoint(uint16_t short_addr, uint8_t ep, uint16_t 
         return;
     }
     device_registry_add_capability(dev, capability_for_kind(kind));
+    if ((dev->capabilities & ZBGW_CAP_CONTACT) && kind == MATCH_POWER_CONFIG) {
+        device_registry_clear_capabilities(dev, ZBGW_CAP_BATTERY);
+    }
     if (kind == MATCH_ON_OFF) {
         device_registry_add_on_off_ep(dev, ep);
     }
@@ -1109,6 +1160,9 @@ static void power_poll_timer_cb(void *arg)
     (void)arg;
     /* One device per tick — polling all plugs at once spikes RF/current → brownout on USB. */
     size_t n = 0;
+    if (!mqtt_bridge_is_connected()) {
+        return;
+    }
     device_registry_foreach(power_poll_count, &n);
     if (!n) {
         return;
@@ -1135,6 +1189,17 @@ static void start_power_poll_timer(void)
     /* 5s tick, round-robin → ~15s per plug with 3 metering devices (same cadence, less peak). */
     esp_timer_start_periodic(s_power_poll_timer, 5 * 1000 * 1000ULL);
     ESP_LOGI(TAG, "Power/energy poll round-robin every 5s");
+}
+
+void zigbee_coordinator_on_mqtt_connected(void)
+{
+    /* Power poll waits until HA discovery finishes — it starves MQTT on this radio. */
+}
+
+void zigbee_coordinator_on_discovery_complete(void)
+{
+    ESP_LOGI(TAG, "Discovery complete - enabling power poll");
+    start_power_poll_timer();
 }
 
 static void reinterview_known_device(zbgw_device_t *dev, void *ctx)
@@ -1174,14 +1239,11 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
                 s_network_ready = true;
                 board_io_set_led(true);
                 publish_bridge_info();
-                /* Match Espressif HA_on_off_switch: always open join after reboot. */
+                /* Keep RF quiet so Wi‑Fi/MQTT can come up; pair via BOOT / permit_join. */
                 s_permit_join_pending = false;
-                ezb_bdb_open_network(CONFIG_ZBGW_PERMIT_JOIN_SECONDS);
-                mqtt_bridge_publish_permit_state(true);
-                ESP_LOGI(TAG, "Coordinator reboot - network restored CH=%d PAN=0x%04x, join open %us",
-                         ezb_nwk_get_current_channel(), ezb_nwk_get_panid(), CONFIG_ZBGW_PERMIT_JOIN_SECONDS);
-                start_power_poll_timer();
-                reinterview_known_devices();
+                mqtt_bridge_publish_permit_state(false);
+                ESP_LOGI(TAG, "Coordinator reboot - network restored CH=%d PAN=0x%04x (join closed)",
+                         ezb_nwk_get_current_channel(), ezb_nwk_get_panid());
             }
         } else {
             ESP_LOGW(TAG, "%s failed status=0x%02x", ezb_app_signal_to_string(signal_type), status);
@@ -1235,6 +1297,13 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
         board_io_blink_led(2, 80, 80);
         board_io_set_led(true);
         find_clusters_on_device(annce->short_addr);
+        if (wifi_net_is_paused()) {
+            ESP_LOGI(TAG, "Device joined - closing permit join and resuming WiFi");
+            ezb_bdb_open_network(0);
+            wifi_net_resume();
+            mqtt_bridge_resume();
+            mqtt_bridge_publish_permit_state(false);
+        }
     } break;
     case EZB_ZDO_SIGNAL_LEAVE_INDICATION: {
         const ezb_zdo_signal_leave_indication_params_t *leave = ezb_app_signal_get_params(app_signal);
@@ -1265,6 +1334,8 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
             ESP_LOGI(TAG, "Permit join open for %u s", duration);
         } else {
             ESP_LOGI(TAG, "Permit join closed");
+            wifi_net_resume();
+            mqtt_bridge_resume();
         }
     } break;
     default:
@@ -1303,7 +1374,8 @@ static void handle_basic_read(ezb_zcl_cmd_read_attr_rsp_message_t *message)
     }
 }
 
-static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16_t attr_id, const void *value)
+static void publish_from_report(uint16_t short_addr, uint8_t src_ep, uint16_t cluster_id, uint16_t attr_id,
+                                const void *value)
 {
     zbgw_device_t *dev = device_registry_find_short(short_addr);
     if (!dev || !value) {
@@ -1366,20 +1438,21 @@ static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16
     } else if (cluster_id == EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT) {
         power_scale_t *scale = power_scale_for_dev(dev, true);
         scale->has_electrical = true;
+        if (src_ep) {
+            scale->electrical_ep = src_ep;
+        }
         if (attr_id == EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_AC_POWER_MULTIPLIER_ID ||
             attr_id == EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_POWER_MULTIPLIER_ID) {
             uint16_t mult = *(const uint16_t *)value;
             if (mult) {
                 scale->ac_power_mult = mult;
             }
-            ESP_LOGI(TAG, "AC power multiplier short=0x%04x -> %u", short_addr, scale->ac_power_mult);
         } else if (attr_id == EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_AC_POWER_DIVISOR_ID ||
                    attr_id == EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_POWER_DIVISOR_ID) {
             uint16_t div = *(const uint16_t *)value;
             if (div) {
                 scale->ac_power_div = div;
             }
-            ESP_LOGI(TAG, "AC power divisor short=0x%04x -> %u", short_addr, scale->ac_power_div);
         } else if (attr_id == EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_AC_VOLTAGE_MULTIPLIER_ID) {
             uint16_t mult = *(const uint16_t *)value;
             if (mult) {
@@ -1404,9 +1477,7 @@ static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16
             uint16_t raw = *(const uint16_t *)value;
             if (raw != 0xffff) {
                 scale->last_rms_voltage = raw;
-                float volts = (float)raw * (float)scale->ac_voltage_mult /
-                              (float)(scale->ac_voltage_div ? scale->ac_voltage_div : 1);
-                ESP_LOGI(TAG, "RMS voltage short=0x%04x raw=%u -> %.1f V", short_addr, raw, volts);
+                float volts = scale_rms_volts(scale);
                 /* Many Tuya plugs leave ActivePower at 0; derive W from V*I. */
                 if (!scale->saw_nonzero_active_power && scale->last_rms_current) {
                     float amps = (float)scale->last_rms_current * (float)scale->ac_current_mult /
@@ -1420,11 +1491,8 @@ static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16
                 scale->last_rms_current = raw;
                 float amps = (float)raw * (float)scale->ac_current_mult /
                              (float)(scale->ac_current_div ? scale->ac_current_div : 1);
-                ESP_LOGI(TAG, "RMS current short=0x%04x raw=%u -> %.3f A", short_addr, raw, amps);
                 if (!scale->saw_nonzero_active_power && scale->last_rms_voltage) {
-                    float volts = (float)scale->last_rms_voltage * (float)scale->ac_voltage_mult /
-                                  (float)(scale->ac_voltage_div ? scale->ac_voltage_div : 1);
-                    publish_power_watts(dev, scale, volts * amps, "V*I");
+                    publish_power_watts(dev, scale, scale_rms_volts(scale) * amps, "V*I");
                 }
             }
         } else if (attr_id == EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_ACTIVE_POWER_ID) {
@@ -1437,23 +1505,20 @@ static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16
                 scale->saw_nonzero_active_power = true;
                 float watts =
                     (float)raw * (float)scale->ac_power_mult / (float)(scale->ac_power_div ? scale->ac_power_div : 1);
-                ESP_LOGI(TAG, "Active power short=0x%04x raw=%d mult=%u div=%u", short_addr, (int)raw,
-                         scale->ac_power_mult, scale->ac_power_div);
                 publish_power_watts(dev, scale, watts, "ActivePower");
-            } else {
-                ESP_LOGI(TAG, "Active power short=0x%04x raw=0 (will use V*I / InstantaneousDemand fallback)",
-                         short_addr);
             }
         }
     } else if (cluster_id == EZB_ZCL_CLUSTER_ID_METERING) {
         power_scale_t *scale = power_scale_for_dev(dev, true);
+        if (src_ep) {
+            scale->metering_ep = src_ep;
+        }
         if (attr_id == EZB_ZCL_ATTR_METERING_MULTIPLIER_ID) {
             /* ZCL type is uint24 — do not read as uint32 (extra byte corrupts scale → ~0 kWh). */
             uint32_t mult = read_u24_le(value);
             if (mult) {
                 scale->meter_mult = mult;
             }
-            ESP_LOGI(TAG, "Meter multiplier short=0x%04x -> %lu", short_addr, (unsigned long)scale->meter_mult);
         } else if (attr_id == EZB_ZCL_ATTR_METERING_DIVISOR_ID) {
             uint32_t div = read_u24_le(value);
             if (div && div < 100000000UL) {
@@ -1462,7 +1527,6 @@ static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16
                 ESP_LOGW(TAG, "Ignoring implausible meter divisor short=0x%04x raw=%lu", short_addr,
                          (unsigned long)div);
             }
-            ESP_LOGI(TAG, "Meter divisor short=0x%04x -> %lu", short_addr, (unsigned long)scale->meter_div);
         } else if (attr_id == EZB_ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED_ID) {
             uint64_t raw = read_u48_le(value);
             double kwh = (double)raw * (double)scale->meter_mult / (double)(scale->meter_div ? scale->meter_div : 1);
@@ -1473,13 +1537,12 @@ static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16
                          (unsigned long long)raw, kwh, scale->last_energy_kwh);
             } else {
                 scale->last_energy_kwh = kwh;
+                scale->last_energy_raw = raw;
                 scale->has_last_energy = true;
                 snprintf(buf, sizeof(buf), "%.3f", kwh);
-                ESP_LOGI(TAG, "Energy short=0x%04x raw=%llu mult=%lu div=%lu -> %s kWh", short_addr,
-                         (unsigned long long)raw, (unsigned long)scale->meter_mult, (unsigned long)scale->meter_div,
-                         buf);
                 ha_discovery_publish_sensor_state(dev, "energy", buf);
                 device_registry_add_capability(dev, ZBGW_CAP_ENERGY);
+                log_power_energy(dev, scale, true);
             }
         } else if (attr_id == EZB_ZCL_ATTR_METERING_INSTANTANEOUS_DEMAND_ID) {
             const uint8_t *p = (const uint8_t *)value;
@@ -1487,7 +1550,6 @@ static void publish_from_report(uint16_t short_addr, uint16_t cluster_id, uint16
             if (raw & 0x800000) {
                 raw |= ~0xFFFFFF;
             }
-            ESP_LOGI(TAG, "Instant demand short=0x%04x raw=%ld", short_addr, (long)raw);
             /* Use when ActivePower is stuck at 0 (common on Tuya). */
             if (!scale->saw_nonzero_active_power && raw != 0) {
                 publish_power_watts(dev, scale, (float)(raw < 0 ? 0 : raw), "InstantaneousDemand");
@@ -1510,8 +1572,8 @@ static void zcl_read_attr_rsp(ezb_zcl_cmd_read_attr_rsp_message_t *message)
     ezb_zcl_read_attr_rsp_variable_t *var = message->in.variables;
     while (var) {
         if (var->status == EZB_ZCL_STATUS_SUCCESS) {
-            publish_from_report(message->in.header->src_addr.u.short_addr, message->info.cluster_id, var->attr_id,
-                                var->attr_value);
+            publish_from_report(message->in.header->src_addr.u.short_addr, message->in.header->src_ep,
+                                message->info.cluster_id, var->attr_id, var->attr_value);
         }
         var = var->next;
     }
@@ -1524,8 +1586,8 @@ static void zcl_report_attr(ezb_zcl_cmd_report_attr_message_t *message)
     }
     ezb_zcl_report_attr_variable_t *var = message->in.variables;
     while (var) {
-        publish_from_report(message->in.header->src_addr.u.short_addr, message->info.cluster_id, var->attr_id,
-                            var->attr_value);
+        publish_from_report(message->in.header->src_addr.u.short_addr, message->in.header->src_ep,
+                            message->info.cluster_id, var->attr_id, var->attr_value);
         var = var->next;
     }
 }
@@ -1675,16 +1737,28 @@ esp_err_t zigbee_coordinator_permit_join(bool enable)
         ESP_LOGW(TAG, "Zigbee network not ready yet - permit join %s queued", enable ? "ON" : "OFF");
         return ESP_ERR_INVALID_STATE;
     }
+    if (enable) {
+        mqtt_bridge_publish_permit_state(true);
+        mqtt_bridge_suspend();
+        wifi_net_pause_for_zigbee();
+    }
+
     esp_zigbee_lock_acquire(portMAX_DELAY);
     if (enable) {
         ezb_bdb_open_network(CONFIG_ZBGW_PERMIT_JOIN_SECONDS);
         ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
         board_io_blink_led(3, 60, 60);
         board_io_set_led(true);
+        ESP_LOGI(TAG, "PAIR NOW: put the device in pairing mode next to the FireBeetle");
     } else {
         ezb_bdb_open_network(0);
     }
     esp_zigbee_lock_release();
+
+    if (!enable) {
+        wifi_net_resume();
+        mqtt_bridge_resume();
+    }
     mqtt_bridge_publish_permit_state(enable);
     return ESP_OK;
 }

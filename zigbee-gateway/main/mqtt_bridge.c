@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_discovery.h"
+#include "zigbee_coordinator.h"
 #include "lwip/inet.h"
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
@@ -108,6 +109,8 @@ static void rediscover_device_paced(zbgw_device_t *dev, void *ctx)
     if (!dev || !pace || !s_connected || pace->gen != s_discovery_gen) {
         return;
     }
+    ESP_LOGI(TAG, "Discovery ieee=%016llx caps=0x%lx", (unsigned long long)dev->ieee,
+             (unsigned long)dev->capabilities);
     (void)ha_discovery_publish_device(dev);
     dev->discovery_published = true;
     vTaskDelay(pdMS_TO_TICKS(120));
@@ -133,6 +136,7 @@ static void discovery_task(void *arg)
 
         if (s_connected && gen == s_discovery_gen) {
             ESP_LOGI(TAG, "HA discovery publish complete");
+            zigbee_coordinator_on_discovery_complete();
         }
     } while (s_discovery_pending && s_connected);
 
@@ -261,6 +265,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         mqtt_bridge_publish_status("online");
         mqtt_bridge_publish_permit_state(false);
         schedule_discovery();
+        zigbee_coordinator_on_mqtt_connected();
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "MQTT disconnected");

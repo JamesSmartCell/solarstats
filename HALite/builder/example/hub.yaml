@@ -1,0 +1,29 @@
+# Example HALite hub config (illustrative)
+
+# secrets.yaml would hold wifi_*, mqtt_*, halite_token
+
+halite_hub:
+  name: home-halite
+  board: p4_m3_combo
+  wifi:
+    ssid: !secret wifi_ssid
+    password: !secret wifi_password
+  mqtt:
+    broker: 192.168.1.10
+    username: !secret mqtt_user
+    password: !secret mqtt_password
+  zigbee:
+    channel: 15
+  ipc:
+    uart:
+      baud: 921600
+  cloud:
+    enabled: false
+  api:
+    token: !secret halite_token
+  esphome_entities:
+    - entity_id: switch.bench_lamp
+      name: Bench lamp
+      node_name: bench-lamp
+      mqtt_state_topic: bench-lamp/switch/bench_lamp/state
+      mqtt_command_topic: bench-lamp/switch/bench_lamp/command

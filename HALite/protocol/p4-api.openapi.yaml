@@ -1,0 +1,255 @@
+openapi: 3.0.3
+info:
+  title: HALite P4 Hub API (Part 1)
+  version: 0.1.0
+  description: |
+    Part 1 REST + WebSocket surface for direct control and reporting.
+    Auth: optional shared bearer token (LAN). Passkeys are out of scope for Part 1.
+servers:
+  - url: http://{hub_host}
+    variables:
+      hub_host:
+        default: 192.168.1.50
+paths:
+  /api/health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  ipc_c6: { type: boolean, description: Last PING to C6 succeeded }
+                  wifi:
+                    type: boolean
+                    description: C6 Wi-Fi STA up (from NET_STATUS)
+                  mqtt:
+                    type: boolean
+                    description: C6 MQTT broker client connected (ESPHome path)
+                  cloud:
+                    type: boolean
+                    description: C6 cloud expose link up (if configured)
+
+  /api/entities:
+    get:
+      summary: List entities
+      parameters:
+        - in: query
+          name: transport
+          schema:
+            type: string
+            enum: [zigbee, esphome]
+        - in: query
+          name: domain
+          schema:
+            type: string
+            enum: [switch, binary_sensor, sensor, light]
+      responses:
+        "200":
+          description: Entity list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entities]
+                properties:
+                  entities:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Entity"
+
+  /api/entities/{entity_id}:
+    get:
+      summary: Get one entity + state
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entity"
+        "404":
+          description: Not found
+
+  /api/entities/{entity_id}/command:
+    post:
+      summary: Send command (switch on/off/toggle)
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Command"
+      responses:
+        "200":
+          description: Accepted (may complete async via Zigbee IPC)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  entity:
+                    $ref: "#/components/schemas/Entity"
+        "400":
+          description: Bad command
+        "404":
+          description: Unknown entity
+        "409":
+          description: Offline / IPC failure
+
+  /api/zigbee/permit_join:
+    get:
+      summary: Permit-join state
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+    post:
+      summary: Enable or disable Zigbee permit join
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                seconds:
+                  type: integer
+                  minimum: 0
+                  maximum: 254
+                  description: 0 = firmware default window
+      responses:
+        "200":
+          description: Forwarded to C6
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  enabled: { type: boolean }
+
+  /api/devices:
+    get:
+      summary: List physical devices (Zigbee + ESPHome nodes)
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Device"
+
+  /ws:
+    get:
+      summary: WebSocket live updates
+      description: |
+        Browser opens `ws://hub/ws`. Server sends JSON text frames.
+        Client may send ping `{"type":"ping"}`.
+      responses:
+        "101":
+          description: Switching Protocols
+
+components:
+  parameters:
+    EntityId:
+      name: entity_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: URL-encoded entity id (e.g. switch.office_plug)
+
+  schemas:
+    Entity:
+      type: object
+      required: [entity_id, domain, name, transport, device_id, state]
+      properties:
+        entity_id: { type: string }
+        domain:
+          type: string
+          enum: [switch, binary_sensor, sensor, light]
+        name: { type: string }
+        transport:
+          type: string
+          enum: [zigbee, esphome]
+        device_id: { type: string }
+        capabilities: { type: integer }
+        state:
+          description: on/off string or numeric sensor value as string
+          oneOf:
+            - type: string
+            - type: number
+        unit:
+          type: string
+          nullable: true
+        online: { type: boolean }
+        last_seen:
+          type: integer
+          format: int64
+          description: Unix epoch milliseconds
+
+    Device:
+      type: object
+      properties:
+        device_id: { type: string }
+        name: { type: string }
+        transport:
+          type: string
+          enum: [zigbee, esphome]
+        manufacturer: { type: string }
+        model: { type: string }
+        online: { type: boolean }
+        entity_ids:
+          type: array
+          items: { type: string }
+
+    Command:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [turn_on, turn_off, toggle]
+        value:
+          nullable: true
+          description: Reserved for Part 2 / lights
+
+  examples:
+    WsHello:
+      summary: Hello
+      value:
+        type: hello
+        entities: []
+    WsState:
+      summary: State update
+      value:
+        type: state
+        entity_id: switch.office_plug
+        state: "on"
+        last_seen: 1720000000000
+    WsDeviceJoined:
+      summary: Zigbee device joined
+      value:
+        type: device_joined
+        device_id: zb_00124b0012345678
+

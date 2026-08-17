@@ -78,9 +78,10 @@ static void zigbee_only_diag(void)
     (void)zigbee_coordinator_permit_join(true);
     vTaskDelay(pdMS_TO_TICKS(1500));
     ESP_LOGE(TAG, "************************************************");
-    ESP_LOGE(TAG, "*** PAIR NOW — put NEW switch in pairing mode ***");
-    ESP_LOGE(TAG, "*** Keep it blinking next to the FireBeetle   ***");
-    ESP_LOGE(TAG, "*** Waiting indefinitely for Device announce  ***");
+    ESP_LOGE(TAG, "*** PAIR NOW — put ZBSA-DS in pairing mode   ***");
+    ESP_LOGE(TAG, "*** Hold reset ~5s until the LED flashes     ***");
+    ESP_LOGE(TAG, "*** Keep it next to the FireBeetle           ***");
+    ESP_LOGE(TAG, "*** Waiting indefinitely for Device announce ***");
     ESP_LOGE(TAG, "************************************************");
 
     uint32_t seconds = 0;

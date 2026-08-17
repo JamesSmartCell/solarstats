@@ -1,3 +1,5 @@
+import { formatHaState, isSensorDomain, stateTone } from "./ha-display.js";
+
 const RANGE_LABELS = {
   "1h": "1 hour",
   "6h": "6 hours",
@@ -36,6 +38,8 @@ const els = {
   socHint: document.getElementById("socHint"),
   adminLink: document.getElementById("adminLink"),
   deviceGrid: document.getElementById("deviceGrid"),
+  sensorSection: document.getElementById("sensorSection"),
+  sensorList: document.getElementById("sensorList"),
 };
 
 const state = {
@@ -404,11 +408,46 @@ function setLive(live) {
 }
 
 function renderDevices(devices) {
-  if (!els.deviceGrid) return;
   state.devices = Array.isArray(devices) ? devices : [];
+  const sensors = state.devices.filter((d) => isSensorDomain(d.domain));
+  const clickable = state.devices.filter((d) => !isSensorDomain(d.domain));
+  renderSensors(sensors);
+  renderClickableDevices(clickable);
+}
+
+function renderSensors(sensors) {
+  if (!els.sensorSection || !els.sensorList) return;
+  els.sensorList.replaceChildren();
+  if (!sensors.length) {
+    els.sensorSection.hidden = true;
+    return;
+  }
+  els.sensorSection.hidden = false;
+  for (const d of sensors) {
+    const row = document.createElement("div");
+    row.className = "sensor-row";
+    row.dataset.entityId = d.entityId;
+
+    const name = document.createElement("span");
+    name.className = "sensor-name";
+    name.textContent = d.name || d.entityId;
+
+    const value = document.createElement("span");
+    value.className = "sensor-state";
+    const tone = stateTone(d);
+    if (tone) value.classList.add(`is-${tone}`);
+    value.textContent = formatHaState(d);
+
+    row.append(name, value);
+    els.sensorList.appendChild(row);
+  }
+}
+
+function renderClickableDevices(devices) {
+  if (!els.deviceGrid) return;
   els.deviceGrid.replaceChildren();
 
-  if (!state.devices.length) {
+  if (!devices.length) {
     const empty = document.createElement("p");
     empty.className = "hint";
     empty.textContent = "No switches or lights available yet.";
@@ -416,14 +455,14 @@ function renderDevices(devices) {
     return;
   }
 
-  for (const d of state.devices) {
+  for (const d of devices) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "device-btn";
     btn.dataset.entityId = d.entityId;
     btn.textContent = d.name || d.entityId;
-    const on = d.on === true || d.state === "on";
-    const known = d.state === "on" || d.state === "off";
+    const on = d.on === true || String(d.state || "").toLowerCase() === "on";
+    const known = ["on", "off"].includes(String(d.state || "").toLowerCase());
     btn.classList.add(known ? (on ? "is-on" : "is-off") : "is-unknown");
     btn.setAttribute("aria-pressed", on ? "true" : "false");
     if (state.toggling.has(d.entityId)) btn.disabled = true;

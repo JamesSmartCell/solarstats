@@ -1,3 +1,5 @@
+import { formatHaState, isSensorDomain, stateTone } from "./ha-display.js";
+
 async function load() {
   const [usersRes, devicesRes] = await Promise.all([
     fetch("/api/admin/users"),
@@ -16,10 +18,10 @@ async function load() {
 
   if (devicesRes.ok) {
     const devicesData = await devicesRes.json();
-    renderDevices(devicesData.devices || []);
+    renderDeviceGroups(devicesData.devices || []);
   } else {
     console.warn("devices HTTP", devicesRes.status);
-    renderDevices([]);
+    renderDeviceGroups([]);
   }
 }
 
@@ -80,9 +82,23 @@ function renderUsers(users) {
   }
 }
 
-function renderDevices(devices) {
-  const tbody = document.querySelector("#devicesTable tbody");
-  const empty = document.getElementById("devicesEmpty");
+function renderDeviceGroups(devices) {
+  const list = Array.isArray(devices) ? devices : [];
+  renderDeviceTable(
+    list.filter((d) => isSensorDomain(d.domain)),
+    "sensorsTable",
+    "sensorsEmpty",
+  );
+  renderDeviceTable(
+    list.filter((d) => !isSensorDomain(d.domain)),
+    "devicesTable",
+    "devicesEmpty",
+  );
+}
+
+function renderDeviceTable(devices, tableId, emptyId) {
+  const tbody = document.querySelector(`#${tableId} tbody`);
+  const empty = document.getElementById(emptyId);
   tbody.innerHTML = "";
   empty.hidden = devices.length > 0;
 
@@ -98,8 +114,9 @@ function renderDevices(devices) {
     entityTd.className = "entity-id";
     entityTd.textContent = d.entityId;
 
+    const tone = stateTone(d);
     const stateTd = document.createElement("td");
-    stateTd.innerHTML = `<span class="status-pill ${d.state === "on" ? "on" : d.state === "off" ? "off" : ""}">${escapeHtml(d.state || "—")}</span>`;
+    stateTd.innerHTML = `<span class="status-pill ${tone}">${escapeHtml(formatHaState(d))}</span>`;
 
     const adminTd = document.createElement("td");
     adminTd.className = "acl-cell";
@@ -151,11 +168,14 @@ async function setDeviceExposure(entityId, exposure) {
     load().catch(console.error);
     return;
   }
-  const note = document.getElementById("devicesSaved");
-  note.hidden = false;
-  setTimeout(() => {
-    note.hidden = true;
-  }, 1200);
+  for (const id of ["devicesSaved", "sensorsSaved"]) {
+    const note = document.getElementById(id);
+    if (!note) continue;
+    note.hidden = false;
+    setTimeout(() => {
+      note.hidden = true;
+    }, 1200);
+  }
 }
 
 function actionBtn(label, onClick) {

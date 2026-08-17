@@ -263,6 +263,48 @@ body {
   gap: 0.65rem;
 }
 
+.sensor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.sensor-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg1);
+}
+
+.sensor-name {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.sensor-state {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sensor-state.is-on {
+  color: #f5d76e;
+}
+
+.sensor-state.is-off {
+  color: var(--muted);
+}
+
 .device-btn {
   appearance: none;
   cursor: pointer;

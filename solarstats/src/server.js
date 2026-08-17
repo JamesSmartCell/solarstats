@@ -578,6 +578,11 @@ app.post("/api/devices/:entityId/toggle", requireApproved, (req, res) => {
   const device = getDevice(db, entityId);
   if (!device) return res.status(404).json({ error: "unknown_device" });
 
+  const domain = String(device.domain || entityId.split(".")[0] || "");
+  if (domain !== "switch" && domain !== "light") {
+    return res.status(400).json({ error: "not_toggleable" });
+  }
+
   const admin = isAdminEmail(req.user.email);
   const allowed =
     device.allow_users === 1 || (admin && device.allow_admin === 1);
@@ -590,7 +595,7 @@ app.post("/api/devices/:entityId/toggle", requireApproved, (req, res) => {
   });
 
   // Optimistic flip for snappier UI; next poll corrects if HA disagrees.
-  const next = device.state === "on" ? "off" : "on";
+  const next = String(device.state || "").toLowerCase() === "on" ? "off" : "on";
   optimisticallySetDeviceState(db, entityId, next);
   const devices = listDevicesForViewer(db, { isAdmin: admin });
   broadcastDevices();

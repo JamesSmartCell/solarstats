@@ -1,0 +1,27 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "zigbee_coordinator.c"
+        "device_registry.c"
+        "wifi_net.c"
+        "board_io.c"
+        "mqtt_bridge.c"
+        "ha_discovery.c"
+        "halite_crc.c"
+        "ipc_codec.c"
+        "ipc_host.c"
+    INCLUDE_DIRS
+        "."
+        "../../../protocol/include"
+    PRIV_REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        mqtt
+        driver
+        esp_timer
+        esp_driver_gpio
+        mdns
+        lwip
+)

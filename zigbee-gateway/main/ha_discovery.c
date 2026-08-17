@@ -40,7 +40,6 @@ static esp_err_t publish_config(const char *component, const char *object_id, cJ
     }
 
     esp_err_t err = mqtt_bridge_publish(topic, payload, 0, true);
-    ESP_LOGI(TAG, "Discovery %s", topic);
     cJSON_free(payload);
     return err;
 }
@@ -167,6 +166,17 @@ esp_err_t ha_discovery_publish_device(const zbgw_device_t *dev)
     }
     if (dev->capabilities & ZBGW_CAP_CONTACT) {
         err |= publish_binary(dev, "contact", "Contact", "door");
+        /* Door sensors: only Contact + Battery low. Drop leftover retained entities. */
+        char ieee[20];
+        char object_id[64];
+        device_registry_ieee_to_str(dev->ieee, ieee, sizeof(ieee));
+        snprintf(object_id, sizeof(object_id), "zbgw_%s_tamper", ieee);
+        err |= unpublish_config("binary_sensor", object_id);
+        snprintf(object_id, sizeof(object_id), "zbgw_%s_test", ieee);
+        err |= unpublish_config("binary_sensor", object_id);
+        snprintf(object_id, sizeof(object_id), "zbgw_%s_battery", ieee);
+        err |= unpublish_config("sensor", object_id);
+        err |= ha_discovery_publish_binary_state(dev, "battery_low", false);
     }
     if (dev->capabilities & ZBGW_CAP_OCCUPANCY) {
         err |= publish_binary(dev, "occupancy", "Occupancy", "occupancy");
@@ -279,7 +289,7 @@ esp_err_t ha_discovery_publish_sensor_state(const zbgw_device_t *dev, const char
     device_registry_ieee_to_str(dev->ieee, ieee, sizeof(ieee));
     char topic[96];
     snprintf(topic, sizeof(topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee, suffix);
-    return mqtt_bridge_publish(topic, value, 0, true);
+    return mqtt_bridge_publish(topic, value, 1, true);
 }
 
 esp_err_t ha_discovery_publish_binary_state(const zbgw_device_t *dev, const char *suffix, bool on)

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halite.local/schemas/entity-model.json",
+  "title": "HALite entity registry export / builder manifest fragment",
+  "type": "object",
+  "required": ["version", "entities"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "entities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entity" }
+    }
+  },
+  "$defs": {
+    "transport": { "type": "string", "enum": ["zigbee", "esphome"] },
+    "domain": { "type": "string", "enum": ["switch", "binary_sensor", "sensor", "light"] },
+    "action": { "type": "string", "enum": ["turn_on", "turn_off", "toggle", "set"] },
+    "entity": {
+      "type": "object",
+      "required": ["entity_id", "domain", "name", "transport", "device_id"],
+      "properties": {
+        "entity_id": {
+          "type": "string",
+          "pattern": "^(switch|binary_sensor|sensor|light)\\.[a-z0-9_]+$"
+        },
+        "domain": { "$ref": "#/$defs/domain" },
+        "name": { "type": "string", "minLength": 1 },
+        "transport": { "$ref": "#/$defs/transport" },
+        "device_id": { "type": "string", "minLength": 1 },
+        "capabilities": { "type": "integer", "minimum": 0 },
+        "zigbee": {
+          "type": "object",
+          "properties": {
+            "ieee": { "type": "string", "pattern": "^[0-9a-fA-F]{16}$" },
+            "endpoint": { "type": "integer", "minimum": 1, "maximum": 254 }
+          }
+        },
+        "esphome": {
+          "type": "object",
+          "properties": {
+            "node_name": { "type": "string" },
+            "mqtt_state_topic": { "type": "string" },
+            "mqtt_command_topic": { "type": "string" }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "command": {
+      "type": "object",
+      "required": ["entity_id", "action"],
+      "properties": {
+        "entity_id": { "type": "string" },
+        "action": { "$ref": "#/$defs/action" },
+        "value": { "type": ["number", "string", "boolean", "null"] }
+      }
+    }
+  }
+}
