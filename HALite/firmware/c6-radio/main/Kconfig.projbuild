@@ -77,20 +77,29 @@ menu "HALite C6 radio"
         bool "Run pair+toggle soak test before WiFi"
         default n
 
+    config HALITE_ESP_HOSTED
+        bool "ESP-Hosted slave (SDIO Wi-Fi for the P4)"
+        default n
+        help
+            C6 becomes the hosted radio. The P4 associates and gets the LAN
+            IP. Do not also run C6 wifi_net (one STA). Flash both images
+            together. P4 will reset this chip on GPIO54 at hosted start.
+
     config HALITE_IPC_UART_NUM
         int "IPC UART number"
         range 0 2
-        default 1
+        default 0
         help
-            UART0 is usually USB console. Use UART1 for P4 IPC.
+            UART0 is C6_TXD/C6_RXD on the P4-M3 header (GPIO16/17).
+            Console is USB Serial/JTAG so this port can be the P4 link.
 
     config HALITE_IPC_TX_GPIO
         int "IPC UART TX GPIO (C6 -> P4)"
-        default 4
+        default 16
 
     config HALITE_IPC_RX_GPIO
         int "IPC UART RX GPIO (P4 -> C6)"
-        default 5
+        default 17
 
     config HALITE_IPC_BAUD
         int "IPC UART baud"

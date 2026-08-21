@@ -195,9 +195,37 @@ function seedDevices(db) {
   }
 }
 
+/** Pack voltage below this means the inverter is not talking (not a real 48/24/12V reading). */
+const MIN_LIVE_BATTERY_V = 8;
+
+function isUnavailableValue(value) {
+  if (value == null) return true;
+  const s = String(value).trim().toLowerCase();
+  return !s || s === "unavailable" || s === "unknown" || s === "none" || s === "null";
+}
+
 function toNumber(value) {
+  if (isUnavailableValue(value)) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function holdNumber(incoming, previous) {
+  return incoming != null ? incoming : previous ?? null;
+}
+
+function isLiveInverter({ batteryVoltage, batterySoc }) {
+  if (batteryVoltage != null && batteryVoltage >= MIN_LIVE_BATTERY_V) return true;
+  if (batterySoc != null && batterySoc > 1) return true;
+  return false;
+}
+
+function isDeadSampleRow(row) {
+  if (!row) return true;
+  return !isLiveInverter({
+    batteryVoltage: row.battery_voltage,
+    batterySoc: row.battery_soc,
+  });
 }
 
 export function getMeta(db, key) {
@@ -394,6 +422,37 @@ function parseLoadsDaily(payload) {
   return any ? out : null;
 }
 
+/** Keep last-good daily kWh when a meter drops to unavailable/0 mid-day. Accept a true midnight reset. */
+function mergeLoadsDaily(incoming, previous) {
+  if (!incoming && !previous) return null;
+  if (!incoming) return previous;
+  if (!previous) return incoming;
+
+  let prevPositive = 0;
+  let incomingNearZero = 0;
+  for (const key of LOAD_KEYS) {
+    if ((previous[key] ?? 0) > 0.05) prevPositive += 1;
+    if ((incoming[key] ?? 0) < 0.02) incomingNearZero += 1;
+  }
+  const midnightReset = prevPositive >= 2 && incomingNearZero >= prevPositive;
+
+  const out = { ...previous };
+  for (const key of LOAD_KEYS) {
+    const next = incoming[key];
+    const prev = previous[key];
+    if (next == null) {
+      out[key] = prev ?? null;
+      continue;
+    }
+    if (!midnightReset && next === 0 && (prev ?? 0) > 0.05) {
+      out[key] = prev;
+      continue;
+    }
+    out[key] = next;
+  }
+  return out;
+}
+
 function loadsToJson(loads) {
   return loads ? JSON.stringify(loads) : null;
 }
@@ -409,41 +468,8 @@ function loadsFromRow(row) {
 
 export function insertSample(db, payload) {
   const ts = Date.parse(payload.ts || "") || Date.now();
-  const outputPower = Math.max(0, toNumber(payload.outputPower) ?? 0);
-  const loads = parseLoadsDaily(payload);
-
-  const prev = db
-    .prepare(
-      `SELECT ts, output_power, energy_kwh_cumulative
-       FROM samples
-       ORDER BY ts DESC
-       LIMIT 1`,
-    )
-    .get();
-
-  let cumulative = prev ? prev.energy_kwh_cumulative : 0;
-  let total = getEnergyTotal(db);
-
-  if (prev) {
-    const dtMs = ts - prev.ts;
-    if (dtMs > 0 && dtMs <= MAX_GAP_MS) {
-      const avgPower = (Math.max(0, prev.output_power ?? 0) + outputPower) / 2;
-      const deltaKwh = (avgPower * (dtMs / 3600000)) / 1000;
-      cumulative += deltaKwh;
-      total += deltaKwh;
-    }
-  }
-
-  setMeta(db, "energy_kwh_total", total);
-  if (loads) {
-    setMeta(db, "loads_daily_kwh_latest", JSON.stringify(loads));
-  }
-  if (Array.isArray(payload.devices)) {
-    upsertDeviceStates(db, payload.devices);
-  }
-
-  const sample = {
-    ts,
+  const incomingOutput = toNumber(payload.outputPower);
+  const incoming = {
     grid_voltage: toNumber(payload.gridVoltage),
     pv_voltage: toNumber(payload.pvVoltage),
     battery_voltage: toNumber(payload.batteryVoltage),
@@ -453,10 +479,97 @@ export function insertSample(db, payload) {
     ac_frequency: toNumber(payload.acFrequency),
     pv_power: toNumber(payload.pvPower),
     battery_discharge_current: toNumber(payload.batteryDischargeCurrent),
-    output_power: outputPower,
-    energy_kwh_cumulative: cumulative,
+    output_power: incomingOutput != null ? Math.max(0, incomingOutput) : null,
+  };
+
+  const prev = db
+    .prepare(`SELECT * FROM samples ORDER BY ts DESC LIMIT 1`)
+    .get();
+
+  if (Array.isArray(payload.devices)) {
+    upsertDeviceStates(db, payload.devices);
+  }
+
+  const prevLoads = getLatestLoadsDaily(db) || loadsFromRow(prev);
+  const loads = mergeLoadsDaily(parseLoadsDaily(payload), prevLoads);
+  if (loads) {
+    setMeta(db, "loads_daily_kwh_latest", JSON.stringify(loads));
+  }
+
+  const live = isLiveInverter({
+    batteryVoltage: incoming.battery_voltage,
+    batterySoc: incoming.battery_soc,
+  });
+
+  const lastGood =
+    prev && !isDeadSampleRow(prev)
+      ? prev
+      : db
+          .prepare(
+            `SELECT * FROM samples
+             WHERE IFNULL(battery_voltage, 0) >= ?
+             ORDER BY ts DESC LIMIT 1`,
+          )
+          .get(MIN_LIVE_BATTERY_V);
+
+  if (!live) {
+    // Keep last good tiles/history. Devices + daily-load merge already applied.
+    if (lastGood) {
+      return {
+        skipped: true,
+        reason: "unavailable",
+        ...sampleToApi(lastGood),
+        energyKwhTotal: getEnergyTotal(db),
+        loadsDailyKwh: loads || loadsFromRow(lastGood),
+      };
+    }
+    return {
+      skipped: true,
+      reason: "unavailable",
+      energyKwhTotal: getEnergyTotal(db),
+      loadsDailyKwh: loads,
+    };
+  }
+
+  const sample = {
+    ts,
+    grid_voltage: holdNumber(incoming.grid_voltage, lastGood?.grid_voltage),
+    pv_voltage: holdNumber(incoming.pv_voltage, lastGood?.pv_voltage),
+    battery_voltage: holdNumber(incoming.battery_voltage, lastGood?.battery_voltage),
+    battery_soc: holdNumber(incoming.battery_soc, lastGood?.battery_soc),
+    battery_charge_current: holdNumber(
+      incoming.battery_charge_current,
+      lastGood?.battery_charge_current,
+    ),
+    load_percent: holdNumber(incoming.load_percent, lastGood?.load_percent),
+    ac_frequency: holdNumber(incoming.ac_frequency, lastGood?.ac_frequency),
+    pv_power: holdNumber(incoming.pv_power, lastGood?.pv_power),
+    battery_discharge_current: holdNumber(
+      incoming.battery_discharge_current,
+      lastGood?.battery_discharge_current,
+    ),
+    output_power: holdNumber(incoming.output_power, lastGood?.output_power),
+    energy_kwh_cumulative: lastGood ? lastGood.energy_kwh_cumulative : 0,
     loads_daily_kwh: loadsToJson(loads),
   };
+
+  let cumulative = sample.energy_kwh_cumulative;
+  let total = getEnergyTotal(db);
+
+  // Only integrate when this tick measured output and the previous row was live.
+  if (prev && !isDeadSampleRow(prev) && incoming.output_power != null) {
+    const dtMs = ts - prev.ts;
+    if (dtMs > 0 && dtMs <= MAX_GAP_MS) {
+      const avgPower =
+        (Math.max(0, prev.output_power ?? 0) + incoming.output_power) / 2;
+      const deltaKwh = (avgPower * (dtMs / 3600000)) / 1000;
+      cumulative += deltaKwh;
+      total += deltaKwh;
+    }
+  }
+
+  sample.energy_kwh_cumulative = cumulative;
+  setMeta(db, "energy_kwh_total", total);
 
   db.prepare(
     `INSERT OR REPLACE INTO samples (
@@ -472,9 +585,49 @@ export function insertSample(db, payload) {
     )`,
   ).run(sample);
 
+  const pruned = pruneDeadSamples(db);
+  if (pruned) {
+    console.warn(`ingest: removed ${pruned} zeroed/unavailable sample(s)`);
+  }
+
   return {
+    skipped: false,
     ...sampleToApi(sample),
     energyKwhTotal: total,
+  };
+}
+
+/** Drop snapshots written while HA/MQTT was unavailable (zeros / no pack voltage). */
+export function pruneDeadSamples(db, { sinceMs } = {}) {
+  const since = sinceMs ?? Date.now() - 14 * 86400000;
+  const info = db
+    .prepare(
+      `DELETE FROM samples
+       WHERE ts >= ?
+         AND IFNULL(battery_voltage, 0) < ?
+         AND IFNULL(battery_soc, 0) <= 1
+         AND IFNULL(output_power, 0) = 0
+         AND IFNULL(pv_power, 0) = 0`,
+    )
+    .run(since, MIN_LIVE_BATTERY_V);
+
+  if (info.changes) {
+    const last = db.prepare(`SELECT * FROM samples ORDER BY ts DESC LIMIT 1`).get();
+    if (last?.loads_daily_kwh) {
+      setMeta(db, "loads_daily_kwh_latest", last.loads_daily_kwh);
+    }
+  }
+  return info.changes;
+}
+
+export function repairDeadSamples(db) {
+  const deleted = pruneDeadSamples(db, { sinceMs: 0 });
+  const latest = db.prepare(`SELECT * FROM samples ORDER BY ts DESC LIMIT 1`).get();
+  return {
+    deleted,
+    latest: latest ? sampleToApi(latest) : null,
+    energyKwhTotal: getEnergyTotal(db),
+    loadsDailyKwh: getLatestLoadsDaily(db),
   };
 }
 
@@ -773,4 +926,4 @@ export function optimisticallySetDeviceState(db, entityId, state) {
   ).run(String(state), now, entityId);
 }
 
-export { LOAD_KEYS, DEFAULT_HA_DEVICES };
+export { LOAD_KEYS, DEFAULT_HA_DEVICES, MIN_LIVE_BATTERY_V };

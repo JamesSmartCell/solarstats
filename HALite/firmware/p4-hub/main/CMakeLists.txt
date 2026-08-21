@@ -1,0 +1,34 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "halite_crc.c"
+        "ipc_codec.c"
+        "ipc_link.c"
+        "registry.c"
+        "hub_cmd.c"
+        "hub_json.c"
+        "http_api.c"
+        "console_cmd.c"
+        "usb_ncm.c"
+        "hosted_wifi.c"
+    INCLUDE_DIRS
+        "."
+        "../../../protocol/include"
+    PRIV_REQUIRES
+        nvs_flash
+        driver
+        esp_timer
+        esp_http_server
+        esp_netif
+        esp_event
+        esp_eth
+        json
+        vfs
+        console
+        esp_driver_uart
+        lwip
+        esp_tinyusb
+        esp_hosted
+        esp_wifi
+        esp_wifi_remote
+)

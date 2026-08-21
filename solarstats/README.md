@@ -116,4 +116,6 @@ Seeded entities ship with useful defaults; **Admin → Switches & lights** lists
 
 On each ingest, cumulative kWh is updated with trapezoidal integration of `outputPower` over the time delta (gaps &gt; 5 minutes are skipped).
 
+Unavailable / `unknown` HA states are **not** stored as zero. The server keeps the last live inverter snapshot (pack voltage ≥ 8 V), skips energy integration for that tick, and holds daily-load kWh unless every meter resets together (midnight). Restarting `solarstats` (or `npm run repair`) deletes zeroed samples so the dashboard comes back.
+
 Daily device kWh from HA (`loadsDailyKwh`) drives the **All devices today** doughnut; those meters reset at midnight in Home Assistant.

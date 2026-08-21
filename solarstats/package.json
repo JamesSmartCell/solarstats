@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Ingest PowMr snapshots and serve /solarstats dashboard",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "repair": "node src/repair.js"
   },
   "engines": {
     "node": ">=18"

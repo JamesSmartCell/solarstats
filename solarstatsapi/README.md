@@ -78,4 +78,4 @@ Daily load entities (edit IDs in [`src/index.js`](src/index.js) if HA renames th
 | `washingMachine` | `sensor.inverter_loads_energy_daily` |
 | `otherInverter` | `sensor.inverter_unmetered_energy_daily` |
 
-Missing sensors are sent as `null` (logged as warnings) so inverter ingest still succeeds.
+Missing or `unavailable` / `unknown` sensors are sent as `null` (logged as warnings). The ingest server keeps the last live inverter reading instead of writing zeros.

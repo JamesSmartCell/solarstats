@@ -175,7 +175,7 @@ template:
         state: >-
           {% set p_id = 'sensor.smart_socket_2_power' %}
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform == 'time_pattern' %}
             {{ (prev + p / 60000) | round(6) }}
           {% else %}
@@ -185,6 +185,7 @@ template:
           last_power: &grid_last_power_office >-
             {% set p_id = 'sensor.smart_socket_2_power' %}
             {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Office PC synth energy daily"
         unique_id: energy_office_pc_synth_energy_daily
@@ -196,7 +197,7 @@ template:
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
           {% set day = now().strftime('%Y-%m-%d') %}
           {% set prev_day = this.attributes.day | default('') %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform != 'time_pattern' %}
             {{ prev if prev_day == day else 0 }}
           {% elif prev_day != day %}
@@ -207,6 +208,7 @@ template:
         attributes:
           day: "{{ now().strftime('%Y-%m-%d') }}"
           last_power: *grid_last_power_office
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Front Room PC energy from power"
         unique_id: energy_front_room_pc_energy_from_power
@@ -216,7 +218,7 @@ template:
         state: >-
           {% set p_id = 'sensor.smart_socket_power' %}
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform == 'time_pattern' %}
             {{ (prev + p / 60000) | round(6) }}
           {% else %}
@@ -226,6 +228,7 @@ template:
           last_power: &grid_last_power_front >-
             {% set p_id = 'sensor.smart_socket_power' %}
             {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Front Room PC synth energy daily"
         unique_id: energy_front_room_pc_synth_energy_daily
@@ -237,7 +240,7 @@ template:
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
           {% set day = now().strftime('%Y-%m-%d') %}
           {% set prev_day = this.attributes.day | default('') %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform != 'time_pattern' %}
             {{ prev if prev_day == day else 0 }}
           {% elif prev_day != day %}
@@ -248,6 +251,7 @@ template:
         attributes:
           day: "{{ now().strftime('%Y-%m-%d') }}"
           last_power: *grid_last_power_front
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Pi5 Server energy from power"
         unique_id: energy_pi5_server_energy_from_power
@@ -257,7 +261,7 @@ template:
         state: >-
           {% set p_id = 'sensor.ts011f_power' %}
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform == 'time_pattern' %}
             {{ (prev + p / 60000) | round(6) }}
           {% else %}
@@ -267,6 +271,7 @@ template:
           last_power: &grid_last_power_pi5 >-
             {% set p_id = 'sensor.ts011f_power' %}
             {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Pi5 Server energy daily"
         unique_id: energy_pi5_server_energy_daily
@@ -278,7 +283,7 @@ template:
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
           {% set day = now().strftime('%Y-%m-%d') %}
           {% set prev_day = this.attributes.day | default('') %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform != 'time_pattern' %}
             {{ prev if prev_day == day else 0 }}
           {% elif prev_day != day %}
@@ -289,6 +294,7 @@ template:
         attributes:
           day: "{{ now().strftime('%Y-%m-%d') }}"
           last_power: *grid_last_power_pi5
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Motorbike charger energy from power"
         unique_id: energy_motorbike_charger_energy_from_power
@@ -298,7 +304,7 @@ template:
         state: >-
           {% set p_id = 'sensor.zigbeesensor_power' %}
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform == 'time_pattern' %}
             {{ (prev + p / 60000) | round(6) }}
           {% else %}
@@ -308,6 +314,7 @@ template:
           last_power: &grid_last_power_bike >-
             {% set p_id = 'sensor.zigbeesensor_power' %}
             {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Motorbike charger energy daily"
         unique_id: energy_motorbike_charger_energy_daily
@@ -319,7 +326,7 @@ template:
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
           {% set day = now().strftime('%Y-%m-%d') %}
           {% set prev_day = this.attributes.day | default('') %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform != 'time_pattern' %}
             {{ prev if prev_day == day else 0 }}
           {% elif prev_day != day %}
@@ -330,6 +337,7 @@ template:
         attributes:
           day: "{{ now().strftime('%Y-%m-%d') }}"
           last_power: *grid_last_power_bike
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Fridge energy from power"
         unique_id: energy_fridge_energy_from_power
@@ -339,7 +347,7 @@ template:
         state: >-
           {% set p_id = 'sensor.kitchen_refrigerator_power' %}
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform == 'time_pattern' %}
             {{ (prev + p / 60000) | round(6) }}
           {% else %}
@@ -349,6 +357,7 @@ template:
           last_power: &grid_last_power_fridge >-
             {% set p_id = 'sensor.kitchen_refrigerator_power' %}
             {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
       - name: "Fridge energy daily"
         unique_id: energy_fridge_energy_daily_tmpl
@@ -360,7 +369,7 @@ template:
           {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
           {% set day = now().strftime('%Y-%m-%d') %}
           {% set prev_day = this.attributes.day | default('') %}
-          {% set prev = this.state | float(0) if this.state not in ['unknown', 'unavailable'] else 0 %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
           {% if trigger.platform != 'time_pattern' %}
             {{ prev if prev_day == day else 0 }}
           {% elif prev_day != day %}
@@ -371,6 +380,7 @@ template:
         attributes:
           day: "{{ now().strftime('%Y-%m-%d') }}"
           last_power: *grid_last_power_fridge
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
   # Snapshot end-of-day totals just before midnight wipe/reset.
   - trigger:

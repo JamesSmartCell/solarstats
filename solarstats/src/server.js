@@ -26,6 +26,7 @@ import {
   listUsers,
   openDatabase,
   pruneOldSamples,
+  repairDeadSamples,
   setAuthSettings,
   setUserStatus,
   upsertMicrosoftUser,
@@ -61,6 +62,14 @@ const HAS_PASSKEY_COOKIE = "solarstats_pk";
 const HAS_MS_COOKIE = "solarstats_ms";
 
 const db = openDatabase(DB_PATH);
+{
+  const repaired = repairDeadSamples(db);
+  if (repaired.deleted) {
+    console.warn(
+      `startup: removed ${repaired.deleted} zeroed/unavailable sample(s); latest=${repaired.latest?.ts || "none"}`,
+    );
+  }
+}
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
 
@@ -83,7 +92,7 @@ app.use(
     },
   }),
 );
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: "2mb" }));
 
 function cookieSecure() {
   return (
@@ -605,7 +614,9 @@ app.post("/api/devices/:entityId/toggle", requireApproved, (req, res) => {
 app.post("/api/ingest", authorizeIngest, (req, res) => {
   try {
     const sample = insertSample(db, req.body || {});
-    broadcast({ type: "sample", sample });
+    if (!sample.skipped) {
+      broadcast({ type: "sample", sample });
+    }
     broadcastDevices();
     res.json({ ok: true, sample });
   } catch (err) {

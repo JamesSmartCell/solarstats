@@ -10,6 +10,7 @@ idf_component_register(
         "halite_crc.c"
         "ipc_codec.c"
         "ipc_host.c"
+        "hosted_slave.c"
     INCLUDE_DIRS
         "."
         "../../../protocol/include"
@@ -24,4 +25,5 @@ idf_component_register(
         esp_driver_gpio
         mdns
         lwip
+        esp_hosted
 )

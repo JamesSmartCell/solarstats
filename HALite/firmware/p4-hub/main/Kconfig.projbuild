@@ -1,0 +1,80 @@
+menu "HALite P4 hub"
+
+    config HALITE_IPC_UART_NUM
+        int "IPC UART number"
+        range 0 2
+        default 1
+        help
+            UART used to talk to the C6. Keep USB console on a different port.
+
+    config HALITE_IPC_TX_GPIO
+        int "IPC UART TX GPIO (P4 -> C6 RX)"
+        default 4
+
+    config HALITE_IPC_RX_GPIO
+        int "IPC UART RX GPIO (C6 TX -> P4)"
+        default 5
+
+    config HALITE_IPC_BAUD
+        int "IPC UART baud"
+        default 921600
+
+    config HALITE_API_TOKEN
+        string "Optional bearer token (empty = open LAN)"
+        default ""
+
+    config HALITE_ESP_HOSTED
+        bool "ESP-Hosted: C6 radio gives the P4 a LAN IP (SDIO)"
+        default n
+        help
+            P4 drives Wi-Fi over the PCB SDIO link. httpd then binds a
+            192.168.50.x address. Requires the C6 image built with
+            HALITE_ESP_HOSTED. Pulses C6 reset on GPIO54 at start.
+            Keep UART jumpers until IPC moves to hosted custom-data.
+
+    config HALITE_WIFI_SSID
+        string "LAN SSID (hosted STA)"
+        depends on HALITE_ESP_HOSTED
+        default "YOUR_WIFI_SSID"
+
+    config HALITE_WIFI_PASSWORD
+        string "LAN password (hosted STA)"
+        depends on HALITE_ESP_HOSTED
+        default "YOUR_WIFI_PASSWORD"
+
+    config HALITE_USB_NCM
+        bool "USB-NCM gadget so the PC can poll the HTTP API"
+        default y
+        help
+            Presents the P4 USB-OTG port as Ethernet. The hub is 192.168.4.1.
+            Use the native USB-OTG connector, not the CH340 UART (COM22).
+            Turn this off once hosted LAN is up (two default routes).
+
+    config HALITE_P4_ETHERNET
+        bool "Start Ethernet + HTTP UI (P4 Function EV-style)"
+        default n
+        help
+            Enable if the P4 board has a wired Ethernet PHY. Otherwise use
+            USB NCM or the USB serial console (entities / permit / toggle).
+
+    config HALITE_ETH_PHY_ADDR
+        int "Ethernet PHY address"
+        depends on HALITE_P4_ETHERNET
+        default 1
+
+    config HALITE_ETH_MDC_GPIO
+        int "Ethernet MDC GPIO"
+        depends on HALITE_P4_ETHERNET
+        default 31
+
+    config HALITE_ETH_MDIO_GPIO
+        int "Ethernet MDIO GPIO"
+        depends on HALITE_P4_ETHERNET
+        default 52
+
+    config HALITE_ETH_RST_GPIO
+        int "Ethernet PHY reset GPIO (-1 = unused)"
+        depends on HALITE_P4_ETHERNET
+        default 51
+
+endmenu

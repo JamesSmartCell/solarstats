@@ -1,5 +1,7 @@
 #include "ipc_host.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/uart.h"
@@ -20,8 +22,29 @@ static const char *TAG = "ipc_host";
 static SemaphoreHandle_t s_tx_mu;
 static uint16_t s_seq;
 static bool s_up;
+static vprintf_like_t s_prev_vprintf;
 static uint8_t s_rx[RX_BUF_SZ];
 static size_t s_rx_len;
+
+static int ipc_log_vprintf(const char *fmt, va_list args)
+{
+    char buf[256];
+    va_list copy;
+    va_copy(copy, args);
+    int n = vsnprintf(buf, sizeof(buf), fmt, copy);
+    va_end(copy);
+    if (n > 0 && s_up && s_tx_mu) {
+        size_t w = (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1;
+        if (xSemaphoreTake(s_tx_mu, pdMS_TO_TICKS(20)) == pdTRUE) {
+            uart_write_bytes(IPC_UART_NUM, buf, w);
+            xSemaphoreGive(s_tx_mu);
+        }
+    }
+    if (s_prev_vprintf) {
+        return s_prev_vprintf(fmt, args);
+    }
+    return n;
+}
 
 static uint16_t next_seq(void)
 {
@@ -254,8 +277,9 @@ esp_err_t ipc_host_start(void)
         return ESP_ERR_NO_MEM;
     }
     s_up = true;
-    ESP_LOGI(TAG, "IPC UART%d TX=%d RX=%d baud=%d", CONFIG_HALITE_IPC_UART_NUM, CONFIG_HALITE_IPC_TX_GPIO,
-             CONFIG_HALITE_IPC_RX_GPIO, CONFIG_HALITE_IPC_BAUD);
+    s_prev_vprintf = esp_log_set_vprintf(ipc_log_vprintf);
+    ESP_LOGI(TAG, "IPC UART%d TX=%d RX=%d baud=%d (logs mirrored to P4)", CONFIG_HALITE_IPC_UART_NUM,
+             CONFIG_HALITE_IPC_TX_GPIO, CONFIG_HALITE_IPC_RX_GPIO, CONFIG_HALITE_IPC_BAUD);
     return ESP_OK;
 }
 

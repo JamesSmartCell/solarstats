@@ -5,6 +5,9 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#if CONFIG_HALITE_ESP_HOSTED
+#include "hosted_slave.h"
+#endif
 #include "ipc_host.h"
 #include "mqtt_bridge.h"
 #include "nvs_flash.h"
@@ -62,11 +65,21 @@ void app_main(void)
 
     ESP_ERROR_CHECK(device_registry_init());
     ESP_ERROR_CHECK(board_io_init(on_boot_button));
+    /* Own C6_TXD/C6_RXD before Wi-Fi spam so the P4 can echo logs. */
     ESP_ERROR_CHECK(ipc_host_start());
 
     ESP_ERROR_CHECK(zigbee_coordinator_start());
     wait_for_zigbee_network();
 
+#if CONFIG_HALITE_ESP_HOSTED
+    ESP_ERROR_CHECK(hosted_slave_start());
+#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
+    ESP_ERROR_CHECK(esp_coex_wifi_i154_enable());
+    ESP_LOGI(TAG, "WiFi + IEEE802.15.4 software coexistence enabled");
+#endif
+    /* P4 owns the STA. MQTT on C6 waits for hosted network-split. */
+    ESP_LOGW(TAG, "Hosted slave: C6 has no own STA — MQTT/ESPHome deferred");
+#else
     ESP_ERROR_CHECK(wifi_net_start());
 #if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
     ESP_ERROR_CHECK(esp_coex_wifi_i154_enable());
@@ -78,6 +91,7 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(mqtt_bridge_start());
+#endif
     (void)ipc_host_net_status(wifi_net_is_connected(), mqtt_bridge_is_connected(), wifi_net_rssi());
     xTaskCreate(net_status_task, "net_status", 3072, NULL, 3, NULL);
 

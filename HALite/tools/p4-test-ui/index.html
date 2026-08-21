@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HALite P4 test</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #0b0f12; color: #e8eef3; margin: 1.2rem; }
+    h1 { font-size: 1.35rem; margin: 0 0 .4rem; }
+    .muted { color: #8b9aab; font-size: .85rem; }
+    .bar, .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin: .8rem 0; }
+    select, button {
+      border: 2px solid #3d4a57; background: #151b21; color: #e8eef3;
+      border-radius: 8px; padding: .55rem .85rem; font: 500 .9rem system-ui;
+    }
+    button { cursor: pointer; border-color: #f5d76e; }
+    button.pj { border-color: #3ecf8e; }
+    button.on { background: #f5d76e; color: #1a1608; }
+    button.pj.on { background: #3ecf8e; color: #062114; }
+    button:disabled { opacity: .45; cursor: default; }
+    .chip { border-radius: 999px; padding: .2rem .65rem; font-size: .75rem; background: #1c242c; color: #8b9aab; }
+    .chip.ok { background: #163226; color: #7ddea8; }
+    .chip.bad { background: #3a1d1d; color: #f0a0a0; }
+    .card {
+      border: 2px solid #2a343d; border-radius: 10px; padding: .75rem .9rem; min-width: 11rem;
+      background: #12181d;
+    }
+    .card.switch.on { border-color: #f5d76e; }
+    .card .id { font-size: .72rem; color: #8b9aab; word-break: break-all; }
+    .err { color: #f0a0a0; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>HALite P4 test</h1>
+  <p class="muted">USB console on this PC. Permit-join talks to the C6 over IPC.</p>
+  <div class="bar">
+    <select id="ports"></select>
+    <button type="button" id="connect">Connect</button>
+    <button type="button" id="refresh">Refresh ports</button>
+    <span id="chips"></span>
+  </div>
+  <div class="bar">
+    <button type="button" class="pj" id="permit">Permit join</button>
+  </div>
+  <p class="err" id="err"></p>
+  <div class="row" id="grid"></div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let last = { connected: false, permit_join: false, entities: [] };
+
+    function chip(label, ok) {
+      return `<span class="chip ${ok ? "ok" : "bad"}">${label}</span>`;
+    }
+    function render(j) {
+      last = j;
+      $("err").textContent = j.error || "";
+      $("chips").innerHTML = [
+        chip("serial " + (j.connected ? (j.port || "up") : "down"), !!j.connected),
+        chip("IPC " + (j.ipc_c6 ? "up" : "down"), !!j.ipc_c6),
+        chip("Wi-Fi " + (j.wifi ? "up" : "down"), !!j.wifi),
+        chip("permit " + (j.permit_join ? "ON" : "off"), !!j.permit_join),
+      ].join(" ");
+      $("permit").className = "pj" + (j.permit_join ? " on" : "");
+      $("permit").textContent = j.permit_join ? "Permit join: ON" : "Permit join";
+      $("permit").disabled = !j.connected;
+      const g = $("grid");
+      g.innerHTML = "";
+      (j.entities || []).forEach((e) => {
+        const card = document.createElement("div");
+        card.className = "card " + e.domain + (e.on ? " on" : "");
+        const state = e.domain === "sensor"
+          ? `${e.state ?? ""} ${e.unit || ""}`.trim()
+          : (e.state || (e.on ? "on" : "off"));
+        card.innerHTML = `<div><strong>${e.name || e.entity_id}</strong></div>
+          <div class="id">${e.entity_id} · ${e.transport}</div>
+          <div>${state}${e.online === false ? " · offline" : ""}</div>`;
+        if (e.domain === "switch") {
+          const b = document.createElement("button");
+          b.textContent = e.on ? "Turn off" : "Turn on";
+          b.className = e.on ? "on" : "";
+          b.onclick = () => command(e.entity_id);
+          card.appendChild(b);
+        }
+        g.appendChild(card);
+      });
+      if (j.connected && !(j.entities || []).length) {
+        g.innerHTML = `<p class="muted">No devices yet. Open permit join and put a Zigbee device in pairing mode.</p>`;
+      }
+    }
+
+    async function loadPorts() {
+      const r = await fetch("/api/ports");
+      const j = await r.json();
+      const sel = $("ports");
+      const cur = sel.value;
+      sel.innerHTML = "";
+      (j.ports || []).forEach((p) => {
+        const o = document.createElement("option");
+        o.value = p.device;
+        o.textContent = `${p.device} — ${p.description}${p.likely_p4 ? " (P4?)" : ""}`;
+        sel.appendChild(o);
+      });
+      const prefer = (j.ports || []).find((p) => p.likely_p4) || (j.ports || []).find((p) => !p.skip_hint);
+      if (j.connected) sel.value = j.connected;
+      else if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+      else if (prefer) sel.value = prefer.device;
+      $("connect").textContent = j.connected ? "Disconnect" : "Connect";
+    }
+
+    async function status() {
+      const r = await fetch("/api/status");
+      render(await r.json());
+    }
+
+    async function connect() {
+      const ports = await (await fetch("/api/ports")).json();
+      if (ports.connected) {
+        await fetch("/api/disconnect", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      } else {
+        const port = $("ports").value;
+        const r = await fetch("/api/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ port }),
+        });
+        const j = await r.json();
+        if (!j.ok) $("err").textContent = j.error || "connect failed";
+      }
+      await loadPorts();
+      await status();
+    }
+
+    async function permit() {
+      await fetch("/api/permit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !last.permit_join }),
+      });
+      await status();
+    }
+
+    async function command(entity_id) {
+      await fetch("/api/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_id, action: "toggle" }),
+      });
+      await status();
+    }
+
+    $("connect").onclick = connect;
+    $("refresh").onclick = loadPorts;
+    $("permit").onclick = permit;
+    loadPorts().then(status);
+    setInterval(status, 2000);
+  </script>
+</body>
+</html>

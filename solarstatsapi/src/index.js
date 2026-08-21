@@ -74,7 +74,14 @@ if (!DRY_RUN) {
 }
 
 function parseState(value) {
-  const n = Number(value);
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  const lower = s.toLowerCase();
+  if (lower === "unavailable" || lower === "unknown" || lower === "none" || lower === "null") {
+    return null;
+  }
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -308,9 +315,18 @@ async function tick() {
       return;
     }
     await forwardSnapshot(snapshot);
-    console.log(
-      `[${snapshot.ts}] forwarded SoC=${snapshot.batterySoc}% PV=${snapshot.pvPower}W Out=${snapshot.outputPower}W devices=${snapshot.devices?.length ?? 0}`,
-    );
+    const live =
+      (snapshot.batteryVoltage != null && snapshot.batteryVoltage >= 8) ||
+      (snapshot.batterySoc != null && snapshot.batterySoc > 1);
+    if (!live) {
+      console.warn(
+        `[${snapshot.ts}] inverter unavailable (SoC=${snapshot.batterySoc} V=${snapshot.batteryVoltage}) — server will keep last good`,
+      );
+    } else {
+      console.log(
+        `[${snapshot.ts}] forwarded SoC=${snapshot.batterySoc}% PV=${snapshot.pvPower}W Out=${snapshot.outputPower}W devices=${snapshot.devices?.length ?? 0}`,
+      );
+    }
   } catch (err) {
     console.error(`[${new Date().toISOString()}] poll failed:`, err.message);
   }

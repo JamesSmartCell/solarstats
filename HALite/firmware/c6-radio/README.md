@@ -29,7 +29,7 @@ Typical strapping:
 
 If the adapter has DTR/RTS auto-reset, `idf.py flash` can enter download mode itself — still confirm BOOT/EN wiring.
 
-**Do not use the IPC UART (UART1 GPIO4/5) for flashing.** That link is for P4 after boot. Flash is UART0.
+On a P4-M3, IPC is **UART0** (`C6_TXD` / `C6_RXD` = GPIO16/17). Unplug the C6 programmer from those pins after flash, then jumper them to P4 GPIO5 / GPIO4. C6 logs are mirrored over that UART and show on the P4 monitor as `C6>`.
 
 ### Commands
 

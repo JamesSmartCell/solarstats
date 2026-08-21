@@ -14,7 +14,7 @@ menu "Zigbee Gateway Configuration"
 
     config ZBGW_MQTT_HOST
         string "MQTT broker hostname or IP"
-        default "192.168.50.43"
+        default "192.168.50.41"
         help
             Mosquitto / Home Assistant MQTT broker address.
             Prefer a LAN IP (e.g. 192.168.50.10) on ESP32-C6 — .local mDNS is

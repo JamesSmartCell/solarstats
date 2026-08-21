@@ -32,6 +32,9 @@
 #define HALITE_IPC_FLAG_IS_ACK     (1u << 1)
 #define HALITE_IPC_FLAG_IS_NACK    (1u << 2)
 
+/** Hosted custom-data msg_id when IPC rides SDIO instead of UART. */
+#define HALITE_IPC_HOSTED_MSG_ID  0x484Cu
+
 #define HALITE_IPC_ATTR_ON_OFF            1u
 #define HALITE_IPC_ATTR_TEMP_C_X100       2u
 #define HALITE_IPC_ATTR_HUMIDITY_X100     3u
