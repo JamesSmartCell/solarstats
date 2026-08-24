@@ -1,0 +1,27 @@
+alias: White robot
+description: >-
+  Off all week except Fri 22:00–Sat 14:00 and Sun 08:00–14:00.
+  Also applies the correct state on HA start / automation reload.
+triggers:
+  - trigger: time
+    at: "22:00:00"
+  - trigger: time
+    at: "08:00:00"
+  - trigger: time
+    at: "14:00:00"
+  - trigger: homeassistant
+    event: start
+  - trigger: event
+    event_type: automation_reloaded
+actions:
+  - variables:
+      should_be_on: >-
+        {% set wd = now().isoweekday() %}
+        {% set mins = now().hour * 60 + now().minute %}
+        {% set fri_sat = (wd == 5 and mins >= 22 * 60) or (wd == 6 and mins < 14 * 60) %}
+        {% set sunday = wd == 7 and mins >= 8 * 60 and mins < 14 * 60 %}
+        {{ fri_sat or sunday }}
+  - action: "switch.turn_{{ 'on' if should_be_on else 'off' }}"
+    target:
+      entity_id: switch.ts011f_switch_4
+mode: single

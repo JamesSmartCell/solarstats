@@ -20,7 +20,9 @@ import {
   getAuthSettings,
   getHistory,
   getLoadConfig,
+  getPieAdminRows,
   setLoadSources,
+  setPieExtra,
   getUserById,
   getUserByEmail,
   insertSample,
@@ -523,6 +525,7 @@ app.get("/api/admin/users", requireAdmin, (_req, res) => {
     users: listUsers(db),
     settings: getAuthSettings(db),
     loadConfig: getLoadConfig(db),
+    pieRows: getPieAdminRows(db),
   });
 });
 
@@ -552,7 +555,15 @@ app.post("/api/admin/settings", requireAdmin, (req, res) => {
     loadConfig = getLoadConfig(db);
     broadcast({ type: "loadConfig", loadConfig });
   }
-  res.json({ settings, loadConfig });
+  if (req.body?.pieExtra) {
+    const entityId = String(req.body.pieExtra.entityId || req.body.pieExtra.key || "").trim();
+    if (entityId) {
+      setPieExtra(db, entityId, !!req.body.pieExtra.onPie);
+      loadConfig = getLoadConfig(db);
+      broadcast({ type: "loadConfig", loadConfig });
+    }
+  }
+  res.json({ settings, loadConfig, pieRows: getPieAdminRows(db) });
 });
 
 app.get("/api/admin/devices", requireAdmin, (_req, res) => {

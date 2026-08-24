@@ -61,6 +61,44 @@ function mapHaEntity(s, entityId = s.entity_id) {
   };
 }
 
+const KNOWN_LOAD_ENTITY_IDS = new Set(Object.values(LOAD_DAILY_ENTITIES));
+
+function isEnergySensor(device) {
+  const entityId = String(device?.entity_id || "");
+  const domain = entityId.split(".")[0];
+  if (domain !== "sensor") return false;
+  const deviceClass = String(device?.device_class || "").toLowerCase();
+  if (deviceClass === "power") return false;
+  if (deviceClass === "energy") return true;
+  const unit = String(device?.unit || "").toLowerCase().replace(/\s+/g, "");
+  if (unit === "kwh" || unit === "wh" || unit === "mwh") return true;
+  return /(^|[._])energy([._]|$)/i.test(entityId);
+}
+
+function energyKwh(device) {
+  const n = parseState(device?.state);
+  if (n == null) return null;
+  const unit = String(device?.unit || "").toLowerCase().replace(/\s+/g, "");
+  if (unit === "wh") return n / 1000;
+  if (unit === "mwh") return n * 1000;
+  return n;
+}
+
+function buildLoadsDaily(devices, fallback = {}) {
+  const byId = new Map((devices || []).map((d) => [d.entity_id, d]));
+  const out = { ...fallback };
+  for (const [key, entityId] of Object.entries(LOAD_DAILY_ENTITIES)) {
+    const d = byId.get(entityId);
+    if (d) out[key] = energyKwh(d);
+  }
+  for (const d of devices || []) {
+    if (!d?.entity_id || KNOWN_LOAD_ENTITY_IDS.has(d.entity_id)) continue;
+    if (!isEnergySensor(d)) continue;
+    out[d.entity_id] = energyKwh(d);
+  }
+  return out;
+}
+
 function requireEnv(name, value) {
   if (!value) {
     console.error(`Missing required env var: ${name}`);
@@ -209,7 +247,7 @@ async function collectDevices() {
 }
 
 async function collectSnapshot() {
-  const [core, loadsDailyKwh, devices] = await Promise.all([
+  const [core, fallbackLoads, devices] = await Promise.all([
     collectMap(ENTITIES),
     collectMap(LOAD_DAILY_ENTITIES),
     collectDevices(),
@@ -218,7 +256,7 @@ async function collectSnapshot() {
   return {
     ts: new Date().toISOString(),
     ...core,
-    loadsDailyKwh,
+    loadsDailyKwh: buildLoadsDaily(devices, fallbackLoads),
     devices,
   };
 }

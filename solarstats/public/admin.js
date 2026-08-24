@@ -15,7 +15,7 @@ async function load() {
   const data = await usersRes.json();
   renderSettings(data.settings);
   renderUsers(data.users);
-  renderLoadSources(data.loadConfig || []);
+  renderPieRows(data.pieRows || data.loadConfig || []);
 
   if (devicesRes.ok) {
     const devicesData = await devicesRes.json();
@@ -62,22 +62,46 @@ function flashSaved(id) {
   }, 1500);
 }
 
-function renderLoadSources(loads) {
+function formatKwh(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${n.toFixed(3)} kWh` : "—";
+}
+
+function pieRowKey(load) {
+  return load.builtin ? load.key : load.entityId || load.key;
+}
+
+function renderPieRows(rows) {
   const tbody = document.querySelector("#loadsTable tbody");
+  const empty = document.getElementById("loadsEmpty");
   tbody.innerHTML = "";
-  for (const load of loads) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (empty) empty.hidden = list.length > 0;
+
+  for (const load of list) {
+    const key = pieRowKey(load);
+    const source = load.source === "inverter" ? "inverter" : "grid";
     const tr = document.createElement("tr");
+
     const nameTd = document.createElement("td");
     nameTd.textContent = load.label || load.key;
+
+    const entityTd = document.createElement("td");
+    entityTd.className = "entity-id";
+    entityTd.textContent = load.entityId || "—";
+
+    const kwhTd = document.createElement("td");
+    kwhTd.textContent = formatKwh(load.kwh);
 
     const invTd = document.createElement("td");
     invTd.className = "acl-cell";
     const inv = document.createElement("input");
     inv.type = "radio";
-    inv.name = `load-src-${load.key}`;
-    inv.checked = load.source === "inverter";
+    inv.name = `load-src-${key}`;
+    inv.checked = source === "inverter";
+    inv.title = "Inverter load";
     inv.addEventListener("change", () => {
-      if (inv.checked) saveLoadSource(load.key, "inverter");
+      if (inv.checked) saveLoadSource(key, "inverter");
     });
     invTd.appendChild(inv);
 
@@ -85,14 +109,26 @@ function renderLoadSources(loads) {
     gridTd.className = "acl-cell";
     const grid = document.createElement("input");
     grid.type = "radio";
-    grid.name = `load-src-${load.key}`;
-    grid.checked = load.source !== "inverter";
+    grid.name = `load-src-${key}`;
+    grid.checked = source === "grid";
+    grid.title = "Grid load";
     grid.addEventListener("change", () => {
-      if (grid.checked) saveLoadSource(load.key, "grid");
+      if (grid.checked) saveLoadSource(key, "grid");
     });
     gridTd.appendChild(grid);
 
-    tr.append(nameTd, invTd, gridTd);
+    const includeTd = document.createElement("td");
+    includeTd.className = "acl-cell";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = load.onPie !== false;
+    cb.title = "Show this energy sensor on the pie";
+    cb.addEventListener("change", () => {
+      savePieExtra(key, cb.checked);
+    });
+    includeTd.appendChild(cb);
+
+    tr.append(nameTd, entityTd, kwhTd, invTd, gridTd, includeTd);
     tbody.appendChild(tr);
   }
 }
@@ -105,6 +141,20 @@ async function saveLoadSource(key, source) {
   });
   if (!res.ok) {
     alert((await res.json().catch(() => ({}))).error || "Load source update failed");
+    load().catch(console.error);
+    return;
+  }
+  flashSaved("loadsSaved");
+}
+
+async function savePieExtra(entityId, onPie) {
+  const res = await fetch("/api/admin/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pieExtra: { entityId, onPie } }),
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Pie update failed");
     load().catch(console.error);
     return;
   }

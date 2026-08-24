@@ -18,16 +18,65 @@ export function isAdminEmail(email) {
 }
 
 export const LOAD_DEFS = [
-  { key: "officePc", label: "Office PC", color: "#42a5f5", defaultSource: "grid" },
-  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0", defaultSource: "grid" },
-  { key: "pi5", label: "Pi5 Server", color: "#7e57c2", defaultSource: "grid" },
-  { key: "motorbike", label: "Motorbike", color: "#26a69a", defaultSource: "grid" },
-  { key: "fridge", label: "Fridge", color: "#66bb6a", defaultSource: "grid" },
-  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", defaultSource: "inverter" },
-  { key: "otherInverter", label: "Other inverter", color: "#cddc39", defaultSource: "inverter" },
+  { key: "officePc", label: "Office PC", color: "#42a5f5", defaultSource: "grid", entityId: "sensor.office_pc_synth_energy_daily" },
+  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0", defaultSource: "grid", entityId: "sensor.front_room_pc_synth_energy_daily" },
+  { key: "pi5", label: "Pi5 Server", color: "#7e57c2", defaultSource: "grid", entityId: "sensor.pi5_server_energy_daily_2" },
+  { key: "motorbike", label: "Motorbike", color: "#26a69a", defaultSource: "grid", entityId: "sensor.motorbike_charger_energy_daily_2" },
+  { key: "fridge", label: "Fridge", color: "#66bb6a", defaultSource: "grid", entityId: "sensor.fridge_energy_daily_2" },
+  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", defaultSource: "inverter", entityId: "sensor.inverter_loads_energy_daily" },
+  { key: "otherInverter", label: "Other inverter", color: "#cddc39", defaultSource: "inverter", entityId: "sensor.inverter_unmetered_energy_daily" },
 ];
 
 const LOAD_KEYS = LOAD_DEFS.map((d) => d.key);
+const BUILTIN_LOAD_ENTITY_IDS = new Set(LOAD_DEFS.map((d) => d.entityId).filter(Boolean));
+
+const EXTRA_PIE_COLORS = [
+  "#ef5350",
+  "#ab47bc",
+  "#26c6da",
+  "#ffa726",
+  "#8d6e63",
+  "#ec407a",
+  "#42a5f5",
+  "#26a69a",
+  "#9ccc65",
+  "#ffca28",
+  "#7e57c2",
+  "#78909c",
+];
+
+function colorForKey(key) {
+  const s = String(key || "");
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  return EXTRA_PIE_COLORS[hash % EXTRA_PIE_COLORS.length];
+}
+
+export function isEnergySensor(device) {
+  const entityId = String(device?.entityId || device?.entity_id || "");
+  const domain = String(device?.domain || entityId.split(".")[0] || "");
+  if (domain !== "sensor") return false;
+  const deviceClass = String(device?.deviceClass || device?.device_class || "").toLowerCase();
+  if (deviceClass === "power") return false;
+  if (deviceClass === "energy") return true;
+  const unit = String(device?.unit || "").toLowerCase().replace(/\s+/g, "");
+  if (unit === "kwh" || unit === "wh" || unit === "mwh") return true;
+  return /(^|[._])energy([._]|$)/i.test(entityId);
+}
+
+/** Daily synthetic / utility-meter energy sensors suitable for the load pie. */
+export function isPieEnergyCandidate(device) {
+  const entityId = String(device?.entityId || device?.entity_id || "");
+  if (!entityId || BUILTIN_LOAD_ENTITY_IDS.has(entityId)) return false;
+  if (!isEnergySensor(device)) return false;
+  if (/(yesterday|from_power|snapshot|latched|derived|washer_energy$)/i.test(entityId)) {
+    return false;
+  }
+  if (/(solar_production|inverter_supply|grid_loads_energy|house_metered|inverter_unmetered)/i.test(entityId)) {
+    return false;
+  }
+  return /energy_daily|synth_energy|daily/i.test(entityId);
+}
 
 const DEFAULT_LOAD_SOURCES = Object.fromEntries(LOAD_DEFS.map((d) => [d.key, d.defaultSource]));
 
@@ -280,9 +329,10 @@ export function getLoadSources(db) {
     parsed = {};
   }
   const out = { ...DEFAULT_LOAD_SOURCES };
-  for (const def of LOAD_DEFS) {
-    const v = parsed[def.key];
-    if (v === "inverter" || v === "grid") out[def.key] = v;
+  if (parsed && typeof parsed === "object") {
+    for (const [key, v] of Object.entries(parsed)) {
+      if (v === "inverter" || v === "grid") out[key] = v;
+    }
   }
   return out;
 }
@@ -290,23 +340,103 @@ export function getLoadSources(db) {
 export function setLoadSources(db, patch) {
   const current = getLoadSources(db);
   if (patch && typeof patch === "object") {
-    for (const def of LOAD_DEFS) {
-      const v = patch[def.key];
-      if (v === "inverter" || v === "grid") current[def.key] = v;
+    for (const [key, v] of Object.entries(patch)) {
+      const id = String(key || "").trim();
+      if (!id) continue;
+      if (v === "inverter" || v === "grid") current[id] = v;
     }
   }
   setMeta(db, "load_sources", JSON.stringify(current));
   return current;
 }
 
-export function getLoadConfig(db) {
+export function getPieExtraIds(db) {
+  const raw = getMeta(db, "pie_extras");
+  let parsed = [];
+  try {
+    parsed = raw ? JSON.parse(raw) : [];
+  } catch {
+    parsed = [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return [...new Set(parsed.map((id) => String(id || "").trim()).filter(Boolean))];
+}
+
+export function getPieVisibility(db) {
+  const raw = getMeta(db, "pie_visibility");
+  let parsed = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    parsed = {};
+  }
+  const out = {};
+  if (parsed && typeof parsed === "object") {
+    for (const [key, v] of Object.entries(parsed)) {
+      if (key) out[key] = !!v;
+    }
+  }
+  for (const id of getPieExtraIds(db)) {
+    if (!(id in out)) out[id] = true;
+  }
+  return out;
+}
+
+function isPieVisible(visibility, key, builtin) {
+  if (key in visibility) return !!visibility[key];
+  return !!builtin;
+}
+
+export function setPieExtra(db, entityId, onPie) {
+  const id = String(entityId || "").trim();
+  if (!id) return getPieExtraIds(db);
+  const visibility = getPieVisibility(db);
+  visibility[id] = !!onPie;
+  setMeta(db, "pie_visibility", JSON.stringify(visibility));
+
+  const ids = new Set(getPieExtraIds(db));
+  if (onPie) ids.add(id);
+  else ids.delete(id);
+  const next = [...ids];
+  setMeta(db, "pie_extras", JSON.stringify(next));
+  return next;
+}
+
+export function getPieAdminRows(db) {
+  const latest = getLatestLoadsDaily(db) || {};
   const sources = getLoadSources(db);
-  return LOAD_DEFS.map((d) => ({
+  const visibility = getPieVisibility(db);
+
+  const builtin = LOAD_DEFS.map((d) => ({
     key: d.key,
     label: d.label,
     color: d.color,
-    source: sources[d.key],
+    source: sources[d.key] || d.defaultSource,
+    entityId: d.entityId,
+    builtin: true,
+    onPie: isPieVisible(visibility, d.key, true),
+    kwh: latest[d.key] ?? null,
   }));
+
+  const extras = listAllDevices(db)
+    .filter((d) => isPieEnergyCandidate(d))
+    .map((d) => ({
+      key: d.entityId,
+      label: d.name || d.entityId,
+      color: colorForKey(d.entityId),
+      source: sources[d.entityId] || "grid",
+      entityId: d.entityId,
+      builtin: false,
+      onPie: isPieVisible(visibility, d.entityId, false),
+      kwh: latest[d.entityId] ?? toNumber(d.state),
+    }))
+    .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+
+  return [...builtin, ...extras];
+}
+
+export function getLoadConfig(db) {
+  return getPieAdminRows(db).filter((row) => row.onPie);
 }
 
 function normalizeEmail(email) {
@@ -451,12 +581,23 @@ export function getEnergyTotal(db) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function loadKeysOf(...maps) {
+  const keys = new Set(LOAD_KEYS);
+  for (const map of maps) {
+    if (!map || typeof map !== "object") continue;
+    for (const key of Object.keys(map)) {
+      if (key && key !== "__proto__") keys.add(key);
+    }
+  }
+  return keys;
+}
+
 function parseLoadsDaily(payload) {
   const src = payload.loadsDailyKwh || payload.loads_daily_kwh || null;
   if (!src || typeof src !== "object") return null;
   const out = {};
   let any = false;
-  for (const key of LOAD_KEYS) {
+  for (const key of loadKeysOf(src)) {
     const n = toNumber(src[key]);
     out[key] = n;
     if (n != null) any = true;
@@ -470,16 +611,17 @@ function mergeLoadsDaily(incoming, previous) {
   if (!incoming) return previous;
   if (!previous) return incoming;
 
+  const keys = loadKeysOf(incoming, previous);
   let prevPositive = 0;
   let incomingNearZero = 0;
-  for (const key of LOAD_KEYS) {
+  for (const key of keys) {
     if ((previous[key] ?? 0) > 0.05) prevPositive += 1;
     if ((incoming[key] ?? 0) < 0.02) incomingNearZero += 1;
   }
   const midnightReset = prevPositive >= 2 && incomingNearZero >= prevPositive;
 
   const out = { ...previous };
-  for (const key of LOAD_KEYS) {
+  for (const key of keys) {
     const next = incoming[key];
     const prev = previous[key];
     if (next == null) {

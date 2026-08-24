@@ -136,6 +136,11 @@ template:
             'sensor.ts011f_power',
             'sensor.zigbeesensor_power',
             'sensor.kitchen_refrigerator_power',
+            'sensor.ts011f_power_4',
+            'sensor.ts011f_power_3',
+            'sensor.zigbeesensor_power_2',
+            'sensor.ts011f_power_2',
+            'sensor.ts011f_power_5',
           ] %}
           {% set ns = namespace(t=0) %}
           {% for id in ids %}
@@ -382,6 +387,221 @@ template:
           last_power: *grid_last_power_fridge
           last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
 
+      - name: "Living room charger energy from power"
+        unique_id: energy_living_room_charger_energy_from_power
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {% set p_id = 'sensor.ts011f_power_4' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform == 'time_pattern' %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% else %}
+            {{ prev }}
+          {% endif %}
+        attributes:
+          last_power: &grid_last_power_living >-
+            {% set p_id = 'sensor.ts011f_power_4' %}
+            {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "Living room charger energy daily"
+        unique_id: energy_living_room_charger_energy_daily
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: >-
+          {% set p_id = 'sensor.ts011f_power_4' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set day = now().strftime('%Y-%m-%d') %}
+          {% set prev_day = this.attributes.day | default('') %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform != 'time_pattern' %}
+            {{ prev if prev_day == day else 0 }}
+          {% elif prev_day != day %}
+            {{ (p / 60000) | round(6) }}
+          {% else %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% endif %}
+        attributes:
+          day: "{{ now().strftime('%Y-%m-%d') }}"
+          last_power: *grid_last_power_living
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "NBN Modem energy from power"
+        unique_id: energy_nbn_modem_energy_from_power
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {% set p_id = 'sensor.ts011f_power_3' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform == 'time_pattern' %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% else %}
+            {{ prev }}
+          {% endif %}
+        attributes:
+          last_power: &grid_last_power_nbn >-
+            {% set p_id = 'sensor.ts011f_power_3' %}
+            {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "NBN Modem energy daily"
+        unique_id: energy_nbn_modem_energy_daily
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: >-
+          {% set p_id = 'sensor.ts011f_power_3' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set day = now().strftime('%Y-%m-%d') %}
+          {% set prev_day = this.attributes.day | default('') %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform != 'time_pattern' %}
+            {{ prev if prev_day == day else 0 }}
+          {% elif prev_day != day %}
+            {{ (p / 60000) | round(6) }}
+          {% else %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% endif %}
+        attributes:
+          day: "{{ now().strftime('%Y-%m-%d') }}"
+          last_power: *grid_last_power_nbn
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "Router energy from power"
+        unique_id: energy_router_energy_from_power
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {% set p_id = 'sensor.zigbeesensor_power_2' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform == 'time_pattern' %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% else %}
+            {{ prev }}
+          {% endif %}
+        attributes:
+          last_power: &grid_last_power_router >-
+            {% set p_id = 'sensor.zigbeesensor_power_2' %}
+            {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "Router energy daily"
+        unique_id: energy_router_energy_daily
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: >-
+          {% set p_id = 'sensor.zigbeesensor_power_2' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set day = now().strftime('%Y-%m-%d') %}
+          {% set prev_day = this.attributes.day | default('') %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform != 'time_pattern' %}
+            {{ prev if prev_day == day else 0 }}
+          {% elif prev_day != day %}
+            {{ (p / 60000) | round(6) }}
+          {% else %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% endif %}
+        attributes:
+          day: "{{ now().strftime('%Y-%m-%d') }}"
+          last_power: *grid_last_power_router
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "TV energy from power"
+        unique_id: energy_tv_energy_from_power
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {% set p_id = 'sensor.ts011f_power_2' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform == 'time_pattern' %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% else %}
+            {{ prev }}
+          {% endif %}
+        attributes:
+          last_power: &grid_last_power_tv >-
+            {% set p_id = 'sensor.ts011f_power_2' %}
+            {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "TV energy daily"
+        unique_id: energy_tv_energy_daily
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: >-
+          {% set p_id = 'sensor.ts011f_power_2' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set day = now().strftime('%Y-%m-%d') %}
+          {% set prev_day = this.attributes.day | default('') %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform != 'time_pattern' %}
+            {{ prev if prev_day == day else 0 }}
+          {% elif prev_day != day %}
+            {{ (p / 60000) | round(6) }}
+          {% else %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% endif %}
+        attributes:
+          day: "{{ now().strftime('%Y-%m-%d') }}"
+          last_power: *grid_last_power_tv
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "White Robot energy from power"
+        unique_id: energy_white_robot_energy_from_power
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {% set p_id = 'sensor.ts011f_power_5' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform == 'time_pattern' %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% else %}
+            {{ prev }}
+          {% endif %}
+        attributes:
+          last_power: &grid_last_power_robot >-
+            {% set p_id = 'sensor.ts011f_power_5' %}
+            {{ states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | default(0) }}
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
+      - name: "White Robot energy daily"
+        unique_id: energy_white_robot_energy_daily
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: >-
+          {% set p_id = 'sensor.ts011f_power_5' %}
+          {% set p = states(p_id) | float(0) if has_value(p_id) else this.attributes.last_power | float(0) %}
+          {% set day = now().strftime('%Y-%m-%d') %}
+          {% set prev_day = this.attributes.day | default('') %}
+          {% set prev = this.state | float(this.attributes.last_energy | default(0)) %}
+          {% if trigger.platform != 'time_pattern' %}
+            {{ prev if prev_day == day else 0 }}
+          {% elif prev_day != day %}
+            {{ (p / 60000) | round(6) }}
+          {% else %}
+            {{ (prev + p / 60000) | round(6) }}
+          {% endif %}
+        attributes:
+          day: "{{ now().strftime('%Y-%m-%d') }}"
+          last_power: *grid_last_power_robot
+          last_energy: "{{ this.state | float(this.attributes.last_energy | default(0)) }}"
+
   # Snapshot end-of-day totals just before midnight wipe/reset.
   - trigger:
       - platform: time
@@ -400,6 +620,16 @@ template:
             {{ states('sensor.pi5_server_energy_daily') | float(0) | round(3) }}
           fridge_kwh: >-
             {{ states('sensor.fridge_energy_daily') | float(0) | round(3) }}
+          living_room_charger_kwh: >-
+            {{ states('sensor.living_room_charger_energy_daily') | float(0) | round(3) }}
+          nbn_modem_kwh: >-
+            {{ states('sensor.nbn_modem_energy_daily') | float(0) | round(3) }}
+          router_kwh: >-
+            {{ states('sensor.router_energy_daily') | float(0) | round(3) }}
+          tv_kwh: >-
+            {{ states('sensor.tv_energy_daily') | float(0) | round(3) }}
+          white_robot_kwh: >-
+            {{ states('sensor.white_robot_energy_daily') | float(0) | round(3) }}
           washing_machine_kwh: >-
             {{ states('sensor.inverter_loads_energy_daily') | float(0) | round(3) }}
           inverter_other_kwh: >-
@@ -435,6 +665,46 @@ template:
         unit_of_measurement: kWh
         device_class: energy
         state: "{{ states('sensor.fridge_energy_daily') | float(0) | round(3) }}"
+        attributes:
+          for_date: "{{ now().strftime('%Y-%m-%d') }}"
+
+      - name: "Living room charger energy yesterday"
+        unique_id: energy_living_room_charger_energy_yesterday
+        unit_of_measurement: kWh
+        device_class: energy
+        state: "{{ states('sensor.living_room_charger_energy_daily') | float(0) | round(3) }}"
+        attributes:
+          for_date: "{{ now().strftime('%Y-%m-%d') }}"
+
+      - name: "NBN Modem energy yesterday"
+        unique_id: energy_nbn_modem_energy_yesterday
+        unit_of_measurement: kWh
+        device_class: energy
+        state: "{{ states('sensor.nbn_modem_energy_daily') | float(0) | round(3) }}"
+        attributes:
+          for_date: "{{ now().strftime('%Y-%m-%d') }}"
+
+      - name: "Router energy yesterday"
+        unique_id: energy_router_energy_yesterday
+        unit_of_measurement: kWh
+        device_class: energy
+        state: "{{ states('sensor.router_energy_daily') | float(0) | round(3) }}"
+        attributes:
+          for_date: "{{ now().strftime('%Y-%m-%d') }}"
+
+      - name: "TV energy yesterday"
+        unique_id: energy_tv_energy_yesterday
+        unit_of_measurement: kWh
+        device_class: energy
+        state: "{{ states('sensor.tv_energy_daily') | float(0) | round(3) }}"
+        attributes:
+          for_date: "{{ now().strftime('%Y-%m-%d') }}"
+
+      - name: "White Robot energy yesterday"
+        unique_id: energy_white_robot_energy_yesterday
+        unit_of_measurement: kWh
+        device_class: energy
+        state: "{{ states('sensor.white_robot_energy_daily') | float(0) | round(3) }}"
         attributes:
           for_date: "{{ now().strftime('%Y-%m-%d') }}"
 

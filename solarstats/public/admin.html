@@ -62,21 +62,26 @@
       <section class="panel admin-panel">
         <h2>Daily load pie</h2>
         <p class="hint">
-          Mark each metered load as <strong>inverter</strong> or <strong>grid</strong>.
-          The dashboard groups those slices and draws a thick black gap between the two.
+          All synthetic daily energy sensors appear here after solarstatsapi syncs HA.
+          <strong>Inverter / Grid</strong> classifies the load ·
+          <strong>On pie</strong> shows it on the dashboard doughnut.
         </p>
         <div class="table-wrap">
           <table class="admin-table" id="loadsTable">
             <thead>
               <tr>
-                <th>Load</th>
+                <th>Name</th>
+                <th>Entity</th>
+                <th>Today</th>
                 <th>Inverter</th>
                 <th>Grid</th>
+                <th>On pie</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
+        <p class="hint" id="loadsEmpty" hidden>No energy sensors synced yet. Restart solarstatsapi so it discovers HA entities.</p>
         <p class="hint" id="loadsSaved" hidden>Saved</p>
       </section>
 
