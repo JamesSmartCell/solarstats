@@ -55,7 +55,7 @@ static void net_status_task(void *arg)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "HALite C6 radio starting (Zigbee + Wi-Fi, UART IPC to P4)");
+    ESP_LOGI(TAG, "HALite C6 radio starting (Zigbee + UART IPC to P4)");
 
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

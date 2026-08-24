@@ -1152,12 +1152,15 @@ static void power_poll_nth(zbgw_device_t *dev, void *ctx)
     power_poll_one(dev, NULL);
 }
 
+static bool s_power_poll_hold;
+
 static void power_poll_timer_cb(void *arg)
 {
     (void)arg;
     /* One device per tick — polling all plugs at once spikes RF/current → brownout on USB. */
     size_t n = 0;
-    if (!mqtt_bridge_is_connected()) {
+    /* Host link is UART IPC, not MQTT. Pause only while pairing owns the radio. */
+    if (s_power_poll_hold) {
         return;
     }
     device_registry_foreach(power_poll_count, &n);
@@ -1183,19 +1186,32 @@ static void start_power_poll_timer(void)
     if (esp_timer_create(&args, &s_power_poll_timer) != ESP_OK) {
         return;
     }
-    /* 5s tick, round-robin → ~15s per plug with 3 metering devices (same cadence, less peak). */
-    esp_timer_start_periodic(s_power_poll_timer, 5 * 1000 * 1000ULL);
-    ESP_LOGI(TAG, "Power/energy poll round-robin every 5s");
+    /* 15s — same lesson as the gateway: metering reads starve the rest of the C6 radio. */
+    esp_timer_start_periodic(s_power_poll_timer, 15 * 1000 * 1000ULL);
+    ESP_LOGI(TAG, "Power/energy poll round-robin every 15s");
+}
+
+static void set_pairing_rf_exclusive(bool pairing)
+{
+    s_power_poll_hold = pairing;
+    if (pairing) {
+        mqtt_bridge_suspend();
+        wifi_net_pause_for_zigbee();
+    } else {
+        wifi_net_resume();
+        mqtt_bridge_resume();
+    }
 }
 
 void zigbee_coordinator_on_mqtt_connected(void)
 {
-    /* Power poll waits until HA discovery finishes — it starves MQTT on this radio. */
+    /* Unused on HALite — host is UART IPC, not the HA MQTT broker. */
 }
 
 void zigbee_coordinator_on_discovery_complete(void)
 {
-    ESP_LOGI(TAG, "Discovery complete - enabling power poll");
+    s_power_poll_hold = false;
+    ESP_LOGI(TAG, "Resuming power poll");
     start_power_poll_timer();
 }
 
@@ -1208,6 +1224,8 @@ static void reinterview_known_device(zbgw_device_t *dev, void *ctx)
     ESP_LOGI(TAG, "Re-interview known device ieee=%016llx short=0x%04x", (unsigned long long)dev->ieee,
              dev->short_addr);
     find_clusters_on_device(dev->short_addr);
+    /* Pace interviews so a P4 rediscover does not flood 802.15.4. */
+    vTaskDelay(pdMS_TO_TICKS(350));
 }
 
 static void reinterview_known_devices(void)
@@ -1236,9 +1254,10 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
                 s_network_ready = true;
                 board_io_set_led(true);
                 publish_bridge_info();
-                /* Keep RF quiet so Wi‑Fi/MQTT can come up; pair via BOOT / permit_join. */
+                /* Join stays closed; pair via BOOT or IPC PERMIT_JOIN. */
                 s_permit_join_pending = false;
                 mqtt_bridge_publish_permit_state(false);
+                start_power_poll_timer();
                 ESP_LOGI(TAG, "Coordinator reboot - network restored CH=%d PAN=0x%04x (join closed)",
                          ezb_nwk_get_current_channel(), ezb_nwk_get_panid());
             }
@@ -1295,10 +1314,9 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
         board_io_set_led(true);
         find_clusters_on_device(annce->short_addr);
         if (wifi_net_is_paused()) {
-            ESP_LOGI(TAG, "Device joined - closing permit join and resuming WiFi");
+            ESP_LOGI(TAG, "Device joined - closing permit join and releasing radio");
             ezb_bdb_open_network(0);
-            wifi_net_resume();
-            mqtt_bridge_resume();
+            set_pairing_rf_exclusive(false);
             mqtt_bridge_publish_permit_state(false);
         }
     } break;
@@ -1331,8 +1349,7 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
             ESP_LOGI(TAG, "Permit join open for %u s", duration);
         } else {
             ESP_LOGI(TAG, "Permit join closed");
-            wifi_net_resume();
-            mqtt_bridge_resume();
+            set_pairing_rf_exclusive(false);
         }
     } break;
     default:
@@ -1736,8 +1753,7 @@ esp_err_t zigbee_coordinator_permit_join(bool enable)
     }
     if (enable) {
         mqtt_bridge_publish_permit_state(true);
-        mqtt_bridge_suspend();
-        wifi_net_pause_for_zigbee();
+        set_pairing_rf_exclusive(true);
     }
 
     esp_zigbee_lock_acquire(portMAX_DELAY);
@@ -1753,8 +1769,7 @@ esp_err_t zigbee_coordinator_permit_join(bool enable)
     esp_zigbee_lock_release();
 
     if (!enable) {
-        wifi_net_resume();
-        mqtt_bridge_resume();
+        set_pairing_rf_exclusive(false);
     }
     mqtt_bridge_publish_permit_state(enable);
     return ESP_OK;
@@ -1834,14 +1849,33 @@ static void rediscover_one(zbgw_device_t *dev, void *ctx)
     if (ha_discovery_publish_device(dev) == ESP_OK) {
         dev->discovery_published = true;
     }
+    vTaskDelay(pdMS_TO_TICKS(80));
 }
 
-esp_err_t zigbee_coordinator_rediscover(void)
+static volatile bool s_rediscover_busy;
+
+static void rediscover_task(void *arg)
 {
+    (void)arg;
     ha_discovery_publish_bridge();
     device_registry_foreach(rediscover_one, NULL);
     /* Also re-interview so new clusters (power/energy) can appear without re-pairing. */
     reinterview_known_devices();
+    s_rediscover_busy = false;
+    vTaskDelete(NULL);
+}
+
+esp_err_t zigbee_coordinator_rediscover(void)
+{
+    if (s_rediscover_busy) {
+        ESP_LOGW(TAG, "Rediscover already running");
+        return ESP_OK;
+    }
+    s_rediscover_busy = true;
+    if (xTaskCreate(rediscover_task, "zb_rediscover", 4096, NULL, 4, NULL) != pdPASS) {
+        s_rediscover_busy = false;
+        return ESP_ERR_NO_MEM;
+    }
     return ESP_OK;
 }
 

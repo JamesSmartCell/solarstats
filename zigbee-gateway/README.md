@@ -78,7 +78,7 @@ ESP32-C6 shares one 2.4 GHz radio between Wi-Fi and Zigbee. Prefer:
 | 6 | 11, 15, 25, 26 |
 | 11 | 15, 20, 25 |
 
-Avoid parking Zigbee on top of the AP’s Wi-Fi channel. Keep MQTT traffic light (this firmware already uses Wi-Fi modem sleep).
+Avoid parking Zigbee on top of the AP’s Wi-Fi channel. Keep MQTT traffic light (this firmware already uses Wi-Fi modem sleep). Power/energy polls run every 15s and are paused while MQTT is down or publishing discovery, so a brief broker blip does not republish every HA entity.
 
 ## Pairing a sensor
 
@@ -113,6 +113,8 @@ Short version:
 | BOOT / permit join | 9 |
 
 Network keys and the joined-device table live in NVS (`zb_storage` + default NVS). Sensors should survive a gateway reboot without re-pairing.
+
+If MQTT stays down after **4** failed reconnects, a watchdog restarts the C6 (Zigbee NVS is kept). Pairing pauses Wi‑Fi/MQTT and does not trip the watchdog.
 
 ## Limitations
 

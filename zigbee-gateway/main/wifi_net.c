@@ -1,4 +1,5 @@
 #include "wifi_net.h"
+#include "mqtt_bridge.h"
 
 #include <string.h>
 
@@ -20,21 +21,39 @@ static bool s_connected;
 static bool s_paused;
 static bool s_started;
 
-/* esp_wifi_set_max_tx_power unit is 0.25 dBm (8=2 dBm … 84=20 dBm). */
-#define WIFI_TX_LOW_QDBM  16 /* ~4 dBm — next to the AP */
-#define WIFI_TX_HIGH_QDBM 84 /* ~20 dBm — weaker link */
+/* esp_wifi_set_max_tx_power unit is 0.25 dBm (8=2 dBm … 84=20 dBm).
+ * 4 dBm + Zigbee coexistence aborts TCP (ECONNABORTED). Floor at ~10 dBm.
+ * Do not stay at 20 dBm after associate: GOT_IP / ARP on 11ax + Zigbee
+ * browns out the FireBeetle USB rail (office RSSI -53 still TX at 20 dBm). */
+#define WIFI_TX_LOW_QDBM  40 /* ~10 dBm */
+#define WIFI_TX_MID_QDBM  56 /* ~14 dBm */
+#define WIFI_TX_HIGH_QDBM 84 /* ~20 dBm */
 #define WIFI_RSSI_LOW_TX  (-55)
+#define WIFI_RSSI_MID_TX  (-70)
+
+static int8_t qdbm_for_rssi(int8_t rssi)
+{
+    if (rssi >= WIFI_RSSI_LOW_TX) {
+        return WIFI_TX_LOW_QDBM;
+    }
+    if (rssi >= WIFI_RSSI_MID_TX) {
+        return WIFI_TX_MID_QDBM;
+    }
+    return WIFI_TX_HIGH_QDBM;
+}
 
 static void apply_tx_power_from_rssi(void)
 {
     wifi_ap_record_t ap = {0};
     if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
-        ESP_LOGW(TAG, "No AP info yet - leaving TX at high power");
+        /* Unknown RSSI: cap at mid so DHCP/ARP cannot sit at 20 dBm. */
+        ESP_LOGW(TAG, "No AP info yet - TX mid ~14 dBm");
+        (void)esp_wifi_set_max_tx_power(WIFI_TX_MID_QDBM);
         return;
     }
 
-    int8_t qdbm = (ap.rssi >= WIFI_RSSI_LOW_TX) ? WIFI_TX_LOW_QDBM : WIFI_TX_HIGH_QDBM;
-    const char *mode = (qdbm == WIFI_TX_LOW_QDBM) ? "low" : "high";
+    int8_t qdbm = qdbm_for_rssi(ap.rssi);
+    const char *mode = (qdbm == WIFI_TX_LOW_QDBM) ? "low" : (qdbm == WIFI_TX_MID_QDBM) ? "mid" : "high";
     float dbm = (float)qdbm * 0.25f;
     esp_err_t err = esp_wifi_set_max_tx_power(qdbm);
     if (err != ESP_OK) {
@@ -51,6 +70,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        /* Drop TX before DHCP/ARP. Waiting until MQTT is up browns out at GOT_IP. */
+        apply_tx_power_from_rssi();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         s_connected = false;
         if (s_paused) {
@@ -70,8 +92,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_count = 0;
         s_connected = true;
-        xEventGroupSetBits(s_wifi_events, WIFI_NET_CONNECTED_BIT);
         apply_tx_power_from_rssi();
+        xEventGroupSetBits(s_wifi_events, WIFI_NET_CONNECTED_BIT);
+        mqtt_bridge_resume();
     }
 }
 
@@ -96,10 +119,12 @@ esp_err_t wifi_net_start(void)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    /* Prefer modem sleep so IEEE 802.15.4 can share the RF path */
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MAX_MODEM));
+    /* 11ax HE peaks higher than 11n; MQTT does not need it on this USB-powered C6. */
+    (void)esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    /* No modem sleep until MQTT is up — MAX_MODEM + Zigbee aborts TCP connect. */
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     ESP_ERROR_CHECK(esp_wifi_start());
-    /* Associate at high power, then drop to low if RSSI is strong (see GOT_IP). */
+    /* Associate at high power; STA_CONNECTED drops TX from RSSI before DHCP. */
     (void)esp_wifi_set_max_tx_power(WIFI_TX_HIGH_QDBM);
     s_started = true;
 
@@ -162,4 +187,23 @@ esp_err_t wifi_net_resume(void)
 bool wifi_net_is_paused(void)
 {
     return s_paused;
+}
+
+void wifi_net_on_mqtt_up(void)
+{
+    if (!s_started || s_paused) {
+        return;
+    }
+    (void)esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    apply_tx_power_from_rssi();
+}
+
+void wifi_net_on_mqtt_down(void)
+{
+    if (!s_started || s_paused) {
+        return;
+    }
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
+    apply_tx_power_from_rssi();
+    ESP_LOGI(TAG, "MQTT down - WiFi PS off, TX from RSSI");
 }

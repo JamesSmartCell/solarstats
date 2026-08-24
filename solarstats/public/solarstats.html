@@ -96,8 +96,13 @@
       <section class="charts">
         <article class="panel">
           <h2>All devices today</h2>
-          <p class="hint">Daily kWh by device (inverter + grid) · resets at midnight</p>
+          <p class="hint">Daily kWh · inverter loads vs grid supply · resets at midnight</p>
+          <div class="pie-source-key" aria-hidden="true">
+            <span class="pie-key is-inverter">Inverter loads</span>
+            <span class="pie-key is-grid">Grid supply</span>
+          </div>
           <div class="chart-wrap pie-wrap"><canvas id="loadsPieChart"></canvas></div>
+          <p class="hint pie-totals" id="loadsPieTotals"></p>
         </article>
 
         <article class="panel">

@@ -118,4 +118,4 @@ On each ingest, cumulative kWh is updated with trapezoidal integration of `outpu
 
 Unavailable / `unknown` HA states are **not** stored as zero. The server keeps the last live inverter snapshot (pack voltage ≥ 8 V), skips energy integration for that tick, and holds daily-load kWh unless every meter resets together (midnight). Restarting `solarstats` (or `npm run repair`) deletes zeroed samples so the dashboard comes back.
 
-Daily device kWh from HA (`loadsDailyKwh`) drives the **All devices today** doughnut; those meters reset at midnight in Home Assistant.
+Daily device kWh from HA (`loadsDailyKwh`) drives the **All devices today** doughnut; those meters reset at midnight in Home Assistant. Admin marks each load as inverter or grid so the pie groups them with a thick black gap between the two.

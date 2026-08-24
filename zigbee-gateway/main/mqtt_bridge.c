@@ -6,9 +6,12 @@
 #include "config.h"
 #include "device_registry.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_discovery.h"
+#include "wifi_net.h"
 #include "zigbee_coordinator.h"
 #include "lwip/inet.h"
 #include "lwip/netdb.h"
@@ -17,10 +20,20 @@
 #include "mqtt_client.h"
 #include "sdkconfig.h"
 
+/* Watchdog period must be longer than one TCP connect attempt. */
+#define MQTT_WD_FAIL_LIMIT 4
+#define MQTT_WD_PERIOD_MS  20000
+#define MQTT_CONNECT_TIMEOUT_MS 15000
+#define MQTT_RECONNECT_MS 4000
+/* Full HA discovery on every flap starves Wi‑Fi on the shared C6 radio. */
+#define MQTT_DISCOVERY_COOLDOWN_MS (15 * 60 * 1000)
+
 static const char *TAG = "mqtt_bridge";
 
 static esp_mqtt_client_handle_t s_client;
 static bool s_connected;
+static bool s_suspended;
+static int s_fail_count;
 static mqtt_bridge_permit_join_cb_t s_permit_cb;
 static mqtt_bridge_switch_cb_t s_switch_cb;
 static mqtt_bridge_remove_cb_t s_remove_cb;
@@ -28,6 +41,8 @@ static mqtt_bridge_rediscover_cb_t s_rediscover_cb;
 static TaskHandle_t s_discovery_task;
 static uint32_t s_discovery_gen;
 static bool s_discovery_pending;
+static bool s_discovery_done;
+static int64_t s_last_discovery_ms;
 /* Resolved once at start so reconnects do not re-hit flaky .local DNS. */
 static char s_broker_host[64];
 
@@ -113,7 +128,7 @@ static void rediscover_device_paced(zbgw_device_t *dev, void *ctx)
              (unsigned long)dev->capabilities);
     (void)ha_discovery_publish_device(dev);
     dev->discovery_published = true;
-    vTaskDelay(pdMS_TO_TICKS(120));
+    vTaskDelay(pdMS_TO_TICKS(350));
 }
 
 static void discovery_task(void *arg)
@@ -136,6 +151,8 @@ static void discovery_task(void *arg)
 
         if (s_connected && gen == s_discovery_gen) {
             ESP_LOGI(TAG, "HA discovery publish complete");
+            s_discovery_done = true;
+            s_last_discovery_ms = esp_timer_get_time() / 1000;
             zigbee_coordinator_on_discovery_complete();
         }
     } while (s_discovery_pending && s_connected);
@@ -258,19 +275,33 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT connected");
         s_connected = true;
+        s_fail_count = 0;
+        wifi_net_on_mqtt_up();
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_PERMIT_JOIN, 1);
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_SWITCH_SET_WILDCARD, 1);
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_REMOVE, 1);
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_REDISCOVER, 1);
         mqtt_bridge_publish_status("online");
         mqtt_bridge_publish_permit_state(false);
-        schedule_discovery();
         zigbee_coordinator_on_mqtt_connected();
+        {
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            bool cooldown_ok =
+                s_discovery_done && (now_ms - s_last_discovery_ms) < MQTT_DISCOVERY_COOLDOWN_MS;
+            if (cooldown_ok) {
+                ESP_LOGI(TAG, "MQTT reconnected - skipping discovery (cooldown)");
+                zigbee_coordinator_on_discovery_complete();
+            } else {
+                schedule_discovery();
+            }
+        }
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "MQTT disconnected");
         s_connected = false;
         s_discovery_gen++;
+        wifi_net_on_mqtt_down();
+        zigbee_coordinator_on_mqtt_disconnected();
         break;
     case MQTT_EVENT_DATA:
         if (event->topic_len == (int)strlen(ZBGW_TOPIC_PERMIT_JOIN) &&
@@ -318,13 +349,43 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
+static void mqtt_watchdog_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(MQTT_WD_PERIOD_MS));
+        if (s_suspended || wifi_net_is_paused()) {
+            s_fail_count = 0;
+            continue;
+        }
+        if (s_connected) {
+            s_fail_count = 0;
+            continue;
+        }
+        if (!s_client || !wifi_net_is_connected()) {
+            continue;
+        }
+        s_fail_count++;
+        ESP_LOGW(TAG, "MQTT watchdog: still down, reconnect (%d/%d)", s_fail_count, MQTT_WD_FAIL_LIMIT);
+        if (s_fail_count >= MQTT_WD_FAIL_LIMIT) {
+            ESP_LOGE(TAG, "MQTT watchdog: %d failed reconnects - restarting", s_fail_count);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            esp_restart();
+        }
+        /* Client often stops retrying after ECONNABORTED — kick it. */
+        (void)esp_mqtt_client_reconnect(s_client);
+    }
+}
+
 void mqtt_bridge_suspend(void)
 {
     if (!s_client) {
         return;
     }
     ESP_LOGW(TAG, "Suspending MQTT during Zigbee pairing");
+    s_suspended = true;
     s_connected = false;
+    s_fail_count = 0;
     s_discovery_gen++;
     (void)esp_mqtt_client_stop(s_client);
 }
@@ -334,8 +395,18 @@ void mqtt_bridge_resume(void)
     if (!s_client) {
         return;
     }
+    s_fail_count = 0;
+    s_suspended = false;
+    if (!wifi_net_is_connected()) {
+        ESP_LOGI(TAG, "MQTT resume armed - waiting for WiFi IP");
+        return;
+    }
     ESP_LOGI(TAG, "Resuming MQTT after Zigbee pairing");
-    (void)esp_mqtt_client_start(s_client);
+    esp_err_t err = esp_mqtt_client_start(s_client);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "MQTT start %s - reconnect", esp_err_to_name(err));
+        (void)esp_mqtt_client_reconnect(s_client);
+    }
 }
 
 esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_switch_cb_t switch_cb,
@@ -346,8 +417,8 @@ esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_
     s_remove_cb = remove_cb;
     s_rediscover_cb = rediscover_cb;
 
-    /* Let DHCP/DNS settle; Zigbee RF also contends for the radio right after boot. */
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    /* Wait for Wi-Fi BA / DHCP to settle before the first TCP connect. */
+    vTaskDelay(pdMS_TO_TICKS(5000));
     (void)resolve_broker_host();
 
     char uri[128];
@@ -366,8 +437,8 @@ esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_
                 .retain = true,
             },
         .session.keepalive = 60,
-        .network.timeout_ms = 20000,
-        .network.reconnect_timeout_ms = 5000,
+        .network.timeout_ms = MQTT_CONNECT_TIMEOUT_MS,
+        .network.reconnect_timeout_ms = MQTT_RECONNECT_MS,
         .buffer.size = 4096,
         .buffer.out_size = 4096,
     };
@@ -378,13 +449,21 @@ esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_
     }
     ESP_ERROR_CHECK(esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL));
     ESP_ERROR_CHECK(esp_mqtt_client_start(s_client));
-    ESP_LOGI(TAG, "MQTT client started -> %s", uri);
+    if (xTaskCreate(mqtt_watchdog_task, "mqtt_wd", 2048, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "MQTT watchdog task failed to start");
+    }
+    ESP_LOGI(TAG, "MQTT client started -> %s (watchdog %d fails)", uri, MQTT_WD_FAIL_LIMIT);
     return ESP_OK;
 }
 
 bool mqtt_bridge_is_connected(void)
 {
     return s_connected;
+}
+
+bool mqtt_bridge_discovery_busy(void)
+{
+    return s_discovery_task != NULL;
 }
 
 esp_err_t mqtt_bridge_publish(const char *topic, const char *payload, int qos, bool retain)

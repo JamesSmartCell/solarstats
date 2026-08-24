@@ -11,14 +11,17 @@ const RANGE_LABELS = {
 };
 
 const LOAD_SLICES = [
-  { key: "officePc", label: "Office PC", color: "#42a5f5" },
-  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0" },
-  { key: "pi5", label: "Pi5 Server", color: "#7e57c2" },
-  { key: "motorbike", label: "Motorbike", color: "#26a69a" },
-  { key: "fridge", label: "Fridge", color: "#66bb6a" },
-  { key: "washingMachine", label: "Washing machine", color: "#8bc34a" },
-  { key: "otherInverter", label: "Other inverter", color: "#cddc39" },
+  { key: "officePc", label: "Office PC", color: "#42a5f5", source: "grid" },
+  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0", source: "grid" },
+  { key: "pi5", label: "Pi5 Server", color: "#7e57c2", source: "grid" },
+  { key: "motorbike", label: "Motorbike", color: "#26a69a", source: "grid" },
+  { key: "fridge", label: "Fridge", color: "#66bb6a", source: "grid" },
+  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", source: "inverter" },
+  { key: "otherInverter", label: "Other inverter", color: "#cddc39", source: "inverter" },
 ];
+
+const GROUP_GAP_PX = 16;
+const SLICE_GAP_PX = 2;
 
 const els = {
   connection: document.getElementById("connection"),
@@ -40,6 +43,7 @@ const els = {
   deviceGrid: document.getElementById("deviceGrid"),
   sensorSection: document.getElementById("sensorSection"),
   sensorList: document.getElementById("sensorList"),
+  loadsPieTotals: document.getElementById("loadsPieTotals"),
 };
 
 const state = {
@@ -48,9 +52,53 @@ const state = {
   energyKwhTotal: 0,
   rangeStartMs: 0,
   loadsDailyKwh: null,
+  loadConfig: LOAD_SLICES.map((s) => ({ ...s })),
   devices: [],
   toggling: new Set(),
 };
+
+function applyLoadConfig(config) {
+  if (!Array.isArray(config) || !config.length) return;
+  const byKey = new Map(config.map((s) => [s.key, s]));
+  state.loadConfig = LOAD_SLICES.map((fallback) => {
+    const next = byKey.get(fallback.key);
+    const source = next?.source === "inverter" || next?.source === "grid" ? next.source : fallback.source;
+    return {
+      key: fallback.key,
+      label: next?.label || fallback.label,
+      color: next?.color || fallback.color,
+      source,
+    };
+  });
+}
+
+function orderedLoadSlices() {
+  const inv = state.loadConfig.filter((s) => s.source === "inverter");
+  const grid = state.loadConfig.filter((s) => s.source !== "inverter");
+  return [...inv, ...grid];
+}
+
+function sourceLabel(source) {
+  return source === "inverter" ? "Inverter" : "Grid";
+}
+
+function pieBorderWidths(slices, values) {
+  const widths = slices.map(() => SLICE_GAP_PX);
+  const visible = slices
+    .map((s, i) => ({ source: s.source, i, v: Number(values[i]) }))
+    .filter((x) => Number.isFinite(x.v) && x.v > 0);
+  const kinds = new Set(visible.map((x) => x.source));
+  if (visible.length < 2 || kinds.size < 2) return widths;
+  for (let k = 0; k < visible.length; k++) {
+    const cur = visible[k];
+    const next = visible[(k + 1) % visible.length];
+    if (cur.source !== next.source) {
+      widths[cur.i] = GROUP_GAP_PX;
+      widths[next.i] = GROUP_GAP_PX;
+    }
+  }
+  return widths;
+}
 
 function rangeToMs(range) {
   const match = /^(\d+)([hdw])$/i.exec(range || "24h");
@@ -226,26 +274,77 @@ const outChart = new Chart(document.getElementById("outChart"), {
   },
 });
 
+const loadsPieCenterPlugin = {
+  id: "loadsPieCenter",
+  afterDraw(chart) {
+    const meta = chart.getDatasetMeta(0);
+    if (!meta?.data?.length) return;
+    const first = meta.data[0];
+    const { x, y } = first;
+    const src = state.loadsDailyKwh || {};
+    let inv = 0;
+    let grid = 0;
+    for (const slice of state.loadConfig) {
+      const n = Number(src[slice.key]);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      if (slice.source === "inverter") inv += n;
+      else grid += n;
+    }
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#8b9aab";
+    ctx.font = "600 11px IBM Plex Sans, sans-serif";
+    ctx.fillText("Inverter", x, y - 14);
+    ctx.fillStyle = "#e8eef3";
+    ctx.font = "500 13px IBM Plex Mono, monospace";
+    ctx.fillText(`${inv.toFixed(2)} kWh`, x, y + 2);
+    ctx.fillStyle = "#8b9aab";
+    ctx.font = "600 11px IBM Plex Sans, sans-serif";
+    ctx.fillText(`Grid ${grid.toFixed(2)}`, x, y + 18);
+    ctx.restore();
+  },
+};
+
 const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
   type: "doughnut",
   data: {
-    labels: LOAD_SLICES.map((s) => s.label),
+    labels: [],
     datasets: [
       {
-        data: LOAD_SLICES.map(() => 0),
-        backgroundColor: LOAD_SLICES.map((s) => s.color),
-        borderColor: "#12181e",
-        borderWidth: 2,
+        data: [],
+        backgroundColor: [],
+        borderColor: "#000000",
+        borderWidth: SLICE_GAP_PX,
+        spacing: 1,
       },
     ],
   },
   options: {
     responsive: true,
     maintainAspectRatio: false,
+    cutout: "58%",
     plugins: {
       legend: {
         position: "bottom",
-        labels: { color: "#8b9aab", boxWidth: 12, font: { size: 11 } },
+        labels: {
+          color: "#8b9aab",
+          boxWidth: 12,
+          font: { size: 11 },
+          generateLabels(chart) {
+            const slices = orderedLoadSlices();
+            const ds = chart.data.datasets[0];
+            return slices.map((s, i) => ({
+              text: `${sourceLabel(s.source)} · ${s.label}`,
+              fillStyle: s.color,
+              strokeStyle: "#000000",
+              lineWidth: 1,
+              hidden: !Number(ds.data[i]),
+              index: i,
+            }));
+          },
+        },
       },
       tooltip: {
         backgroundColor: "#12181e",
@@ -253,13 +352,17 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
         borderWidth: 1,
         callbacks: {
           label(ctx) {
+            const slices = orderedLoadSlices();
+            const slice = slices[ctx.dataIndex];
             const v = Number(ctx.raw);
-            return `${ctx.label}: ${Number.isFinite(v) ? v.toFixed(3) : "—"} kWh`;
+            const group = sourceLabel(slice?.source);
+            return `${group} · ${ctx.label}: ${Number.isFinite(v) ? v.toFixed(3) : "—"} kWh`;
           },
         },
       },
     },
   },
+  plugins: [loadsPieCenterPlugin],
 });
 
 const charts = [socChart, pvChart, outChart];
@@ -278,10 +381,30 @@ function flash(el) {
 function updateLoadsPie(loads) {
   if (loads) state.loadsDailyKwh = loads;
   const src = state.loadsDailyKwh || {};
-  loadsPieChart.data.datasets[0].data = LOAD_SLICES.map((s) => {
+  const slices = orderedLoadSlices();
+  const values = slices.map((s) => {
     const n = Number(src[s.key]);
     return Number.isFinite(n) && n > 0 ? n : 0;
   });
+  const ds = loadsPieChart.data.datasets[0];
+  loadsPieChart.data.labels = slices.map((s) => s.label);
+  ds.data = values;
+  ds.backgroundColor = slices.map((s) => s.color);
+  ds.borderColor = "#000000";
+  ds.borderWidth = pieBorderWidths(slices, values);
+
+  let inv = 0;
+  let grid = 0;
+  for (const slice of slices) {
+    const n = Number(src[slice.key]);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (slice.source === "inverter") inv += n;
+    else grid += n;
+  }
+  if (els.loadsPieTotals) {
+    els.loadsPieTotals.textContent =
+      `Inverter ${inv.toFixed(3)} kWh · Grid ${grid.toFixed(3)} kWh`;
+  }
   loadsPieChart.update("none");
 }
 
@@ -364,6 +487,7 @@ function applyHistory(payload) {
       ? { ...payload.latest, energyKwhTotal: state.energyKwhTotal }
       : null,
   );
+  applyLoadConfig(payload.loadConfig);
   updateLoadsPie(payload.loadsDailyKwh || payload.latest?.loadsDailyKwh || null);
   updateChrome();
 }
@@ -520,8 +644,12 @@ function connectWs() {
         if (msg.latest) {
           updateTiles({ ...msg.latest, energyKwhTotal: state.energyKwhTotal });
         }
+        applyLoadConfig(msg.loadConfig);
         if (msg.loadsDailyKwh) updateLoadsPie(msg.loadsDailyKwh);
         if (msg.devices) renderDevices(msg.devices);
+      } else if (msg.type === "loadConfig") {
+        applyLoadConfig(msg.loadConfig);
+        updateLoadsPie();
       } else if (msg.type === "sample") {
         applySample(msg.sample);
       } else if (msg.type === "history") {

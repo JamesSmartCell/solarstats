@@ -263,6 +263,43 @@ body {
   gap: 0.65rem;
 }
 
+.pie-source-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  justify-content: center;
+  margin: 0 0 0.55rem;
+}
+
+.pie-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.pie-key::before {
+  content: "";
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+}
+
+.pie-key.is-inverter::before {
+  background: #cddc39;
+  box-shadow: 0 0 0 2px #000;
+}
+
+.pie-key.is-grid::before {
+  background: #42a5f5;
+}
+
+.pie-totals {
+  text-align: center;
+  margin: 0.45rem 0 0;
+}
+
 .sensor-list {
   display: flex;
   flex-direction: column;

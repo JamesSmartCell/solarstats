@@ -11,6 +11,7 @@ esp_err_t zigbee_coordinator_remove_device(uint64_t ieee);
 esp_err_t zigbee_coordinator_remove_all_switches(void);
 esp_err_t zigbee_coordinator_rediscover(void);
 void zigbee_coordinator_on_mqtt_connected(void);
+void zigbee_coordinator_on_mqtt_disconnected(void);
 void zigbee_coordinator_on_discovery_complete(void);
 bool zigbee_coordinator_network_ready(void);
 

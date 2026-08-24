@@ -289,7 +289,9 @@ esp_err_t ha_discovery_publish_sensor_state(const zbgw_device_t *dev, const char
     device_registry_ieee_to_str(dev->ieee, ieee, sizeof(ieee));
     char topic[96];
     snprintf(topic, sizeof(topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee, suffix);
-    return mqtt_bridge_publish(topic, value, 1, true);
+    /* QoS 0: live power/energy used to block 20s on PUBACK and drop the MQTT session. */
+    bool live = strcmp(suffix, "power") == 0 || strcmp(suffix, "energy") == 0;
+    return mqtt_bridge_publish(topic, value, live ? 0 : 1, !live);
 }
 
 esp_err_t ha_discovery_publish_binary_state(const zbgw_device_t *dev, const char *suffix, bool on)

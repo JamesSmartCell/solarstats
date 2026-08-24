@@ -14,6 +14,7 @@ esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_
 void mqtt_bridge_suspend(void);
 void mqtt_bridge_resume(void);
 bool mqtt_bridge_is_connected(void);
+bool mqtt_bridge_discovery_busy(void);
 
 esp_err_t mqtt_bridge_publish(const char *topic, const char *payload, int qos, bool retain);
 esp_err_t mqtt_bridge_publish_status(const char *status);

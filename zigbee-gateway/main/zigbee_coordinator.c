@@ -71,6 +71,7 @@ typedef struct {
     float last_watts;
     char last_power_source[24];
     bool has_last_energy;
+    bool energy_mqtt_pending; /* publish after ZCL/RF settles — same-tick MQTT browns out USB */
     bool has_electrical;
     bool switch_known; /* true once we have seen On/Off state */
     bool switch_is_on; /* when known+off, force published power to 0 W */
@@ -79,6 +80,8 @@ typedef struct {
 
 static power_scale_t s_power_scale[ZBGW_MAX_DEVICES];
 static esp_timer_handle_t s_power_poll_timer;
+static esp_timer_handle_t s_energy_mqtt_timer;
+#define ENERGY_MQTT_DEFER_US (600 * 1000ULL)
 static uint16_t s_interview_queue[ZBGW_MAX_DEVICES];
 static uint8_t s_interview_q_len;
 static const uint8_t s_power_probe_eps[] = {1, 2, 11};
@@ -115,6 +118,8 @@ static power_scale_t *power_scale_get_ieee(uint64_t ieee, uint16_t short_addr, b
     return empty;
 }
 
+static void log_power_energy(zbgw_device_t *dev, power_scale_t *scale, bool from_energy);
+
 static void publish_power_watts(zbgw_device_t *dev, power_scale_t *scale, float watts, const char *source)
 {
     char buf[32];
@@ -148,6 +153,52 @@ static float scale_rms_volts(power_scale_t *scale)
         scale->ac_voltage_div = 1;
     }
     return volts;
+}
+
+static void energy_mqtt_timer_cb(void *arg)
+{
+    (void)arg;
+    for (size_t i = 0; i < ZBGW_MAX_DEVICES; ++i) {
+        power_scale_t *scale = &s_power_scale[i];
+        if (!scale->in_use || !scale->energy_mqtt_pending || !scale->has_last_energy) {
+            continue;
+        }
+        scale->energy_mqtt_pending = false;
+        zbgw_device_t *dev = device_registry_find_ieee(scale->ieee);
+        if (!dev) {
+            continue;
+        }
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.3f", scale->last_energy_kwh);
+        ha_discovery_publish_sensor_state(dev, "energy", buf);
+        device_registry_add_capability(dev, ZBGW_CAP_ENERGY);
+        log_power_energy(dev, scale, true);
+    }
+}
+
+static void schedule_energy_mqtt(zbgw_device_t *dev, power_scale_t *scale)
+{
+    if (!dev || !scale || !scale->has_last_energy) {
+        return;
+    }
+    scale->energy_mqtt_pending = true;
+    ESP_LOGI(TAG, "Energy queued short=0x%04x (MQTT in 600 ms)", dev->short_addr);
+    if (!s_energy_mqtt_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &energy_mqtt_timer_cb,
+            .name = "zb_energy_mqtt",
+        };
+        if (esp_timer_create(&args, &s_energy_mqtt_timer) != ESP_OK) {
+            energy_mqtt_timer_cb(NULL);
+            return;
+        }
+    }
+    if (esp_timer_is_active(s_energy_mqtt_timer)) {
+        return;
+    }
+    if (esp_timer_start_once(s_energy_mqtt_timer, ENERGY_MQTT_DEFER_US) != ESP_OK) {
+        energy_mqtt_timer_cb(NULL);
+    }
 }
 
 static void log_power_energy(zbgw_device_t *dev, power_scale_t *scale, bool from_energy)
@@ -194,6 +245,7 @@ typedef struct {
 static esp_timer_handle_t s_interview_timer;
 static uint16_t s_interview_short;
 static bool s_interview_busy;
+static bool s_hold_wifi_for_interview;
 static uint8_t s_interview_eps[16];
 static uint8_t s_interview_ep_count;
 static uint8_t s_interview_ep_idx;
@@ -811,9 +863,14 @@ static void read_on_off_attr(uint16_t short_addr, uint8_t endpoint)
     ezb_zcl_read_attr_cmd_req(&read_attr_cmd);
 }
 
-static void read_electrical_attrs(uint16_t short_addr, uint8_t endpoint)
+static void read_electrical_attrs_ex(uint16_t short_addr, uint8_t endpoint, bool live_only)
 {
-    static uint16_t attr_field[] = {
+    static uint16_t live_attrs[] = {
+        EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_ACTIVE_POWER_ID,
+        EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_RMS_VOLTAGE_ID,
+        EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_RMS_CURRENT_ID,
+    };
+    static uint16_t full_attrs[] = {
         EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_ACTIVE_POWER_ID,
         EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_RMS_VOLTAGE_ID,
         EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_RMS_CURRENT_ID,
@@ -826,6 +883,9 @@ static void read_electrical_attrs(uint16_t short_addr, uint8_t endpoint)
         EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_AC_CURRENT_MULTIPLIER_ID,
         EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_AC_CURRENT_DIVISOR_ID,
     };
+    uint16_t *attr_field = live_only ? live_attrs : full_attrs;
+    size_t attr_n = live_only ? (sizeof(live_attrs) / sizeof(live_attrs[0]))
+                              : (sizeof(full_attrs) / sizeof(full_attrs[0]));
     ezb_zcl_read_attr_cmd_t read_attr_cmd = {
         .cmd_ctrl =
             {
@@ -835,10 +895,15 @@ static void read_electrical_attrs(uint16_t short_addr, uint8_t endpoint)
                 .dst_ep = endpoint,
                 .cluster_id = EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
             },
-        .payload.attr_number = sizeof(attr_field) / sizeof(attr_field[0]),
+        .payload.attr_number = (uint8_t)attr_n,
         .payload.attr_field = attr_field,
     };
     ezb_zcl_read_attr_cmd_req(&read_attr_cmd);
+}
+
+static void read_electrical_attrs(uint16_t short_addr, uint8_t endpoint)
+{
+    read_electrical_attrs_ex(short_addr, endpoint, false);
 }
 
 static void read_metering_attrs(uint16_t short_addr, uint8_t endpoint)
@@ -926,6 +991,20 @@ static void apply_cluster_on_endpoint(uint16_t short_addr, uint8_t ep, uint16_t 
              ep);
 }
 
+static void resume_wifi_after_pairing_work(void)
+{
+    if (s_interview_busy || s_interview_q_len > 0) {
+        return;
+    }
+    if (!s_hold_wifi_for_interview && !wifi_net_is_paused()) {
+        return;
+    }
+    s_hold_wifi_for_interview = false;
+    ESP_LOGI(TAG, "Interview idle - resuming WiFi after pairing");
+    wifi_net_resume();
+    mqtt_bridge_resume();
+}
+
 static void interview_drain_queue(void)
 {
     if (s_interview_busy || s_interview_q_len == 0) {
@@ -943,6 +1022,7 @@ static void interview_finish(void)
     ESP_LOGI(TAG, "Interview complete short=0x%04x", s_interview_short);
     s_interview_busy = false;
     interview_drain_queue();
+    resume_wifi_after_pairing_work();
 }
 
 static void interview_advance_ep(void)
@@ -1102,6 +1182,8 @@ static void find_clusters_on_device(uint16_t short_addr)
     ESP_ERROR_CHECK(esp_timer_start_once(s_interview_timer, 4000 * 1000ULL));
 }
 
+static bool s_poll_metering;
+
 static void power_poll_one(zbgw_device_t *dev, void *ctx)
 {
     (void)ctx;
@@ -1112,17 +1194,22 @@ static void power_poll_one(zbgw_device_t *dev, void *ctx)
         return;
     }
     power_scale_t *scale = power_scale_for_dev(dev, true);
-    if (dev->capabilities & ZBGW_CAP_POWER) {
+    bool want_energy = s_poll_metering && (dev->capabilities & ZBGW_CAP_ENERGY);
+    bool want_power = !want_energy && (dev->capabilities & ZBGW_CAP_POWER);
+    s_poll_metering = !s_poll_metering;
+
+    if (want_power) {
         if (scale && scale->electrical_ep) {
-            read_electrical_attrs(dev->short_addr, scale->electrical_ep);
+            read_electrical_attrs_ex(dev->short_addr, scale->electrical_ep, true);
         } else {
             /* Probe common Tuya endpoints until interview records the real one. */
             for (size_t i = 0; i < sizeof(s_power_probe_eps); ++i) {
-                read_electrical_attrs(dev->short_addr, s_power_probe_eps[i]);
+                read_electrical_attrs_ex(dev->short_addr, s_power_probe_eps[i], true);
             }
         }
+        return;
     }
-    if (dev->capabilities & ZBGW_CAP_ENERGY) {
+    if (want_energy || (dev->capabilities & ZBGW_CAP_ENERGY)) {
         if (scale && scale->metering_ep) {
             read_metering_attrs(dev->short_addr, scale->metering_ep);
         } else {
@@ -1155,12 +1242,15 @@ static void power_poll_nth(zbgw_device_t *dev, void *ctx)
     power_poll_one(dev, NULL);
 }
 
+static bool s_power_poll_hold;
+
 static void power_poll_timer_cb(void *arg)
 {
     (void)arg;
     /* One device per tick — polling all plugs at once spikes RF/current → brownout on USB. */
     size_t n = 0;
-    if (!mqtt_bridge_is_connected()) {
+    if (s_power_poll_hold || s_interview_busy || wifi_net_is_paused() || !mqtt_bridge_is_connected() ||
+        mqtt_bridge_discovery_busy()) {
         return;
     }
     device_registry_foreach(power_poll_count, &n);
@@ -1186,19 +1276,26 @@ static void start_power_poll_timer(void)
     if (esp_timer_create(&args, &s_power_poll_timer) != ESP_OK) {
         return;
     }
-    /* 5s tick, round-robin → ~15s per plug with 3 metering devices (same cadence, less peak). */
-    esp_timer_start_periodic(s_power_poll_timer, 5 * 1000 * 1000ULL);
-    ESP_LOGI(TAG, "Power/energy poll round-robin every 5s");
+    /* 15s tick — Zigbee polls starve MQTT writes on the shared C6 radio. */
+    esp_timer_start_periodic(s_power_poll_timer, 15 * 1000 * 1000ULL);
+    ESP_LOGI(TAG, "Power/energy poll round-robin every 15s");
 }
 
 void zigbee_coordinator_on_mqtt_connected(void)
 {
-    /* Power poll waits until HA discovery finishes — it starves MQTT on this radio. */
+    /* Hold polls until discovery finishes (or is skipped on a short reconnect). */
+    s_power_poll_hold = true;
+}
+
+void zigbee_coordinator_on_mqtt_disconnected(void)
+{
+    s_power_poll_hold = true;
 }
 
 void zigbee_coordinator_on_discovery_complete(void)
 {
-    ESP_LOGI(TAG, "Discovery complete - enabling power poll");
+    s_power_poll_hold = false;
+    ESP_LOGI(TAG, "Resuming power poll");
     start_power_poll_timer();
 }
 
@@ -1298,10 +1395,9 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
         board_io_set_led(true);
         find_clusters_on_device(annce->short_addr);
         if (wifi_net_is_paused()) {
-            ESP_LOGI(TAG, "Device joined - closing permit join and resuming WiFi");
+            s_hold_wifi_for_interview = true;
+            ESP_LOGI(TAG, "Device joined - closing permit join, WiFi down until interview");
             ezb_bdb_open_network(0);
-            wifi_net_resume();
-            mqtt_bridge_resume();
             mqtt_bridge_publish_permit_state(false);
         }
     } break;
@@ -1334,8 +1430,12 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
             ESP_LOGI(TAG, "Permit join open for %u s", duration);
         } else {
             ESP_LOGI(TAG, "Permit join closed");
-            wifi_net_resume();
-            mqtt_bridge_resume();
+            if (s_hold_wifi_for_interview || s_interview_busy) {
+                ESP_LOGI(TAG, "Holding WiFi down until interview finishes");
+            } else {
+                wifi_net_resume();
+                mqtt_bridge_resume();
+            }
         }
     } break;
     default:
@@ -1539,10 +1639,7 @@ static void publish_from_report(uint16_t short_addr, uint8_t src_ep, uint16_t cl
                 scale->last_energy_kwh = kwh;
                 scale->last_energy_raw = raw;
                 scale->has_last_energy = true;
-                snprintf(buf, sizeof(buf), "%.3f", kwh);
-                ha_discovery_publish_sensor_state(dev, "energy", buf);
-                device_registry_add_capability(dev, ZBGW_CAP_ENERGY);
-                log_power_energy(dev, scale, true);
+                schedule_energy_mqtt(dev, scale);
             }
         } else if (attr_id == EZB_ZCL_ATTR_METERING_INSTANTANEOUS_DEMAND_ID) {
             const uint8_t *p = (const uint8_t *)value;

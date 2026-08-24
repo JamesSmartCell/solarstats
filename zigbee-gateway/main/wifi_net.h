@@ -16,3 +16,6 @@ esp_err_t wifi_net_wait_connected(TickType_t ticks_to_wait);
 esp_err_t wifi_net_pause_for_zigbee(void);
 esp_err_t wifi_net_resume(void);
 bool wifi_net_is_paused(void);
+/* No modem sleep while MQTT is down; TX follows RSSI. Relax PS after MQTT is up. */
+void wifi_net_on_mqtt_up(void);
+void wifi_net_on_mqtt_down(void);

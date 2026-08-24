@@ -8,6 +8,7 @@
 
 esp_err_t ipc_host_start(void);
 bool ipc_host_is_up(void);
+bool ipc_host_peer_ok(void);
 
 esp_err_t ipc_host_send(uint8_t type, uint8_t flags, const void *payload, uint16_t len);
 esp_err_t ipc_host_send_ack(uint16_t seq, uint8_t type);

@@ -60,6 +60,27 @@
       </section>
 
       <section class="panel admin-panel">
+        <h2>Daily load pie</h2>
+        <p class="hint">
+          Mark each metered load as <strong>inverter</strong> or <strong>grid</strong>.
+          The dashboard groups those slices and draws a thick black gap between the two.
+        </p>
+        <div class="table-wrap">
+          <table class="admin-table" id="loadsTable">
+            <thead>
+              <tr>
+                <th>Load</th>
+                <th>Inverter</th>
+                <th>Grid</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint" id="loadsSaved" hidden>Saved</p>
+      </section>
+
+      <section class="panel admin-panel">
         <h2>Sensors</h2>
         <p class="hint">
           <strong>User</strong> = on the board for everyone ·

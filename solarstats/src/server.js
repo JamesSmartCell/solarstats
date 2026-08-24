@@ -19,6 +19,8 @@ import {
   isAdminEmail,
   getAuthSettings,
   getHistory,
+  getLoadConfig,
+  setLoadSources,
   getUserById,
   getUserByEmail,
   insertSample,
@@ -520,6 +522,7 @@ app.get("/api/admin/users", requireAdmin, (_req, res) => {
   res.json({
     users: listUsers(db),
     settings: getAuthSettings(db),
+    loadConfig: getLoadConfig(db),
   });
 });
 
@@ -543,7 +546,13 @@ app.post("/api/admin/settings", requireAdmin, (req, res) => {
     allowNewAccounts: req.body?.allowNewAccounts,
     allowPasskeyEnrollment: req.body?.allowPasskeyEnrollment,
   });
-  res.json({ settings });
+  let loadConfig = getLoadConfig(db);
+  if (req.body?.loadSources) {
+    setLoadSources(db, req.body.loadSources);
+    loadConfig = getLoadConfig(db);
+    broadcast({ type: "loadConfig", loadConfig });
+  }
+  res.json({ settings, loadConfig });
 });
 
 app.get("/api/admin/devices", requireAdmin, (_req, res) => {
@@ -573,7 +582,10 @@ app.get("/solarstats", (_req, res) => {
 
 app.get("/api/history", requireApproved, (req, res) => {
   const range = String(req.query.range || "24h");
-  res.json(getHistory(db, range));
+  res.json({
+    ...getHistory(db, range),
+    loadConfig: getLoadConfig(db),
+  });
 });
 
 app.get("/api/devices", requireApproved, (req, res) => {
@@ -712,6 +724,7 @@ wss.on("connection", (socket) => {
       energyKwhTotal: history.energyKwhTotal,
       latest: history.latest,
       loadsDailyKwh: history.loadsDailyKwh,
+      loadConfig: getLoadConfig(db),
       devices: user
         ? listDevicesForViewer(db, { isAdmin: isAdminEmail(user.email) })
         : [],

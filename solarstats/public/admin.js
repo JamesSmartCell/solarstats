@@ -15,6 +15,7 @@ async function load() {
   const data = await usersRes.json();
   renderSettings(data.settings);
   renderUsers(data.users);
+  renderLoadSources(data.loadConfig || []);
 
   if (devicesRes.ok) {
     const devicesData = await devicesRes.json();
@@ -50,6 +51,64 @@ function renderSettings(settings) {
 
   allowNew.onchange = save;
   allowPk.onchange = save;
+}
+
+function flashSaved(id) {
+  const note = document.getElementById(id);
+  if (!note) return;
+  note.hidden = false;
+  setTimeout(() => {
+    note.hidden = true;
+  }, 1500);
+}
+
+function renderLoadSources(loads) {
+  const tbody = document.querySelector("#loadsTable tbody");
+  tbody.innerHTML = "";
+  for (const load of loads) {
+    const tr = document.createElement("tr");
+    const nameTd = document.createElement("td");
+    nameTd.textContent = load.label || load.key;
+
+    const invTd = document.createElement("td");
+    invTd.className = "acl-cell";
+    const inv = document.createElement("input");
+    inv.type = "radio";
+    inv.name = `load-src-${load.key}`;
+    inv.checked = load.source === "inverter";
+    inv.addEventListener("change", () => {
+      if (inv.checked) saveLoadSource(load.key, "inverter");
+    });
+    invTd.appendChild(inv);
+
+    const gridTd = document.createElement("td");
+    gridTd.className = "acl-cell";
+    const grid = document.createElement("input");
+    grid.type = "radio";
+    grid.name = `load-src-${load.key}`;
+    grid.checked = load.source !== "inverter";
+    grid.addEventListener("change", () => {
+      if (grid.checked) saveLoadSource(load.key, "grid");
+    });
+    gridTd.appendChild(grid);
+
+    tr.append(nameTd, invTd, gridTd);
+    tbody.appendChild(tr);
+  }
+}
+
+async function saveLoadSource(key, source) {
+  const res = await fetch("/api/admin/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ loadSources: { [key]: source } }),
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Load source update failed");
+    load().catch(console.error);
+    return;
+  }
+  flashSaved("loadsSaved");
 }
 
 function renderUsers(users) {

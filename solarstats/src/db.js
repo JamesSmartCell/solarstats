@@ -17,15 +17,19 @@ export function isAdminEmail(email) {
   return String(email || "").trim().toLowerCase() === admin;
 }
 
-const LOAD_KEYS = [
-  "officePc",
-  "frontRoomPc",
-  "pi5",
-  "motorbike",
-  "fridge",
-  "washingMachine",
-  "otherInverter",
+export const LOAD_DEFS = [
+  { key: "officePc", label: "Office PC", color: "#42a5f5", defaultSource: "grid" },
+  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0", defaultSource: "grid" },
+  { key: "pi5", label: "Pi5 Server", color: "#7e57c2", defaultSource: "grid" },
+  { key: "motorbike", label: "Motorbike", color: "#26a69a", defaultSource: "grid" },
+  { key: "fridge", label: "Fridge", color: "#66bb6a", defaultSource: "grid" },
+  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", defaultSource: "inverter" },
+  { key: "otherInverter", label: "Other inverter", color: "#cddc39", defaultSource: "inverter" },
 ];
+
+const LOAD_KEYS = LOAD_DEFS.map((d) => d.key);
+
+const DEFAULT_LOAD_SOURCES = Object.fromEntries(LOAD_DEFS.map((d) => [d.key, d.defaultSource]));
 
 export function openDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -265,6 +269,44 @@ export function setAuthSettings(db, patch) {
     setSettingBool(db, "allow_passkey_enrollment", !!patch.allowPasskeyEnrollment);
   }
   return getAuthSettings(db);
+}
+
+export function getLoadSources(db) {
+  const raw = getMeta(db, "load_sources");
+  let parsed = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    parsed = {};
+  }
+  const out = { ...DEFAULT_LOAD_SOURCES };
+  for (const def of LOAD_DEFS) {
+    const v = parsed[def.key];
+    if (v === "inverter" || v === "grid") out[def.key] = v;
+  }
+  return out;
+}
+
+export function setLoadSources(db, patch) {
+  const current = getLoadSources(db);
+  if (patch && typeof patch === "object") {
+    for (const def of LOAD_DEFS) {
+      const v = patch[def.key];
+      if (v === "inverter" || v === "grid") current[def.key] = v;
+    }
+  }
+  setMeta(db, "load_sources", JSON.stringify(current));
+  return current;
+}
+
+export function getLoadConfig(db) {
+  const sources = getLoadSources(db);
+  return LOAD_DEFS.map((d) => ({
+    key: d.key,
+    label: d.label,
+    color: d.color,
+    source: sources[d.key],
+  }));
 }
 
 function normalizeEmail(email) {

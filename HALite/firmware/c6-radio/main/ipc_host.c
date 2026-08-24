@@ -6,6 +6,7 @@
 
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -18,10 +19,16 @@ static const char *TAG = "ipc_host";
 
 #define IPC_UART_NUM ((uart_port_t)CONFIG_HALITE_IPC_UART_NUM)
 #define RX_BUF_SZ    1024
+/* Same idea as the gateway MQTT watchdog: kick, then reboot after 4 misses. */
+#define IPC_WD_PERIOD_MS  20000
+#define IPC_WD_FAIL_LIMIT 4
 
 static SemaphoreHandle_t s_tx_mu;
 static uint16_t s_seq;
 static bool s_up;
+static bool s_ever_seen_peer;
+static bool s_peer_fresh;
+static int s_missed_pongs;
 static vprintf_like_t s_prev_vprintf;
 static uint8_t s_rx[RX_BUF_SZ];
 static size_t s_rx_len;
@@ -145,8 +152,16 @@ esp_err_t ipc_host_net_status(bool wifi_up, bool mqtt_up, int8_t rssi)
     return ipc_host_send(HALITE_IPC_TYPE_NET_STATUS, 0, &m, sizeof(m));
 }
 
+static void note_peer(void)
+{
+    s_ever_seen_peer = true;
+    s_peer_fresh = true;
+    s_missed_pongs = 0;
+}
+
 static void handle_frame(const ipc_frame_view_t *f)
 {
+    note_peer();
     if (f->flags & HALITE_IPC_FLAG_IS_ACK) {
         return;
     }
@@ -160,6 +175,8 @@ static void handle_frame(const ipc_frame_view_t *f)
         (void)ipc_host_send(HALITE_IPC_TYPE_PONG, 0, &uptime_ms, sizeof(uptime_ms));
         break;
     }
+    case HALITE_IPC_TYPE_PONG:
+        break;
     case HALITE_IPC_TYPE_PERMIT_JOIN: {
         if (f->len < sizeof(ipc_permit_join_t)) {
             (void)ipc_host_send_cmd_result(f->seq, ESP_ERR_INVALID_SIZE);
@@ -252,6 +269,27 @@ static void rx_task(void *arg)
     }
 }
 
+static void ipc_watchdog_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(IPC_WD_PERIOD_MS));
+        if (s_peer_fresh) {
+            s_peer_fresh = false;
+            s_missed_pongs = 0;
+        } else if (s_ever_seen_peer) {
+            s_missed_pongs++;
+            ESP_LOGW(TAG, "IPC watchdog: no P4 (%d/%d)", s_missed_pongs, IPC_WD_FAIL_LIMIT);
+            if (s_missed_pongs >= IPC_WD_FAIL_LIMIT) {
+                ESP_LOGE(TAG, "IPC watchdog: serial dead - restarting");
+                vTaskDelay(pdMS_TO_TICKS(250));
+                esp_restart();
+            }
+        }
+        (void)ipc_host_send(HALITE_IPC_TYPE_PING, HALITE_IPC_FLAG_NEEDS_ACK, NULL, 0);
+    }
+}
+
 esp_err_t ipc_host_start(void)
 {
     s_tx_mu = xSemaphoreCreateMutex();
@@ -276,6 +314,9 @@ esp_err_t ipc_host_start(void)
     if (ok != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
+    if (xTaskCreate(ipc_watchdog_task, "ipc_wd", 2048, NULL, 3, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "IPC watchdog task failed to start");
+    }
     s_up = true;
     s_prev_vprintf = esp_log_set_vprintf(ipc_log_vprintf);
     ESP_LOGI(TAG, "IPC UART%d TX=%d RX=%d baud=%d (logs mirrored to P4)", CONFIG_HALITE_IPC_UART_NUM,
@@ -286,4 +327,9 @@ esp_err_t ipc_host_start(void)
 bool ipc_host_is_up(void)
 {
     return s_up;
+}
+
+bool ipc_host_peer_ok(void)
+{
+    return s_ever_seen_peer && s_missed_pongs == 0;
 }

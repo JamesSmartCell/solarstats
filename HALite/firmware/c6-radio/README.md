@@ -1,8 +1,8 @@
 # HALite C6 radio
 
-ESP-IDF firmware for **ESP32-C6**: Zigbee coordinator + Wi‑Fi, talking to the P4 over **UART IPC**.
+ESP-IDF firmware for **ESP32-C6**: Zigbee coordinator talking to the P4 over **UART IPC**.
 
-Extracted from [`zigbee-gateway`](../../../zigbee-gateway) (that project is unchanged and still MQTT→HA).
+Extracted from [`zigbee-gateway`](../../../zigbee-gateway) (that project is unchanged and still MQTT→HA). The host path here is serial, not LAN MQTT — there is no broker IP to “block.”
 
 ## What this image does
 
@@ -10,9 +10,16 @@ Extracted from [`zigbee-gateway`](../../../zigbee-gateway) (that project is unch
 |------|------|
 | Zigbee 802.15.4 | Same stack as zigbee-gateway (`zigbee_coordinator.c`) |
 | UART IPC | Host link to P4 — joins, attr reports, permit join, on/off commands |
-| Wi‑Fi STA | ESPHome MQTT, later SmartHub/cloud — **not** used to reach P4 |
+| Wi‑Fi / MQTT | Optional. Hosted slave lets the **P4** own STA. Empty MQTT host disables ESPHome ingest. Neither is used to reach the P4. |
 
-BOOT button still opens permit-join (pauses Wi‑Fi during pair, same as the gateway).
+BOOT still opens permit-join (pauses C6 STA during pair if that STA is running).
+
+## Radio lessons from zigbee-gateway (no MQTT)
+
+- Power/energy poll is **15 s** round-robin and starts when Zigbee is up — it does **not** wait for MQTT.
+- Pairing holds those polls so interviews get the radio.
+- Rediscover / re-interview is paced so a P4 `CMD_REDISCOVER` does not dump every device at once.
+- IPC watchdog: after the P4 has answered once, four silent 20 s periods restart the C6 (Zigbee NVS survives). Bench without a P4 never arms the reboot.
 
 ## Build / flash
 
