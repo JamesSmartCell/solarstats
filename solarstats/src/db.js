@@ -1287,11 +1287,4 @@ export function completeDeviceCommand(db, id, ok) {
   ).run(ok ? "done" : "error", now, id);
 }
 
-export function optimisticallySetDeviceState(db, entityId, state) {
-  const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE ha_devices SET state = ?, updated_at = ? WHERE entity_id = ?`,
-  ).run(String(state), now, entityId);
-}
-
 export { LOAD_KEYS, DEFAULT_HA_DEVICES, MIN_LIVE_BATTERY_V };

@@ -44,7 +44,6 @@ import {
   enqueueDeviceCommand,
   claimPendingCommands,
   completeDeviceCommand,
-  optimisticallySetDeviceState,
   listTrackedEntityIds,
   countDevices,
 } from "./db.js";
@@ -643,12 +642,12 @@ app.post("/api/devices/:entityId/toggle", requireApproved, (req, res) => {
     userId: req.user.id,
   });
 
-  // Optimistic flip for snappier UI; next poll corrects if HA disagrees.
-  const next = String(device.state || "").toLowerCase() === "on" ? "off" : "on";
-  optimisticallySetDeviceState(db, entityId, next);
-  const devices = listDevicesForViewer(db, { isAdmin: admin });
-  broadcastDevices();
-  res.json({ ok: true, devices });
+  // Keep last HA state in the DB. The dashboard locks locally until ingest
+  // reports the new state (or the client times out).
+  res.json({
+    ok: true,
+    devices: listDevicesForViewer(db, { isAdmin: admin }),
+  });
 });
 
 app.post("/api/ingest", authorizeIngest, (req, res) => {

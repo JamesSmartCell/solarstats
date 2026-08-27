@@ -53,8 +53,59 @@ const state = {
   loadsPowerW: null,
   loadSlices: LOAD_SLICES.map((s) => ({ ...s })),
   devices: [],
-  toggling: new Set(),
+  pendingToggles: new Map(),
 };
+
+const TOGGLE_LOCK_MS = 20000;
+
+function switchState(device) {
+  const value = String(device?.state || "").toLowerCase();
+  if (value === "on") return "on";
+  if (value === "off") return "off";
+  return null;
+}
+
+function clearPendingToggle(entityId) {
+  const pending = state.pendingToggles.get(entityId);
+  if (pending?.timer) clearTimeout(pending.timer);
+  state.pendingToggles.delete(entityId);
+}
+
+function expirePendingToggle(entityId) {
+  const pending = state.pendingToggles.get(entityId);
+  if (!pending) return;
+  if (pending.timer) clearTimeout(pending.timer);
+  state.pendingToggles.delete(entityId);
+  state.devices = state.devices.map((device) =>
+    device.entityId === entityId
+      ? { ...device, state: pending.from, on: pending.from === "on" }
+      : device,
+  );
+  paintDevices();
+}
+
+function startPendingToggle(entityId, from) {
+  clearPendingToggle(entityId);
+  const to = from === "on" ? "off" : "on";
+  const timer = setTimeout(() => expirePendingToggle(entityId), TOGGLE_LOCK_MS);
+  state.pendingToggles.set(entityId, { from, to, timer });
+}
+
+function overlayPendingDevice(device) {
+  const pending = state.pendingToggles.get(device.entityId);
+  if (!pending) return device;
+  return { ...device, state: pending.to, on: pending.to === "on" };
+}
+
+function confirmPendingFrom(devices) {
+  for (const device of devices) {
+    const pending = state.pendingToggles.get(device.entityId);
+    if (!pending) continue;
+    if (switchState(device) === pending.to) {
+      clearPendingToggle(device.entityId);
+    }
+  }
+}
 
 function applyLoadConfig(config) {
   if (!Array.isArray(config) || !config.length) return;
@@ -507,8 +558,15 @@ function setLive(live) {
   document.getElementById("connDot").classList.toggle("live", live);
 }
 
-function renderDevices(devices) {
-  state.devices = Array.isArray(devices) ? devices : [];
+function renderDevices(devices, { confirmPending = true } = {}) {
+  if (Array.isArray(devices)) {
+    if (confirmPending) confirmPendingFrom(devices);
+    state.devices = devices.map(overlayPendingDevice);
+  }
+  paintDevices();
+}
+
+function paintDevices() {
   const sensors = state.devices.filter((d) => isSensorDomain(d.domain));
   const clickable = state.devices.filter((d) => !isSensorDomain(d.domain));
   renderSensors(sensors);
@@ -561,11 +619,20 @@ function renderClickableDevices(devices) {
     btn.className = "device-btn";
     btn.dataset.entityId = d.entityId;
     btn.textContent = d.name || d.entityId;
-    const on = d.on === true || String(d.state || "").toLowerCase() === "on";
-    const known = ["on", "off"].includes(String(d.state || "").toLowerCase());
+    const pending = state.pendingToggles.get(d.entityId);
+    const on = pending
+      ? pending.to === "on"
+      : d.on === true || String(d.state || "").toLowerCase() === "on";
+    const known = pending
+      ? true
+      : ["on", "off"].includes(String(d.state || "").toLowerCase());
     btn.classList.add(known ? (on ? "is-on" : "is-off") : "is-unknown");
+    if (pending) btn.classList.add("is-pending");
     btn.setAttribute("aria-pressed", on ? "true" : "false");
-    if (state.toggling.has(d.entityId)) btn.disabled = true;
+    if (pending) {
+      btn.disabled = true;
+      btn.setAttribute("aria-busy", "true");
+    }
     btn.addEventListener("click", () => toggleDevice(d.entityId));
     els.deviceGrid.appendChild(btn);
   }
@@ -583,9 +650,11 @@ async function loadDevices() {
 }
 
 async function toggleDevice(entityId) {
-  if (!entityId || state.toggling.has(entityId)) return;
-  state.toggling.add(entityId);
-  renderDevices(state.devices);
+  if (!entityId || state.pendingToggles.has(entityId)) return;
+  const current = state.devices.find((d) => d.entityId === entityId);
+  const from = switchState(current) === "on" ? "on" : "off";
+  startPendingToggle(entityId, from);
+  renderDevices(state.devices, { confirmPending: false });
   try {
     const res = await fetch(`/api/devices/${encodeURIComponent(entityId)}/toggle`, {
       method: "POST",
@@ -593,13 +662,11 @@ async function toggleDevice(entityId) {
     });
     if (!res.ok) throw new Error(`toggle ${res.status}`);
     const data = await res.json();
-    if (data.devices) renderDevices(data.devices);
+    if (data.devices) renderDevices(data.devices, { confirmPending: false });
   } catch (err) {
     console.error(err);
+    expirePendingToggle(entityId);
     await loadDevices().catch(() => {});
-  } finally {
-    state.toggling.delete(entityId);
-    renderDevices(state.devices);
   }
 }
 
