@@ -71,6 +71,104 @@ function pieRowKey(load) {
   return load.builtin ? load.key : load.entityId || load.key;
 }
 
+function mergeOptionsFor(parentKey, rows) {
+  return rows.filter((row) => {
+    const key = pieRowKey(row);
+    if (key === parentKey) return false;
+    if (row.mergedInto) return false;
+    if ((row.mergeChildren || []).length) return false;
+    return true;
+  });
+}
+
+function fillMergeSelect(select, rows, selectedKey) {
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = "Choose a feed…";
+  select.appendChild(blank);
+  for (const row of rows) {
+    const option = document.createElement("option");
+    option.value = pieRowKey(row);
+    option.textContent = row.label || row.key;
+    if (selectedKey && option.value === selectedKey) option.selected = true;
+    select.appendChild(option);
+  }
+}
+
+function renderMergeCell(load, rows) {
+  const td = document.createElement("td");
+  td.className = "merge-cell";
+  const key = pieRowKey(load);
+
+  if (load.mergedInto) {
+    const note = document.createElement("span");
+    note.className = "merge-into";
+    note.textContent = `→ ${load.mergedInto.label || load.mergedInto.key}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "merge-remove";
+    remove.title = "Unmerge";
+    remove.textContent = "×";
+    remove.addEventListener("click", () => savePieUnmerge(key));
+    td.append(note, remove);
+    return td;
+  }
+
+  const stack = document.createElement("div");
+  stack.className = "merge-stack";
+  const children = Array.isArray(load.mergeChildren) ? load.mergeChildren : [];
+  const available = mergeOptionsFor(key, rows);
+
+  for (const child of children) {
+    const row = document.createElement("div");
+    row.className = "merge-row";
+    const select = document.createElement("select");
+    select.className = "merge-select";
+    select.title = "Merged into this feed";
+    fillMergeSelect(select, [{ key: child.key, label: child.label }, ...available], child.key);
+    select.addEventListener("change", () => {
+      if (!select.value || select.value === child.key) return;
+      savePieUnmerge(child.key).then((ok) => {
+        if (ok) savePieMerge(key, select.value);
+      });
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "merge-remove";
+    remove.title = "Unmerge";
+    remove.textContent = "×";
+    remove.addEventListener("click", () => savePieUnmerge(child.key));
+    row.append(select, remove);
+    stack.appendChild(row);
+  }
+
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "merge-add";
+  add.title = "Merge another feed into this one";
+  add.textContent = "+";
+  add.disabled = available.length === 0;
+  add.addEventListener("click", () => {
+    if (add.dataset.open === "1" || available.length === 0) return;
+    add.dataset.open = "1";
+    const row = document.createElement("div");
+    row.className = "merge-row";
+    const select = document.createElement("select");
+    select.className = "merge-select";
+    fillMergeSelect(select, available, "");
+    select.addEventListener("change", () => {
+      if (!select.value) return;
+      savePieMerge(key, select.value);
+    });
+    row.appendChild(select);
+    stack.insertBefore(row, add);
+    select.focus();
+  });
+  stack.appendChild(add);
+  td.appendChild(stack);
+  return td;
+}
+
 function renderPieRows(rows) {
   const tbody = document.querySelector("#loadsTable tbody");
   const empty = document.getElementById("loadsEmpty");
@@ -82,6 +180,7 @@ function renderPieRows(rows) {
     const key = pieRowKey(load);
     const source = load.source === "inverter" ? "inverter" : "grid";
     const tr = document.createElement("tr");
+    if (load.mergedInto) tr.classList.add("is-merged");
 
     const nameTd = document.createElement("td");
     nameTd.textContent = load.label || load.key;
@@ -122,13 +221,16 @@ function renderPieRows(rows) {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = load.onPie !== false;
-    cb.title = "Show this energy sensor on the pie";
+    cb.disabled = !!load.mergedInto;
+    cb.title = load.mergedInto
+      ? `Merged into ${load.mergedInto.label || load.mergedInto.key}`
+      : "Show this energy sensor on the pie";
     cb.addEventListener("change", () => {
       savePieExtra(key, cb.checked);
     });
     includeTd.appendChild(cb);
 
-    tr.append(nameTd, entityTd, kwhTd, invTd, gridTd, includeTd);
+    tr.append(nameTd, entityTd, kwhTd, invTd, gridTd, includeTd, renderMergeCell(load, list));
     tbody.appendChild(tr);
   }
 }
@@ -147,18 +249,33 @@ async function saveLoadSource(key, source) {
   flashSaved("loadsSaved");
 }
 
-async function savePieExtra(entityId, onPie) {
+async function postPieSettings(body) {
   const res = await fetch("/api/admin/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pieExtra: { entityId, onPie } }),
+    body: JSON.stringify(body),
   });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    alert((await res.json().catch(() => ({}))).error || "Pie update failed");
+    alert(data.error || "Pie update failed");
     load().catch(console.error);
-    return;
+    return null;
   }
   flashSaved("loadsSaved");
+  if (data.pieRows) renderPieRows(data.pieRows);
+  return data;
+}
+
+async function savePieExtra(entityId, onPie) {
+  return postPieSettings({ pieExtra: { entityId, onPie } });
+}
+
+async function savePieMerge(parentKey, childKey) {
+  return postPieSettings({ pieMerge: { parentKey, childKey } });
+}
+
+async function savePieUnmerge(childKey) {
+  return postPieSettings({ pieUnmerge: { childKey } });
 }
 
 function renderUsers(users) {

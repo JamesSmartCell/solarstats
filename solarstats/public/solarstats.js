@@ -40,6 +40,8 @@ const els = {
   deviceGrid: document.getElementById("deviceGrid"),
   sensorSection: document.getElementById("sensorSection"),
   sensorList: document.getElementById("sensorList"),
+  currentLoadsList: document.getElementById("currentLoadsList"),
+  currentLoadsTotal: document.getElementById("currentLoadsTotal"),
 };
 
 const state = {
@@ -48,6 +50,7 @@ const state = {
   energyKwhTotal: 0,
   rangeStartMs: 0,
   loadsDailyKwh: null,
+  loadsPowerW: null,
   loadSlices: LOAD_SLICES.map((s) => ({ ...s })),
   devices: [],
   toggling: new Set(),
@@ -61,7 +64,21 @@ function applyLoadConfig(config) {
       key: s.key,
       label: s.label || s.key,
       color: s.color || "#90a4ae",
+      members: Array.isArray(s.members) ? s.members.filter(Boolean) : [],
     }));
+}
+
+function sliceKeys(slice) {
+  return [slice.key, ...(slice.members || [])];
+}
+
+function sumMapValues(map, keys) {
+  let total = 0;
+  for (const key of keys) {
+    const n = Number(map?.[key]);
+    if (Number.isFinite(n) && n > 0) total += n;
+  }
+  return total;
 }
 
 function currentLoadSlices() {
@@ -270,7 +287,11 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
         callbacks: {
           label(ctx) {
             const v = Number(ctx.raw);
-            return `${ctx.label}: ${Number.isFinite(v) ? v.toFixed(3) : "—"} kWh`;
+            const slice = currentLoadSlices()[ctx.dataIndex];
+            const extra = slice?.members?.length
+              ? ` · ${slice.members.length} merged`
+              : "";
+            return `${ctx.label}: ${Number.isFinite(v) ? v.toFixed(3) : "—"} kWh${extra}`;
           },
         },
       },
@@ -291,6 +312,12 @@ function flash(el) {
   el.classList.add("flash");
 }
 
+function formatWatts(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${n >= 100 ? n.toFixed(0) : n.toFixed(1)} W`;
+}
+
 function updateLoadsPie(loads) {
   if (loads) state.loadsDailyKwh = loads;
   const src = state.loadsDailyKwh || {};
@@ -298,11 +325,59 @@ function updateLoadsPie(loads) {
   const ds = loadsPieChart.data.datasets[0];
   loadsPieChart.data.labels = slices.map((s) => s.label);
   ds.backgroundColor = slices.map((s) => s.color);
-  ds.data = slices.map((s) => {
-    const n = Number(src[s.key]);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  });
+  ds.data = slices.map((s) => sumMapValues(src, sliceKeys(s)));
   loadsPieChart.update("none");
+  updateCurrentLoads();
+}
+
+function updateCurrentLoads(power) {
+  if (power) state.loadsPowerW = power;
+  if (!els.currentLoadsList) return;
+
+  const src = state.loadsPowerW || {};
+  const rows = currentLoadSlices()
+    .map((s) => ({
+      label: s.label,
+      color: s.color,
+      watts: sumMapValues(src, sliceKeys(s)),
+    }))
+    .filter((row) => row.watts > 0)
+    .sort((a, b) => b.watts - a.watts);
+
+  els.currentLoadsList.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("li");
+    empty.className = "current-loads-empty";
+    empty.textContent = "Nothing drawing power";
+    els.currentLoadsList.appendChild(empty);
+  } else {
+    for (const row of rows) {
+      const li = document.createElement("li");
+      li.className = "current-load-row";
+
+      const name = document.createElement("span");
+      name.className = "current-load-name";
+      const swatch = document.createElement("span");
+      swatch.className = "current-load-swatch";
+      swatch.style.background = row.color;
+      const label = document.createElement("span");
+      label.className = "current-load-label";
+      label.textContent = row.label;
+      name.append(swatch, label);
+
+      const watts = document.createElement("span");
+      watts.className = "current-load-watts";
+      watts.textContent = formatWatts(row.watts);
+
+      li.append(name, watts);
+      els.currentLoadsList.appendChild(li);
+    }
+  }
+
+  if (els.currentLoadsTotal) {
+    const total = rows.reduce((sum, row) => sum + row.watts, 0);
+    els.currentLoadsTotal.textContent = rows.length ? formatWatts(total) : "—";
+  }
 }
 
 function updateTiles(sample) {
@@ -334,6 +409,9 @@ function updateTiles(sample) {
 
   if (sample.loadsDailyKwh) {
     updateLoadsPie(sample.loadsDailyKwh);
+  }
+  if (sample.loadsPowerW) {
+    updateCurrentLoads(sample.loadsPowerW);
   }
 }
 
@@ -386,6 +464,7 @@ function applyHistory(payload) {
   );
   applyLoadConfig(payload.loadConfig);
   updateLoadsPie(payload.loadsDailyKwh || payload.latest?.loadsDailyKwh || null);
+  updateCurrentLoads(payload.loadsPowerW || payload.latest?.loadsPowerW || null);
   updateChrome();
 }
 
@@ -543,10 +622,14 @@ function connectWs() {
         }
         applyLoadConfig(msg.loadConfig);
         if (msg.loadsDailyKwh) updateLoadsPie(msg.loadsDailyKwh);
+        if (msg.loadsPowerW) updateCurrentLoads(msg.loadsPowerW);
         if (msg.devices) renderDevices(msg.devices);
       } else if (msg.type === "loadConfig") {
         applyLoadConfig(msg.loadConfig);
         updateLoadsPie();
+        updateCurrentLoads();
+      } else if (msg.type === "loadsPower") {
+        updateCurrentLoads(msg.loadsPowerW);
       } else if (msg.type === "sample") {
         applySample(msg.sample);
       } else if (msg.type === "history") {

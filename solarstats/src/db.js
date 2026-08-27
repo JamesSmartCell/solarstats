@@ -18,14 +18,23 @@ export function isAdminEmail(email) {
 }
 
 export const LOAD_DEFS = [
-  { key: "officePc", label: "Office PC", color: "#42a5f5", defaultSource: "grid", entityId: "sensor.office_pc_synth_energy_daily" },
-  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0", defaultSource: "grid", entityId: "sensor.front_room_pc_synth_energy_daily" },
-  { key: "pi5", label: "Pi5 Server", color: "#7e57c2", defaultSource: "grid", entityId: "sensor.pi5_server_energy_daily_2" },
-  { key: "motorbike", label: "Motorbike", color: "#26a69a", defaultSource: "grid", entityId: "sensor.motorbike_charger_energy_daily_2" },
-  { key: "fridge", label: "Fridge", color: "#66bb6a", defaultSource: "grid", entityId: "sensor.fridge_energy_daily_2" },
-  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", defaultSource: "inverter", entityId: "sensor.inverter_loads_energy_daily" },
-  { key: "otherInverter", label: "Other inverter", color: "#cddc39", defaultSource: "inverter", entityId: "sensor.inverter_unmetered_energy_daily" },
+  { key: "officePc", label: "Office PC", color: "#42a5f5", defaultSource: "grid", entityId: "sensor.office_pc_synth_energy_daily", powerEntityId: "sensor.smart_socket_2_power" },
+  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0", defaultSource: "grid", entityId: "sensor.front_room_pc_synth_energy_daily", powerEntityId: "sensor.smart_socket_power" },
+  { key: "pi5", label: "Pi5 Server", color: "#7e57c2", defaultSource: "grid", entityId: "sensor.pi5_server_energy_daily_2", powerEntityId: "sensor.ts011f_power" },
+  { key: "motorbike", label: "Motorbike", color: "#26a69a", defaultSource: "grid", entityId: "sensor.motorbike_charger_energy_daily_2", powerEntityId: "sensor.zigbeesensor_power" },
+  { key: "fridge", label: "Fridge", color: "#66bb6a", defaultSource: "grid", entityId: "sensor.fridge_energy_daily_2", powerEntityId: "sensor.kitchen_refrigerator_power" },
+  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", defaultSource: "inverter", entityId: "sensor.inverter_loads_energy_daily", powerEntityId: "sensor.laundry_room_washer_power_approx" },
+  { key: "otherInverter", label: "Other inverter", color: "#cddc39", defaultSource: "inverter", entityId: "sensor.inverter_unmetered_energy_daily", powerEntityId: "sensor.inverter_unmetered_power" },
 ];
+
+/** Extra daily-energy sensors → their live power (W) entity. */
+const EXTRA_POWER_BY_ENERGY_ID = {
+  "sensor.nbn_modem_energy_daily": "sensor.ts011f_power_3",
+  "sensor.router_energy_daily": "sensor.zigbeesensor_power_2",
+  "sensor.tv_energy_daily": "sensor.ts011f_power_2",
+  "sensor.white_robot_energy_daily": "sensor.ts011f_power_5",
+  "sensor.living_room_charger_energy_daily": "sensor.ts011f_power_4",
+};
 
 const LOAD_KEYS = LOAD_DEFS.map((d) => d.key);
 const BUILTIN_LOAD_ENTITY_IDS = new Set(LOAD_DEFS.map((d) => d.entityId).filter(Boolean));
@@ -146,6 +155,11 @@ export function openDatabase(dbPath) {
       requested_by INTEGER,
       created_at TEXT NOT NULL,
       completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS pie_merges (
+      child_key TEXT PRIMARY KEY,
+      parent_key TEXT NOT NULL
     );
   `);
 
@@ -387,6 +401,132 @@ function isPieVisible(visibility, key, builtin) {
   return !!builtin;
 }
 
+export function getPieMerges(db) {
+  const rows = db
+    .prepare(`SELECT child_key, parent_key FROM pie_merges ORDER BY parent_key, child_key`)
+    .all();
+  const childrenByParent = {};
+  const parentByChild = {};
+  for (const row of rows) {
+    const child = String(row.child_key || "").trim();
+    const parent = String(row.parent_key || "").trim();
+    if (!child || !parent) continue;
+    parentByChild[child] = parent;
+    if (!childrenByParent[parent]) childrenByParent[parent] = [];
+    childrenByParent[parent].push(child);
+  }
+  return { childrenByParent, parentByChild };
+}
+
+function mergeError(code, message) {
+  const err = new Error(message);
+  err.status = 400;
+  err.code = code;
+  return err;
+}
+
+export function addPieMerge(db, parentKey, childKey) {
+  const parent = String(parentKey || "").trim();
+  const child = String(childKey || "").trim();
+  if (!parent || !child) {
+    throw mergeError("invalid_merge", "Parent and child are required");
+  }
+  if (parent === child) {
+    throw mergeError("invalid_merge", "A feed cannot merge into itself");
+  }
+
+  const { childrenByParent, parentByChild } = getPieMerges(db);
+  if (parentByChild[parent]) {
+    throw mergeError("parent_is_child", "Cannot merge into a feed that is already merged");
+  }
+  if (childrenByParent[child]?.length) {
+    throw mergeError("child_is_parent", "Unmerge this feed's children before merging it into another");
+  }
+
+  db.prepare(
+    `INSERT INTO pie_merges (child_key, parent_key) VALUES (?, ?)
+     ON CONFLICT(child_key) DO UPDATE SET parent_key = excluded.parent_key`,
+  ).run(child, parent);
+  return getPieMerges(db);
+}
+
+export function removePieMerge(db, childKey) {
+  const child = String(childKey || "").trim();
+  if (!child) {
+    throw mergeError("invalid_merge", "Child is required");
+  }
+  db.prepare(`DELETE FROM pie_merges WHERE child_key = ?`).run(child);
+  return getPieMerges(db);
+}
+
+function isPowerSensor(device) {
+  const entityId = String(device?.entityId || device?.entity_id || "");
+  const domain = String(device?.domain || entityId.split(".")[0] || "");
+  if (domain !== "sensor") return false;
+  if (isEnergySensor(device)) return false;
+  const deviceClass = String(device?.deviceClass || device?.device_class || "").toLowerCase();
+  if (deviceClass === "power") return true;
+  const unit = String(device?.unit || "").toLowerCase().replace(/\s+/g, "");
+  if (unit === "w" || unit === "kw" || unit === "mw") return true;
+  return /(^|[._])power(_\d+)?$/i.test(entityId);
+}
+
+function nameStem(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/energy[_\s-]*(daily|from[_\s-]*power|yesterday).*$/g, "")
+    .replace(/\bsynth\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolvePowerEntityId(row, devicesById, powerSensors) {
+  const mapped =
+    row.powerEntityId ||
+    EXTRA_POWER_BY_ENERGY_ID[row.entityId] ||
+    EXTRA_POWER_BY_ENERGY_ID[row.key];
+  if (mapped && devicesById.has(mapped)) return mapped;
+  if (mapped) return mapped;
+
+  const stem = nameStem(row.label) || nameStem(row.entityId || row.key);
+  if (!stem) return null;
+
+  const exact = powerSensors.find((d) => nameStem(d.name) === stem);
+  if (exact) return exact.entityId;
+
+  const fromEntity = powerSensors.find((d) => {
+    const idStem = nameStem(String(d.entityId || "").replace(/_power(_\d+)?$/i, ""));
+    return idStem && idStem === stem;
+  });
+  return fromEntity?.entityId || null;
+}
+
+export function getLatestLoadsPower(db) {
+  const devices = listAllDevices(db);
+  const devicesById = new Map(devices.map((d) => [d.entityId, d]));
+  const powerSensors = devices.filter(isPowerSensor);
+  const out = {};
+
+  for (const def of LOAD_DEFS) {
+    const powerId = resolvePowerEntityId(def, devicesById, powerSensors);
+    out[def.key] = powerId ? toNumber(devicesById.get(powerId)?.state) : null;
+  }
+
+  for (const device of devices) {
+    if (!isPieEnergyCandidate(device)) continue;
+    const row = {
+      key: device.entityId,
+      label: device.name || device.entityId,
+      entityId: device.entityId,
+    };
+    const powerId = resolvePowerEntityId(row, devicesById, powerSensors);
+    out[device.entityId] = powerId ? toNumber(devicesById.get(powerId)?.state) : null;
+  }
+
+  return out;
+}
+
 export function setPieExtra(db, entityId, onPie) {
   const id = String(entityId || "").trim();
   if (!id) return getPieExtraIds(db);
@@ -404,8 +544,11 @@ export function setPieExtra(db, entityId, onPie) {
 
 export function getPieAdminRows(db) {
   const latest = getLatestLoadsDaily(db) || {};
+  const power = getLatestLoadsPower(db);
   const sources = getLoadSources(db);
   const visibility = getPieVisibility(db);
+  const { childrenByParent, parentByChild } = getPieMerges(db);
+  const labelByKey = Object.fromEntries(LOAD_DEFS.map((d) => [d.key, d.label]));
 
   const builtin = LOAD_DEFS.map((d) => ({
     key: d.key,
@@ -413,30 +556,67 @@ export function getPieAdminRows(db) {
     color: d.color,
     source: sources[d.key] || d.defaultSource,
     entityId: d.entityId,
+    powerEntityId: d.powerEntityId || null,
     builtin: true,
     onPie: isPieVisible(visibility, d.key, true),
     kwh: latest[d.key] ?? null,
+    watts: power[d.key] ?? null,
   }));
 
   const extras = listAllDevices(db)
     .filter((d) => isPieEnergyCandidate(d))
-    .map((d) => ({
-      key: d.entityId,
-      label: d.name || d.entityId,
-      color: colorForKey(d.entityId),
-      source: sources[d.entityId] || "grid",
-      entityId: d.entityId,
-      builtin: false,
-      onPie: isPieVisible(visibility, d.entityId, false),
-      kwh: latest[d.entityId] ?? toNumber(d.state),
-    }))
+    .map((d) => {
+      labelByKey[d.entityId] = d.name || d.entityId;
+      return {
+        key: d.entityId,
+        label: d.name || d.entityId,
+        color: colorForKey(d.entityId),
+        source: sources[d.entityId] || "grid",
+        entityId: d.entityId,
+        powerEntityId: EXTRA_POWER_BY_ENERGY_ID[d.entityId] || null,
+        builtin: false,
+        onPie: isPieVisible(visibility, d.entityId, false),
+        kwh: latest[d.entityId] ?? toNumber(d.state),
+        watts: power[d.entityId] ?? null,
+      };
+    })
     .sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
-  return [...builtin, ...extras];
+  const rows = [...builtin, ...extras];
+  const rowByKey = new Map(rows.map((row) => [row.key, row]));
+
+  return rows.map((row) => {
+    const parentKey = parentByChild[row.key] || null;
+    const parentRow = parentKey ? rowByKey.get(parentKey) : null;
+    const childKeys = childrenByParent[row.key] || [];
+    return {
+      ...row,
+      mergedInto: parentKey
+        ? { key: parentKey, label: parentRow?.label || labelByKey[parentKey] || parentKey }
+        : null,
+      mergeChildren: childKeys.map((key) => ({
+        key,
+        label: rowByKey.get(key)?.label || labelByKey[key] || key,
+      })),
+    };
+  });
 }
 
 export function getLoadConfig(db) {
-  return getPieAdminRows(db).filter((row) => row.onPie);
+  return getPieAdminRows(db)
+    .filter((row) => row.onPie && !row.mergedInto)
+    .map((row) => ({
+      key: row.key,
+      label: row.label,
+      color: row.color,
+      source: row.source,
+      entityId: row.entityId,
+      builtin: row.builtin,
+      onPie: true,
+      kwh: row.kwh,
+      watts: row.watts,
+      members: row.mergeChildren.map((child) => child.key),
+    }));
 }
 
 function normalizeEmail(email) {
@@ -705,6 +885,7 @@ export function insertSample(db, payload) {
         ...sampleToApi(lastGood),
         energyKwhTotal: getEnergyTotal(db),
         loadsDailyKwh: loads || loadsFromRow(lastGood),
+        loadsPowerW: getLatestLoadsPower(db),
       };
     }
     return {
@@ -712,6 +893,7 @@ export function insertSample(db, payload) {
       reason: "unavailable",
       energyKwhTotal: getEnergyTotal(db),
       loadsDailyKwh: loads,
+      loadsPowerW: getLatestLoadsPower(db),
     };
   }
 
@@ -778,6 +960,7 @@ export function insertSample(db, payload) {
     skipped: false,
     ...sampleToApi(sample),
     energyKwhTotal: total,
+    loadsPowerW: getLatestLoadsPower(db),
   };
 }
 
@@ -932,6 +1115,7 @@ export function getHistory(db, range = "24h") {
         }
       : null,
     loadsDailyKwh: loadsLatest,
+    loadsPowerW: getLatestLoadsPower(db),
     samples: reduced.map(sampleToApi),
   };
 }

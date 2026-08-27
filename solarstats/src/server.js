@@ -23,6 +23,8 @@ import {
   getPieAdminRows,
   setLoadSources,
   setPieExtra,
+  addPieMerge,
+  removePieMerge,
   getUserById,
   getUserByEmail,
   insertSample,
@@ -563,6 +565,21 @@ app.post("/api/admin/settings", requireAdmin, (req, res) => {
       broadcast({ type: "loadConfig", loadConfig });
     }
   }
+  try {
+    if (req.body?.pieMerge) {
+      addPieMerge(db, req.body.pieMerge.parentKey, req.body.pieMerge.childKey);
+      loadConfig = getLoadConfig(db);
+      broadcast({ type: "loadConfig", loadConfig });
+    }
+    if (req.body?.pieUnmerge) {
+      removePieMerge(db, req.body.pieUnmerge.childKey);
+      loadConfig = getLoadConfig(db);
+      broadcast({ type: "loadConfig", loadConfig });
+    }
+  } catch (err) {
+    const status = err.status || 400;
+    return res.status(status).json({ error: err.message || "merge_failed" });
+  }
   res.json({ settings, loadConfig, pieRows: getPieAdminRows(db) });
 });
 
@@ -639,6 +656,9 @@ app.post("/api/ingest", authorizeIngest, (req, res) => {
     const sample = insertSample(db, req.body || {});
     if (!sample.skipped) {
       broadcast({ type: "sample", sample });
+    }
+    if (sample.loadsPowerW) {
+      broadcast({ type: "loadsPower", loadsPowerW: sample.loadsPowerW });
     }
     broadcastDevices();
     res.json({ ok: true, sample });
@@ -735,6 +755,7 @@ wss.on("connection", (socket) => {
       energyKwhTotal: history.energyKwhTotal,
       latest: history.latest,
       loadsDailyKwh: history.loadsDailyKwh,
+      loadsPowerW: history.loadsPowerW,
       loadConfig: getLoadConfig(db),
       devices: user
         ? listDevicesForViewer(db, { isAdmin: isAdminEmail(user.email) })

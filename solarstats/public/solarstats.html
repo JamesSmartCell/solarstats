@@ -94,10 +94,18 @@
       </section>
 
       <section class="charts">
-        <article class="panel">
+        <article class="panel energy-panel">
           <h2>All devices today</h2>
-          <p class="hint">Daily kWh by device (inverter + grid) · resets at midnight</p>
-          <div class="chart-wrap pie-wrap"><canvas id="loadsPieChart"></canvas></div>
+          <p class="hint">Daily kWh by device (inverter + grid) · current watts on the right</p>
+          <div class="energy-split">
+            <div class="chart-wrap pie-wrap"><canvas id="loadsPieChart"></canvas></div>
+            <aside class="current-loads" aria-label="Current load">
+              <h3>Current load</h3>
+              <p class="hint">Items drawing power now</p>
+              <ul class="current-loads-list" id="currentLoadsList"></ul>
+              <p class="current-loads-total">Total <span id="currentLoadsTotal">—</span></p>
+            </aside>
+          </div>
         </article>
 
         <article class="panel">

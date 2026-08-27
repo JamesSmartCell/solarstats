@@ -236,6 +236,102 @@ body {
   height: 220px;
 }
 
+.energy-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 16.5rem);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.current-loads {
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+  padding: 0.15rem 0 0.35rem;
+  border-left: 1px solid var(--line);
+  padding-left: 1rem;
+}
+
+.current-loads h3 {
+  margin: 0 0 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.current-loads .hint {
+  margin-bottom: 0.55rem;
+}
+
+.current-loads-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.current-load-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.current-load-name {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+
+.current-load-swatch {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.current-load-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.current-load-watts {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.current-loads-empty {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.current-loads-total {
+  margin: 0.75rem 0 0;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.current-loads-total span {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
 .foot {
   margin-top: 1.25rem;
   color: var(--muted);
@@ -358,5 +454,17 @@ body {
 
   .chart-wrap {
     height: 190px;
+  }
+
+  .energy-split {
+    grid-template-columns: 1fr;
+  }
+
+  .current-loads {
+    min-height: 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding-left: 0;
+    padding-top: 0.85rem;
   }
 }
