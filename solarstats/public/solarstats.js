@@ -21,14 +21,16 @@ const RANGE_LABELS = {
   "30d": "30 days",
 };
 
+const INVERTER_PIE_OFFSET = 18;
+
 const LOAD_SLICES = [
-  { key: "officePc", label: "Office PC", color: "#42a5f5" },
-  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0" },
-  { key: "pi5", label: "Pi5 Server", color: "#7e57c2" },
-  { key: "motorbike", label: "Motorbike", color: "#26a69a" },
-  { key: "fridge", label: "Fridge", color: "#66bb6a" },
-  { key: "washingMachine", label: "Washing machine", color: "#8bc34a" },
-  { key: "otherInverter", label: "Other inverter", color: "#cddc39" },
+  { key: "officePc", label: "Office PC", color: "#42a5f5", source: "grid" },
+  { key: "frontRoomPc", label: "Front Room PC", color: "#5c6bc0", source: "grid" },
+  { key: "pi5", label: "Pi5 Server", color: "#7e57c2", source: "grid" },
+  { key: "motorbike", label: "Motorbike", color: "#26a69a", source: "grid" },
+  { key: "fridge", label: "Fridge", color: "#66bb6a", source: "grid" },
+  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", source: "inverter" },
+  { key: "otherInverter", label: "Other inverter", color: "#cddc39", source: "inverter" },
 ];
 
 const els = {
@@ -126,6 +128,7 @@ function applyLoadConfig(config) {
       key: s.key,
       label: s.label || s.key,
       color: s.color || "#90a4ae",
+      source: s.source === "inverter" ? "inverter" : "grid",
       members: Array.isArray(s.members) ? s.members.filter(Boolean) : [],
     }));
 }
@@ -145,6 +148,10 @@ function sumMapValues(map, keys) {
 
 function currentLoadSlices() {
   return state.loadSlices.length ? state.loadSlices : LOAD_SLICES;
+}
+
+function slicePieOffset(slice) {
+  return slice?.source === "inverter" ? INVERTER_PIE_OFFSET : 0;
 }
 
 function rangeToMs(range) {
@@ -331,12 +338,14 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
         backgroundColor: LOAD_SLICES.map((s) => s.color),
         borderColor: "#12181e",
         borderWidth: 2,
+        offset: LOAD_SLICES.map(slicePieOffset),
       },
     ],
   },
   options: {
     responsive: true,
     maintainAspectRatio: false,
+    layout: { padding: INVERTER_PIE_OFFSET },
     plugins: {
       legend: {
         position: "bottom",
@@ -387,6 +396,7 @@ function updateLoadsPie(loads) {
   const ds = loadsPieChart.data.datasets[0];
   loadsPieChart.data.labels = slices.map((s) => s.label);
   ds.backgroundColor = slices.map((s) => s.color);
+  ds.offset = slices.map(slicePieOffset);
   ds.data = slices.map((s) => sumMapValues(src, sliceKeys(s)));
   loadsPieChart.update("none");
   updateCurrentLoads();
