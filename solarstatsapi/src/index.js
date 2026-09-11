@@ -213,13 +213,8 @@ async function tick() {
       console.log(`[${snapshot.ts}] dry-run devices=${snapshot.devices?.length ?? 0}`);
       return;
     }
-    const ingest = await forwardSnapshot(snapshot);
-    const fields = ingest?.fields || {};
-    const extra = fields.missing?.length ? ` missing=${fields.missing.join(",")}` : "";
-    const healed = fields.healed?.length ? ` healed=${fields.healed.join(",")}` : "";
-    console.log(
-      `[${snapshot.ts}] forwarded devices=${snapshot.devices?.length ?? 0} fields=${fields.found ?? "?"}${extra}${healed}`,
-    );
+    await forwardSnapshot(snapshot);
+    console.log(`[${snapshot.ts}] forwarded devices=${snapshot.devices?.length ?? 0}`);
   } catch (err) {
     console.error(`[${new Date().toISOString()}] poll failed:`, err.message);
   }

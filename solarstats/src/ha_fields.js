@@ -70,17 +70,6 @@ export const INVERTER_FIELDS = [
     reject: ["soc", "battery"],
   },
   {
-    key: "acFrequency",
-    column: "ac_frequency",
-    label: "AC frequency",
-    seeds: ["sensor.garden_powmr_inverter_ac_frequency", "sensor.powmr_inverter_ac_frequency"],
-    units: ["hz"],
-    classes: ["frequency"],
-    tokens: ["frequency"],
-    prefer: ["powmr", "inverter", "ac"],
-    reject: [],
-  },
-  {
     key: "pvPower",
     column: "pv_power",
     label: "PV power",

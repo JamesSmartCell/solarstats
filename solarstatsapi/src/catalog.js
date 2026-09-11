@@ -60,15 +60,6 @@ const CORE_FIELDS = [
     reject: ["soc", "battery"],
   },
   {
-    key: "acFrequency",
-    seeds: ["sensor.garden_powmr_inverter_ac_frequency", "sensor.powmr_inverter_ac_frequency"],
-    units: ["hz"],
-    classes: ["frequency"],
-    tokens: ["frequency"],
-    prefer: ["powmr", "inverter", "ac"],
-    reject: [],
-  },
-  {
     key: "pvPower",
     seeds: ["sensor.garden_powmr_inverter_pv_power", "sensor.powmr_inverter_pv_power"],
     units: ["w", "kw"],
