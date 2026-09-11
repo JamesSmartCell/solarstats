@@ -1,9 +1,13 @@
 import { formatHaState, isSensorDomain, stateTone } from "./ha-display.js";
 
+let selectedGateway = "";
+
 async function load() {
-  const [usersRes, devicesRes] = await Promise.all([
+  const [usersRes, devicesRes, zbgwRes, fieldsRes] = await Promise.all([
     fetch("/api/admin/users"),
     fetch("/api/admin/devices"),
+    fetch(zbgwUrl()),
+    fetch("/api/admin/fields"),
   ]);
 
   if (usersRes.status === 401 || usersRes.status === 403) {
@@ -24,6 +28,88 @@ async function load() {
     console.warn("devices HTTP", devicesRes.status);
     renderDeviceGroups([]);
   }
+
+  if (zbgwRes.ok) {
+    const zbgwData = await zbgwRes.json();
+    renderGateways(zbgwData.gateways || [], zbgwData.events || []);
+  } else {
+    console.warn("zbgw HTTP", zbgwRes.status);
+    renderGateways([], []);
+  }
+
+  if (fieldsRes.ok) {
+    renderHaFields(await fieldsRes.json());
+  } else {
+    console.warn("fields HTTP", fieldsRes.status);
+    renderHaFields({ fields: [] });
+  }
+}
+
+function renderHaFields(data) {
+  const tbody = document.querySelector("#fieldsTable tbody");
+  const empty = document.getElementById("fieldsEmpty");
+  const fields = data.fields || [];
+  tbody.replaceChildren();
+  empty.hidden = fields.length > 0;
+
+  for (const field of fields) {
+    const tr = document.createElement("tr");
+    const age = field.haUpdated || field.lastSeen
+      ? formatAge(Math.round((Date.now() - (field.haUpdated || field.lastSeen)) / 1000))
+      : "—";
+    const statusCls =
+      field.status === "ok" || field.status === "healed"
+        ? "on"
+        : field.status === "stale"
+          ? "pending"
+          : "denied";
+    tr.innerHTML = `
+      <td>${escapeHtml(field.label || field.key)}</td>
+      <td class="entity-id">${escapeHtml(field.entityId || "—")}${field.name ? `<div>${escapeHtml(field.name)}</div>` : ""}</td>
+      <td>${field.value == null ? "—" : escapeHtml(String(field.value))}</td>
+      <td>${escapeHtml(age)}</td>
+      <td><span class="status-pill ${statusCls}">${escapeHtml(field.status)}</span></td>
+      <td class="admin-actions"></td>
+    `;
+    const actions = tr.querySelector(".admin-actions");
+    const candidates = field.candidates || [];
+    if (candidates.length) {
+      const select = document.createElement("select");
+      select.innerHTML = `<option value="">${candidates.length} candidate(s)</option>`;
+      for (const c of candidates) {
+        const opt = document.createElement("option");
+        opt.value = c.entityId;
+        opt.textContent = `${c.entityId} (${c.state ?? "?"} ${c.unit || ""})`;
+        select.appendChild(opt);
+      }
+      select.addEventListener("change", () => {
+        if (select.value) bindField(field.key, select.value);
+      });
+      actions.appendChild(select);
+    } else if (field.status === "missing") {
+      actions.textContent = "none found";
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+async function bindField(key, entityId) {
+  const res = await fetch(`/api/admin/fields/${encodeURIComponent(key)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entityId }),
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Bind failed");
+    return;
+  }
+  flashSaved("fieldsSaved");
+  renderHaFields(await res.json());
+}
+
+function zbgwUrl() {
+  const q = selectedGateway ? `?device=${encodeURIComponent(selectedGateway)}` : "";
+  return `/api/admin/zbgw${q}`;
 }
 
 function renderSettings(settings) {
@@ -402,6 +488,100 @@ async function setDeviceExposure(entityId, exposure) {
       note.hidden = true;
     }, 1200);
   }
+}
+
+function renderGateways(gateways, events) {
+  const tbody = document.querySelector("#zbgwTable tbody");
+  const empty = document.getElementById("zbgwEmpty");
+  tbody.replaceChildren();
+  empty.hidden = gateways.length > 0;
+
+  for (const gw of gateways) {
+    const tr = document.createElement("tr");
+    if (gw.device_id === selectedGateway) tr.classList.add("is-selected");
+    tr.addEventListener("click", (ev) => {
+      if (ev.target.closest("button")) return;
+      selectedGateway = selectedGateway === gw.device_id ? "" : gw.device_id;
+      load().catch(console.error);
+    });
+
+    const age = formatAge(gw.age_s);
+    const state = gatewayState(gw);
+    const mqtt = gw.mqtt_ok ? "up" : "down";
+    const zig = gw.zigbee_ok ? "up" : "down";
+    const pending = gw.pending_restart ? "Queued" : "Restart";
+
+    tr.innerHTML = `
+      <td class="entity-id">${escapeHtml(gw.device_id)}</td>
+      <td>${escapeHtml(age)}</td>
+      <td><span class="status-pill ${state.cls}">${escapeHtml(state.label)}</span></td>
+      <td>${escapeHtml(gw.fw || "—")}</td>
+      <td>${escapeHtml(formatUptime(gw.uptime_s))}</td>
+      <td>${escapeHtml(`${mqtt} / ${zig}`)}</td>
+      <td class="admin-actions"></td>
+    `;
+    const actions = tr.querySelector(".admin-actions");
+    const btn = actionBtn(pending, () => restartGateway(gw.device_id));
+    if (gw.pending_restart) btn.disabled = true;
+    actions.appendChild(btn);
+    tbody.appendChild(tr);
+  }
+
+  const wrap = document.getElementById("zbgwEventsWrap");
+  const evBody = document.querySelector("#zbgwEventsTable tbody");
+  evBody.replaceChildren();
+  wrap.hidden = events.length === 0;
+  for (const ev of events) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(formatDate(new Date(ev.ts).toISOString()))}</td>
+      <td class="entity-id">${escapeHtml(ev.device_id)}</td>
+      <td>${escapeHtml(ev.kind)}</td>
+      <td>${escapeHtml(ev.message || ev.code || "—")}</td>
+    `;
+    evBody.appendChild(tr);
+  }
+}
+
+function gatewayState(gw) {
+  if (gw.last_kind === "error" || gw.last_ok === 0) {
+    return { cls: "denied", label: gw.last_code || "error" };
+  }
+  if ((gw.age_s || 0) > 2 * 60 * 60) {
+    return { cls: "pending", label: "quiet" };
+  }
+  if (gw.last_kind === "ok") {
+    return { cls: "on", label: "ok" };
+  }
+  return { cls: "on", label: gw.last_kind || "seen" };
+}
+
+function formatAge(ageS) {
+  const n = Number(ageS);
+  if (!Number.isFinite(n)) return "—";
+  if (n < 90) return `${n}s`;
+  if (n < 90 * 60) return `${Math.round(n / 60)}m`;
+  return `${(n / 3600).toFixed(1)}h`;
+}
+
+function formatUptime(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 3600) return `${Math.round(n / 60)}m`;
+  if (n < 48 * 3600) return `${(n / 3600).toFixed(1)}h`;
+  return `${(n / 86400).toFixed(1)}d`;
+}
+
+async function restartGateway(deviceId) {
+  const res = await fetch(`/api/admin/zbgw/${encodeURIComponent(deviceId)}/restart`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Restart failed");
+    return;
+  }
+  flashSaved("zbgwSaved");
+  load().catch(console.error);
 }
 
 function actionBtn(label, onClick) {

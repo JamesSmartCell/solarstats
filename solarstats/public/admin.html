@@ -42,6 +42,70 @@
       </section>
 
       <section class="panel admin-panel">
+        <h2>HA inverter fields</h2>
+        <p class="hint">
+          Populated from the latest Home Assistant dump. Missing fields stay empty;
+          found values still ingest. Bind a candidate after a rename if auto-heal did not pick it.
+        </p>
+        <div class="table-wrap">
+          <table class="admin-table" id="fieldsTable">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Entity</th>
+                <th>Value</th>
+                <th>Age</th>
+                <th>Status</th>
+                <th>Heal</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint" id="fieldsEmpty" hidden>No HA catalog yet. Wait for the next solarstatsapi ingest.</p>
+        <p class="hint" id="fieldsSaved" hidden>Binding saved</p>
+      </section>
+
+      <section class="panel admin-panel">
+        <h2>Zigbee gateways</h2>
+        <p class="hint">
+          Anonymous diagnostics from opted-in C6 gateways.
+          Health ping is hourly; a restart is delivered on the next 2-minute poll.
+        </p>
+        <div class="table-wrap">
+          <table class="admin-table" id="zbgwTable">
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>Seen</th>
+                <th>State</th>
+                <th>FW</th>
+                <th>Up</th>
+                <th>MQTT / Zigbee</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint" id="zbgwEmpty" hidden>No gateways have reported yet.</p>
+        <p class="hint" id="zbgwSaved" hidden>Restart queued</p>
+        <div class="table-wrap" id="zbgwEventsWrap" hidden>
+          <table class="admin-table" id="zbgwEventsTable">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Device</th>
+                <th>Kind</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel admin-panel">
         <h2>Users</h2>
         <div class="table-wrap">
           <table class="admin-table" id="usersTable">
@@ -83,7 +147,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <p class="hint" id="loadsEmpty" hidden>No energy sensors synced yet. Restart solarstatsapi so it discovers HA entities.</p>
+        <p class="hint" id="loadsEmpty" hidden>No energy sensors synced yet. Wait for the next solarstatsapi poll.</p>
         <p class="hint" id="loadsSaved" hidden>Saved</p>
       </section>
 
@@ -108,7 +172,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <p class="hint" id="sensorsEmpty" hidden>No sensors synced yet. Restart solarstatsapi so it discovers HA entities.</p>
+        <p class="hint" id="sensorsEmpty" hidden>No sensors synced yet. Wait for the next solarstatsapi poll.</p>
         <p class="hint" id="sensorsSaved" hidden>Saved</p>
       </section>
 
@@ -133,7 +197,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <p class="hint" id="devicesEmpty" hidden>No switches or lights synced yet. Restart solarstatsapi so it discovers HA entities.</p>
+        <p class="hint" id="devicesEmpty" hidden>No HA entities synced yet. After the next solarstatsapi poll, bind inverter fields and enable devices here.</p>
         <p class="hint" id="devicesSaved" hidden>Saved</p>
       </section>
     </div>

@@ -53,6 +53,15 @@ import {
   verifyAuthentication,
   verifyRegistration,
 } from "./passkeys.js";
+import { listPublicSites, loadSites } from "./sites.js";
+import {
+  enqueueZbgwRestart,
+  listZbgwEvents,
+  listZbgwGateways,
+  openZbgwDiagDb,
+  receiveZbgwDiag,
+} from "./zbgw_diag.js";
+import { listHaFields, setFieldBinding } from "./ha_fields.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -66,14 +75,33 @@ const LONG_COOKIE_MS = 120 * 24 * 60 * 60 * 1000;
 const HAS_PASSKEY_COOKIE = "solarstats_pk";
 const HAS_MS_COOKIE = "solarstats_ms";
 
+const ZBGW_DIAG_TOKEN = process.env.ZBGW_DIAG_TOKEN || "zbgw-anon-v1";
+const ZBGW_DIAG_DB_PATH = process.env.ZBGW_DIAG_DB_PATH || "./data/zbgw_diag.db";
+const zbgwDiag = openZbgwDiagDb(ZBGW_DIAG_DB_PATH);
+const diagHits = new Map();
+
 const db = openDatabase(DB_PATH);
-{
-  const repaired = repairDeadSamples(db);
+const sites = loadSites({
+  authDb: db,
+  defaultDbPath: DB_PATH,
+  defaultSecret: INGEST_SECRET,
+});
+for (const site of sites.values()) {
+  const repaired = repairDeadSamples(site.db);
   if (repaired.deleted) {
     console.warn(
-      `startup: removed ${repaired.deleted} zeroed/unavailable sample(s); latest=${repaired.latest?.ts || "none"}`,
+      `startup ${site.slug}: removed ${repaired.deleted} zeroed/unavailable sample(s); latest=${repaired.latest?.ts || "none"}`,
     );
   }
+}
+
+function getSite(slug) {
+  return sites.get(String(slug || "home").toLowerCase()) || null;
+}
+
+function siteFromRequest(req) {
+  const raw = req.params.slug || req.query.site || "home";
+  return getSite(raw);
 }
 const app = express();
 const publicDir = path.join(__dirname, "..", "public");
@@ -222,16 +250,47 @@ function requireAdmin(req, res, next) {
   });
 }
 
-function authorizeIngest(req, res, next) {
-  if (!INGEST_SECRET) {
+function authorizeBearer(secret, req, res, next) {
+  if (!secret) {
     return next();
   }
   const header = req.get("authorization") || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (token !== INGEST_SECRET) {
+  if (token !== secret) {
     return res.status(401).json({ error: "unauthorized" });
   }
   return next();
+}
+
+function authorizeIngest(req, res, next) {
+  req.site = sites.get("home");
+  return authorizeBearer(req.site.secret, req, res, next);
+}
+
+function authorizeSiteIngest(req, res, next) {
+  const site = getSite(req.params.slug);
+  if (!site) {
+    return res.status(404).json({ error: "unknown_site" });
+  }
+  req.site = site;
+  return authorizeBearer(site.secret, req, res, next);
+}
+
+function requireSite(req, res, next) {
+  const site = siteFromRequest(req);
+  if (!site) {
+    return res.status(404).json({ error: "unknown_site" });
+  }
+  req.site = site;
+  return next();
+}
+
+function sendDashboard(res, site) {
+  const template = fs.readFileSync(path.join(publicDir, "solarstats.html"), "utf8");
+  const html = template
+    .replaceAll("{{SITE_SLUG}}", site.slug)
+    .replaceAll("{{SITE_NAME}}", site.name);
+  res.type("html").send(html);
 }
 
 // --- Public auth pages / routes ---
@@ -586,6 +645,68 @@ app.get("/api/admin/devices", requireAdmin, (_req, res) => {
   res.json({ devices: listAllDevices(db) });
 });
 
+app.get("/api/admin/fields", requireAdmin, (_req, res) => {
+  res.json(listHaFields(db));
+});
+
+app.post("/api/admin/fields/:key", requireAdmin, (req, res) => {
+  try {
+    res.json(setFieldBinding(db, req.params.key, req.body?.entityId || req.body?.entity_id));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "bind_failed" });
+  }
+});
+
+app.get("/api/admin/zbgw", requireAdmin, (req, res) => {
+  res.json({
+    gateways: listZbgwGateways(zbgwDiag),
+    events: listZbgwEvents(zbgwDiag, req.query.device, 40),
+  });
+});
+
+app.post("/api/admin/zbgw/:deviceId/restart", requireAdmin, (req, res) => {
+  try {
+    const result = enqueueZbgwRestart(zbgwDiag, req.params.deviceId);
+    res.json({ ok: true, ...result, gateways: listZbgwGateways(zbgwDiag) });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "restart_failed" });
+  }
+});
+
+function authorizeZbgwDiag(req, res, next) {
+  if (!ZBGW_DIAG_TOKEN) {
+    return next();
+  }
+  const token = req.get("x-zbgw-diag") || "";
+  if (token !== ZBGW_DIAG_TOKEN) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  return next();
+}
+
+function rateLimitZbgwDiag(req, res, next) {
+  const id = String(req.body?.device_id || req.ip || "?").toLowerCase();
+  const now = Date.now();
+  const prev = diagHits.get(id) || [];
+  const recent = prev.filter((ts) => now - ts < 60_000);
+  const kind = String(req.body?.kind || "");
+  const max = kind === "error" ? 12 : 8;
+  if (recent.length >= max) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  recent.push(now);
+  diagHits.set(id, recent);
+  return next();
+}
+
+app.post("/api/diag/zbgw", authorizeZbgwDiag, rateLimitZbgwDiag, (req, res) => {
+  try {
+    res.json(receiveZbgwDiag(zbgwDiag, req.body || {}));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "bad request" });
+  }
+});
+
 app.post("/api/admin/devices/:entityId/acl", requireAdmin, (req, res) => {
   const entityId = decodeURIComponent(req.params.entityId);
   const device = setDeviceAcl(db, entityId, {
@@ -600,30 +721,37 @@ app.post("/api/admin/devices/:entityId/acl", requireAdmin, (req, res) => {
 // --- Protected dashboard / data ---
 
 app.get("/", requireApproved, (_req, res) => {
-  res.sendFile(path.join(publicDir, "solarstats.html"));
+  sendDashboard(res, sites.get("home"));
 });
 
 app.get("/solarstats", (_req, res) => {
   res.redirect(301, "/");
 });
 
-app.get("/api/history", requireApproved, (req, res) => {
+app.get("/api/sites", requireApproved, (_req, res) => {
+  res.json({ sites: listPublicSites(sites) });
+});
+
+app.get("/api/history", requireApproved, requireSite, (req, res) => {
   const range = String(req.query.range || "24h");
+  const sdb = req.site.db;
   res.json({
-    ...getHistory(db, range),
-    loadConfig: getLoadConfig(db),
+    ...getHistory(sdb, range),
+    loadConfig: getLoadConfig(sdb),
+    site: { slug: req.site.slug, name: req.site.name },
   });
 });
 
-app.get("/api/devices", requireApproved, (req, res) => {
+app.get("/api/devices", requireApproved, requireSite, (req, res) => {
   res.json({
-    devices: listDevicesForViewer(db, { isAdmin: isAdminEmail(req.user.email) }),
+    devices: listDevicesForViewer(req.site.db, { isAdmin: isAdminEmail(req.user.email) }),
   });
 });
 
-app.post("/api/devices/:entityId/toggle", requireApproved, (req, res) => {
+app.post("/api/devices/:entityId/toggle", requireApproved, requireSite, (req, res) => {
   const entityId = decodeURIComponent(req.params.entityId);
-  const device = getDevice(db, entityId);
+  const sdb = req.site.db;
+  const device = getDevice(sdb, entityId);
   if (!device) return res.status(404).json({ error: "unknown_device" });
 
   const domain = String(device.domain || entityId.split(".")[0] || "");
@@ -636,48 +764,63 @@ app.post("/api/devices/:entityId/toggle", requireApproved, (req, res) => {
     device.allow_users === 1 || (admin && device.allow_admin === 1);
   if (!allowed) return res.status(403).json({ error: "forbidden" });
 
-  enqueueDeviceCommand(db, {
+  enqueueDeviceCommand(sdb, {
     entityId,
     action: "toggle",
     userId: req.user.id,
   });
 
-  // Keep last HA state in the DB. The dashboard locks locally until ingest
-  // reports the new state (or the client times out).
   res.json({
     ok: true,
-    devices: listDevicesForViewer(db, { isAdmin: admin }),
+    devices: listDevicesForViewer(sdb, { isAdmin: admin }),
   });
 });
 
-app.post("/api/ingest", authorizeIngest, (req, res) => {
+function handleIngest(req, res) {
   try {
-    const sample = insertSample(db, req.body || {});
+    const site = req.site;
+    const sample = insertSample(site.db, req.body || {});
     if (!sample.skipped) {
-      broadcast({ type: "sample", sample });
+      broadcast({ type: "sample", sample }, site.slug);
     }
     if (sample.loadsPowerW) {
-      broadcast({ type: "loadsPower", loadsPowerW: sample.loadsPowerW });
+      broadcast({ type: "loadsPower", loadsPowerW: sample.loadsPowerW }, site.slug);
     }
-    broadcastDevices();
-    res.json({ ok: true, sample });
+    broadcastDevices(site);
+    const fields = listHaFields(site.db);
+    res.json({ ok: true, sample, site: site.slug, fields });
   } catch (err) {
-    console.error("ingest failed:", err);
+    console.error(`ingest ${req.site?.slug || "?"} failed:`, err);
     res.status(400).json({ error: err.message || "bad request" });
   }
+}
+
+app.post("/api/ingest", authorizeIngest, handleIngest);
+app.post("/api/ingest/:slug", authorizeSiteIngest, handleIngest);
+
+app.get("/api/agent/commands", authorizeIngest, (req, res) => {
+  res.json({
+    commands: claimPendingCommands(req.site.db, 20),
+    track: listTrackedEntityIds(req.site.db),
+  });
 });
 
-/** Pi agent: pull pending HA commands (Bearer INGEST_SECRET). */
-app.get("/api/agent/commands", authorizeIngest, (_req, res) => {
+app.get("/api/agent/commands/:slug", authorizeSiteIngest, (req, res) => {
   res.json({
-    commands: claimPendingCommands(db, 20),
-    track: listTrackedEntityIds(db),
+    commands: claimPendingCommands(req.site.db, 20),
+    track: listTrackedEntityIds(req.site.db),
   });
 });
 
 app.post("/api/agent/commands/:id/complete", authorizeIngest, (req, res) => {
   const id = Number(req.params.id);
-  completeDeviceCommand(db, id, req.body?.ok !== false);
+  completeDeviceCommand(req.site.db, id, req.body?.ok !== false);
+  res.json({ ok: true });
+});
+
+app.post("/api/agent/:slug/commands/:id/complete", authorizeSiteIngest, (req, res) => {
+  const id = Number(req.params.id);
+  completeDeviceCommand(req.site.db, id, req.body?.ok !== false);
   res.json({ ok: true });
 });
 
@@ -693,24 +836,27 @@ app.use(express.static(publicDir));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
-function broadcast(message) {
+function broadcast(message, siteSlug = "home") {
   const data = JSON.stringify(message);
   for (const client of wss.clients) {
-    if (client.readyState === 1) {
+    if (client.readyState === 1 && (client.siteSlug || "home") === siteSlug) {
       client.send(data);
     }
   }
 }
 
-function broadcastDevices() {
+function broadcastDevices(site) {
+  const sdb = site?.db || db;
+  const slug = site?.slug || "home";
   for (const client of wss.clients) {
     if (client.readyState !== 1 || !client.userId) continue;
+    if ((client.siteSlug || "home") !== slug) continue;
     const user = getUserById(db, client.userId);
     if (!user || user.status !== "approved") continue;
     client.send(
       JSON.stringify({
         type: "devices",
-        devices: listDevicesForViewer(db, {
+        devices: listDevicesForViewer(sdb, {
           isAdmin: isAdminEmail(user.email),
         }),
       }),
@@ -723,7 +869,8 @@ function runSession(req, res, next) {
 }
 
 server.on("upgrade", (req, socket, head) => {
-  if (req.url?.split("?")[0] !== "/ws") {
+  const url = new URL(req.url || "/", "http://localhost");
+  if (url.pathname !== "/ws") {
     socket.destroy();
     return;
   }
@@ -738,42 +885,59 @@ server.on("upgrade", (req, socket, head) => {
       return;
     }
 
+    const site = getSite(url.searchParams.get("site") || "home") || sites.get("home");
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.userId = user.id;
+      ws.siteSlug = site.slug;
       wss.emit("connection", ws, req);
     });
   });
 });
 
 wss.on("connection", (socket) => {
-  const history = getHistory(db, "1h");
+  const site = getSite(socket.siteSlug) || sites.get("home");
+  const sdb = site.db;
+  const history = getHistory(sdb, "1h");
   const user = socket.userId ? getUserById(db, socket.userId) : null;
   socket.send(
     JSON.stringify({
       type: "hello",
+      site: { slug: site.slug, name: site.name },
       energyKwhTotal: history.energyKwhTotal,
       latest: history.latest,
       loadsDailyKwh: history.loadsDailyKwh,
       loadsPowerW: history.loadsPowerW,
-      loadConfig: getLoadConfig(db),
+      loadConfig: getLoadConfig(sdb),
       devices: user
-        ? listDevicesForViewer(db, { isAdmin: isAdminEmail(user.email) })
+        ? listDevicesForViewer(sdb, { isAdmin: isAdminEmail(user.email) })
         : [],
     }),
   );
 });
 
 setInterval(() => {
-  try {
-    pruneOldSamples(db, HISTORY_RETENTION_DAYS);
-  } catch (err) {
-    console.error("prune failed:", err.message);
+  for (const site of sites.values()) {
+    try {
+      pruneOldSamples(site.db, HISTORY_RETENTION_DAYS);
+    } catch (err) {
+      console.error(`prune ${site.slug} failed:`, err.message);
+    }
   }
 }, 6 * 3600000);
+
+app.get("/:slug", (req, res, next) => {
+  const site = getSite(req.params.slug);
+  if (!site || site.default) return next();
+  requireApproved(req, res, () => sendDashboard(res, site));
+});
 
 server.listen(PORT, () => {
   console.log(`solarstats listening on http://0.0.0.0:${PORT}`);
   console.log(`dashboard: http://127.0.0.1:${PORT}/`);
+  for (const site of sites.values()) {
+    if (site.default) continue;
+    console.log(`site ${site.slug}: http://127.0.0.1:${PORT}/${site.slug}`);
+  }
   console.log(
     authConfigured()
       ? "Microsoft auth: configured"

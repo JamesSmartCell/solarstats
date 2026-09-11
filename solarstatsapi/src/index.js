@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { openCatalog } from "./catalog.js";
 
 function env(name, fallback = "") {
   const raw = process.env[name] ?? fallback;
@@ -8,44 +9,12 @@ function env(name, fallback = "") {
 const HA_BASE_URL = env("HA_BASE_URL", "http://192.168.50.41").replace(/\/$/, "");
 const HA_TOKEN = env("HA_TOKEN");
 const SITE_INGEST_URL = env("SITE_INGEST_URL");
+const SITE_SLUG = env("SITE_SLUG");
 const POLL_INTERVAL_MS = Number(env("POLL_INTERVAL_MS", "15000"));
 const INGEST_SECRET = env("INGEST_SECRET");
 const DRY_RUN = ["1", "true", "yes"].includes(env("DRY_RUN", "false").toLowerCase());
-
-const ENTITIES = {
-  gridVoltage: "sensor.powmr_inverter_grid_voltage",
-  pvVoltage: "sensor.powmr_inverter_pv_voltage",
-  batteryVoltage: "sensor.powmr_inverter_battery_voltage",
-  batterySoc: "sensor.powmr_inverter_battery_soc",
-  batteryChargeCurrent: "sensor.powmr_inverter_battery_charge_current",
-  loadPercent: "sensor.powmr_inverter_load_percent",
-  acFrequency: "sensor.garden_powmr_inverter_ac_frequency",
-  pvPower: "sensor.garden_powmr_inverter_pv_power",
-  batteryDischargeCurrent: "sensor.garden_powmr_inverter_battery_discharge_current",
-  outputPower: "sensor.garden_powmr_inverter_output_power",
-};
-
-/** Daily kWh meters for All-devices pie (keep HA _2 IDs where renamed). */
-const LOAD_DAILY_ENTITIES = {
-  officePc: "sensor.office_pc_synth_energy_daily",
-  frontRoomPc: "sensor.front_room_pc_synth_energy_daily",
-  pi5: "sensor.pi5_server_energy_daily_2",
-  motorbike: "sensor.motorbike_charger_energy_daily_2",
-  fridge: "sensor.fridge_energy_daily_2",
-  washingMachine: "sensor.inverter_loads_energy_daily",
-  otherInverter: "sensor.inverter_unmetered_energy_daily",
-};
-
-/** Switches/lights/sensors mirrored on solarstats (fallback if /api/states fails). */
-const DEVICE_ENTITIES = [
-  "switch.smart_socket_socket_1",
-  "switch.zigbeesensor_switch_2",
-  "switch.smart_socket_2_socket_1",
-  "light.office_office",
-  "light.front_bedroom",
-  "light.living_room_floor_lamp_2",
-  "binary_sensor.ds01_contact",
-];
+const CATALOG_PATH = env("CATALOG_PATH", "./data/catalog.db");
+const catalog = openCatalog(CATALOG_PATH);
 
 const CLICKABLE_DOMAINS = new Set(["switch", "light"]);
 const BOARD_DOMAINS = new Set(["switch", "light", "sensor", "binary_sensor"]);
@@ -55,48 +24,11 @@ function mapHaEntity(s, entityId = s.entity_id) {
   return {
     entity_id: entityId,
     state: s.state,
-    name: attrs.friendly_name || null,
-    device_class: attrs.device_class || null,
-    unit: attrs.unit_of_measurement || null,
+    name: attrs.friendly_name || s.name || null,
+    device_class: attrs.device_class || s.device_class || null,
+    unit: attrs.unit_of_measurement || s.unit || null,
+    last_updated: s.last_updated || s.last_changed || null,
   };
-}
-
-const KNOWN_LOAD_ENTITY_IDS = new Set(Object.values(LOAD_DAILY_ENTITIES));
-
-function isEnergySensor(device) {
-  const entityId = String(device?.entity_id || "");
-  const domain = entityId.split(".")[0];
-  if (domain !== "sensor") return false;
-  const deviceClass = String(device?.device_class || "").toLowerCase();
-  if (deviceClass === "power") return false;
-  if (deviceClass === "energy") return true;
-  const unit = String(device?.unit || "").toLowerCase().replace(/\s+/g, "");
-  if (unit === "kwh" || unit === "wh" || unit === "mwh") return true;
-  return /(^|[._])energy([._]|$)/i.test(entityId);
-}
-
-function energyKwh(device) {
-  const n = parseState(device?.state);
-  if (n == null) return null;
-  const unit = String(device?.unit || "").toLowerCase().replace(/\s+/g, "");
-  if (unit === "wh") return n / 1000;
-  if (unit === "mwh") return n * 1000;
-  return n;
-}
-
-function buildLoadsDaily(devices, fallback = {}) {
-  const byId = new Map((devices || []).map((d) => [d.entity_id, d]));
-  const out = { ...fallback };
-  for (const [key, entityId] of Object.entries(LOAD_DAILY_ENTITIES)) {
-    const d = byId.get(entityId);
-    if (d) out[key] = energyKwh(d);
-  }
-  for (const d of devices || []) {
-    if (!d?.entity_id || KNOWN_LOAD_ENTITY_IDS.has(d.entity_id)) continue;
-    if (!isEnergySensor(d)) continue;
-    out[d.entity_id] = energyKwh(d);
-  }
-  return out;
 }
 
 function requireEnv(name, value) {
@@ -109,18 +41,6 @@ function requireEnv(name, value) {
 requireEnv("HA_TOKEN", HA_TOKEN);
 if (!DRY_RUN) {
   requireEnv("SITE_INGEST_URL", SITE_INGEST_URL);
-}
-
-function parseState(value) {
-  if (value == null) return null;
-  const s = String(value).trim();
-  if (!s) return null;
-  const lower = s.toLowerCase();
-  if (lower === "unavailable" || lower === "unknown" || lower === "none" || lower === "null") {
-    return null;
-  }
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
 }
 
 function formatFetchError(stage, err) {
@@ -139,9 +59,19 @@ function agentHeaders() {
   return headers;
 }
 
-function commandsUrl() {
+function ingestUrl() {
   if (!SITE_INGEST_URL) return "";
-  return SITE_INGEST_URL.replace(/\/api\/ingest\/?$/, "/api/agent/commands");
+  if (/\/api\/ingest\/[^/]+\/?$/.test(SITE_INGEST_URL)) return SITE_INGEST_URL;
+  if (!SITE_SLUG) return SITE_INGEST_URL;
+  return SITE_INGEST_URL.replace(/\/api\/ingest\/?$/, `/api/ingest/${SITE_SLUG}`);
+}
+
+function commandsUrl() {
+  const url = ingestUrl();
+  if (!url) return "";
+  const withSlug = url.match(/^(.*)\/api\/ingest\/([^/]+)\/?$/);
+  if (withSlug) return `${withSlug[1]}/api/agent/commands/${withSlug[2]}`;
+  return url.replace(/\/api\/ingest\/?$/, "/api/agent/commands");
 }
 
 function haAuthHeaders() {
@@ -151,54 +81,7 @@ function haAuthHeaders() {
   };
 }
 
-async function fetchEntity(entityId) {
-  const url = `${HA_BASE_URL}/api/states/${entityId}`;
-  let res;
-  try {
-    res = await fetch(url, { headers: haAuthHeaders() });
-  } catch (err) {
-    throw new Error(formatFetchError(`HA GET ${url}`, err));
-  }
-
-  if (!res.ok) {
-    throw new Error(`HA ${entityId}: HTTP ${res.status}`);
-  }
-
-  const data = await res.json();
-  return parseState(data.state);
-}
-
-async function fetchEntityFull(entityId) {
-  const url = `${HA_BASE_URL}/api/states/${entityId}`;
-  let res;
-  try {
-    res = await fetch(url, { headers: haAuthHeaders() });
-  } catch (err) {
-    throw new Error(formatFetchError(`HA GET ${url}`, err));
-  }
-  if (!res.ok) {
-    throw new Error(`HA ${entityId}: HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-async function collectMap(map) {
-  const entries = await Promise.all(
-    Object.entries(map).map(async ([key, entityId]) => {
-      try {
-        const value = await fetchEntity(entityId);
-        return [key, value];
-      } catch (err) {
-        console.warn(`[warn] ${err.message}`);
-        return [key, null];
-      }
-    }),
-  );
-  return Object.fromEntries(entries);
-}
-
-/** All HA switches, lights, sensors, and binary sensors (for admin ACL + board). */
-async function fetchAllBoardDevices() {
+async function fetchAllStates() {
   const url = `${HA_BASE_URL}/api/states`;
   let res;
   try {
@@ -210,61 +93,38 @@ async function fetchAllBoardDevices() {
     throw new Error(`HA states: HTTP ${res.status}`);
   }
   const states = await res.json();
-  if (!Array.isArray(states)) return [];
-  return states
+  return Array.isArray(states) ? states : [];
+}
+
+function toBoardDevices(states) {
+  return (states || [])
     .filter((s) => BOARD_DOMAINS.has(String(s.entity_id || "").split(".")[0]))
     .map((s) => mapHaEntity(s));
 }
 
-async function collectDevicesFallback(entityIds) {
-  const list = entityIds?.length ? entityIds : DEVICE_ENTITIES;
-  return Promise.all(
-    list.map(async (entityId) => {
-      try {
-        const data = await fetchEntityFull(entityId);
-        return mapHaEntity(data, entityId);
-      } catch (err) {
-        console.warn(`[warn] ${err.message}`);
-        return {
-          entity_id: entityId,
-          state: "unavailable",
-          name: null,
-          device_class: null,
-          unit: null,
-        };
-      }
-    }),
-  );
-}
-
-async function collectDevices() {
-  try {
-    return await fetchAllBoardDevices();
-  } catch (err) {
-    console.warn(`[warn] full device list failed, fallback: ${err.message}`);
-    return collectDevicesFallback(DEVICE_ENTITIES);
-  }
-}
-
 async function collectSnapshot() {
-  const [core, fallbackLoads, devices] = await Promise.all([
-    collectMap(ENTITIES),
-    collectMap(LOAD_DAILY_ENTITIES),
-    collectDevices(),
-  ]);
-
-  return {
-    ts: new Date().toISOString(),
-    ...core,
-    loadsDailyKwh: buildLoadsDaily(devices, fallbackLoads),
-    devices,
-  };
+  try {
+    const states = await fetchAllStates();
+    catalog.ingest(states);
+    return {
+      ts: new Date().toISOString(),
+      devices: toBoardDevices(states),
+    };
+  } catch (err) {
+    const cached = catalog.listBoard(BOARD_DOMAINS);
+    if (!cached.length) throw err;
+    console.warn(`[warn] HA states failed, sending last catalog: ${err.message}`);
+    return {
+      ts: new Date().toISOString(),
+      devices: cached,
+    };
+  }
 }
 
 async function forwardSnapshot(snapshot) {
   let res;
   try {
-    res = await fetch(SITE_INGEST_URL, {
+    res = await fetch(ingestUrl(), {
       method: "POST",
       headers: agentHeaders(),
       body: JSON.stringify(snapshot),
@@ -272,7 +132,7 @@ async function forwardSnapshot(snapshot) {
   } catch (err) {
     throw new Error(
       formatFetchError(
-        `Ingest POST ${SITE_INGEST_URL} (is solarstats running / tunnel up?)`,
+        `Ingest POST ${ingestUrl()} (is solarstats running / tunnel up?)`,
         err,
       ),
     );
@@ -282,6 +142,7 @@ async function forwardSnapshot(snapshot) {
     const body = await res.text().catch(() => "");
     throw new Error(`Ingest HTTP ${res.status}${body ? `: ${body}` : ""}`);
   }
+  return res.json().catch(() => ({}));
 }
 
 async function callHaService(domain, service, entityId) {
@@ -349,22 +210,16 @@ async function tick() {
     await processCommands();
     const snapshot = await collectSnapshot();
     if (DRY_RUN) {
-      console.log(`[${snapshot.ts}] dry-run snapshot:`, JSON.stringify(snapshot));
+      console.log(`[${snapshot.ts}] dry-run devices=${snapshot.devices?.length ?? 0}`);
       return;
     }
-    await forwardSnapshot(snapshot);
-    const live =
-      (snapshot.batteryVoltage != null && snapshot.batteryVoltage >= 8) ||
-      (snapshot.batterySoc != null && snapshot.batterySoc > 1);
-    if (!live) {
-      console.warn(
-        `[${snapshot.ts}] inverter unavailable (SoC=${snapshot.batterySoc} V=${snapshot.batteryVoltage}) — server will keep last good`,
-      );
-    } else {
-      console.log(
-        `[${snapshot.ts}] forwarded SoC=${snapshot.batterySoc}% PV=${snapshot.pvPower}W Out=${snapshot.outputPower}W devices=${snapshot.devices?.length ?? 0}`,
-      );
-    }
+    const ingest = await forwardSnapshot(snapshot);
+    const fields = ingest?.fields || {};
+    const extra = fields.missing?.length ? ` missing=${fields.missing.join(",")}` : "";
+    const healed = fields.healed?.length ? ` healed=${fields.healed.join(",")}` : "";
+    console.log(
+      `[${snapshot.ts}] forwarded devices=${snapshot.devices?.length ?? 0} fields=${fields.found ?? "?"}${extra}${healed}`,
+    );
   } catch (err) {
     console.error(`[${new Date().toISOString()}] poll failed:`, err.message);
   }
@@ -373,7 +228,7 @@ async function tick() {
 console.log(
   DRY_RUN
     ? `solarstatsapi DRY_RUN → HA ${HA_BASE_URL}, every ${POLL_INTERVAL_MS}ms (no ingest)`
-    : `solarstatsapi starting → HA ${HA_BASE_URL}, ingest ${SITE_INGEST_URL}, every ${POLL_INTERVAL_MS}ms`,
+    : `solarstatsapi starting → HA ${HA_BASE_URL}, ingest ${SITE_INGEST_URL}, catalog ${catalog.path}, every ${POLL_INTERVAL_MS}ms`,
 );
 
 await tick();

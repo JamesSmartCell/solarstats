@@ -1,5 +1,16 @@
 import { formatHaState, isSensorDomain, stateTone } from "./ha-display.js";
 
+const SITE =
+  document.querySelector('meta[name="solarstats-site"]')?.content || "home";
+
+function withSite(path) {
+  const u = new URL(path, location.origin);
+  if (SITE && SITE !== "home") {
+    u.searchParams.set("site", SITE);
+  }
+  return `${u.pathname}${u.search}`;
+}
+
 const RANGE_LABELS = {
   "1h": "1 hour",
   "6h": "6 hours",
@@ -544,7 +555,7 @@ function applySample(sample) {
 }
 
 async function loadHistory() {
-  const res = await fetch(`/api/history?range=${encodeURIComponent(state.range)}`);
+  const res = await fetch(withSite(`/api/history?range=${encodeURIComponent(state.range)}`));
   if (res.status === 401) {
     location.href = "/login";
     return;
@@ -639,7 +650,7 @@ function renderClickableDevices(devices) {
 }
 
 async function loadDevices() {
-  const res = await fetch("/api/devices");
+  const res = await fetch(withSite("/api/devices"));
   if (!res.ok) {
     renderDevices([]);
     console.warn("devices API", res.status);
@@ -656,7 +667,7 @@ async function toggleDevice(entityId) {
   startPendingToggle(entityId, from);
   renderDevices(state.devices, { confirmPending: false });
   try {
-    const res = await fetch(`/api/devices/${encodeURIComponent(entityId)}/toggle`, {
+    const res = await fetch(withSite(`/api/devices/${encodeURIComponent(entityId)}/toggle`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
@@ -672,7 +683,8 @@ async function toggleDevice(entityId) {
 
 function connectWs() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const qs = SITE && SITE !== "home" ? `?site=${encodeURIComponent(SITE)}` : "";
+  const ws = new WebSocket(`${proto}://${location.host}/ws${qs}`);
 
   ws.addEventListener("open", () => setLive(true));
   ws.addEventListener("close", () => {

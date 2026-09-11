@@ -1,6 +1,6 @@
 # solarstats
 
-Receives PowMr snapshots from `solarstatsapi`, stores history in SQLite, integrates inverter output into **kWh**, and serves a live dashboard at **`/`**.
+Receives snapshots from **`solarstatsapi`** (home) and **`solarshim`** (other sites), stores history in SQLite, integrates inverter output into **kWh**, and serves dashboards at **`/`** (home) and **`/:slug`** (e.g. `/rivermill`).
 
 The dashboard is **private**: Sign in with Microsoft (Authenticator number matching), admin-approved accounts, optional site passkeys, plus an **All devices today (kWh)** doughnut.
 
@@ -52,6 +52,27 @@ Admin email is set via **`ADMIN_EMAIL`** in `.env` (seeded as approved admin on 
 | **Allow passkey enrollment** | On: approved users can **Add passkey** on the dashboard. Off: registration API returns 403. Existing passkeys still work for login. |
 | **Approve / Deny / Revoke** | Controls who can open `/` and `/api/history` / `/ws`. |
 
+## Multiple sites
+
+One solarstats process. Home keeps `INGEST_SECRET` + `data/solarstats.db`. Extra slugs get their own secret and `data/sites/<slug>.db`.
+
+```env
+SITES=rivermill
+SITE_RIVERMILL_SECRET=long-random
+SITE_RIVERMILL_NAME=Rivermill
+```
+
+| URL | Role |
+|-----|------|
+| `/` | Home dashboard (existing) |
+| `/rivermill` | Rivermill dashboard |
+| `POST /api/ingest` | Home agent (`Authorization: Bearer INGEST_SECRET`) |
+| `POST /api/ingest/rivermill` | solarshim (`Bearer SITE_RIVERMILL_SECRET`) |
+
+Login is still the existing solarstats accounts. Site data is isolated.
+
+On the Rivermill LAN run [`../solarshim`](../solarshim) with `SITE_INGEST_URL=https://solarstats.percolate.one/api/ingest/rivermill`.
+
 ## Caddy (DNS → TLS → Node on 8787)
 
 ```caddy
@@ -80,8 +101,11 @@ Pi `.env`: `SITE_INGEST_URL=http://127.0.0.1:8787/api/ingest` (through the tunne
 | Variable | Default | Notes |
 |----------|---------|--------|
 | `PORT` | `8787` | HTTP + WebSocket listen port |
-| `INGEST_SECRET` | _(empty = open)_ | Bearer token required on `/api/ingest` |
-| `DB_PATH` | `./data/solarstats.db` | SQLite file |
+| `INGEST_SECRET` | _(empty = open)_ | Bearer token required on `/api/ingest` (home) |
+| `SITES` | _(empty)_ | Extra slugs, e.g. `rivermill` |
+| `SITE_<SLUG>_SECRET` | — | Ingest bearer for that slug |
+| `SITE_<SLUG>_NAME` | slug | Dashboard title |
+| `DB_PATH` | `./data/solarstats.db` | Home SQLite file |
 | `HISTORY_RETENTION_DAYS` | `30` | Old samples pruned periodically |
 | `AZURE_CLIENT_ID` | — | Entra application ID |
 | `AZURE_CLIENT_SECRET` | — | Client secret |
@@ -91,10 +115,13 @@ Pi `.env`: `SITE_INGEST_URL=http://127.0.0.1:8787/api/ingest` (through the tunne
 | `ORIGIN` | — | Public origin, e.g. `https://solar.example.com` |
 | `RP_ID` | hostname of `ORIGIN` | WebAuthn RP ID (apex host, no path) |
 | `COOKIE_SECURE` | off unless `production` | Set `1` behind HTTPS |
+| `ZBGW_DIAG_TOKEN` | `zbgw-anon-v1` | Header `X-ZBGW-Diag` from opted-in C6 gateways |
+| `ZBGW_DIAG_DB_PATH` | `./data/zbgw_diag.db` | Gateway health / restart queue |
 
 ## API
 
-- `POST /api/ingest` — Pi snapshot (`Authorization: Bearer <INGEST_SECRET>`); includes optional `loadsDailyKwh` and `devices` (switch/light states)
+- `POST /api/ingest` — home snapshot (`Authorization: Bearer <INGEST_SECRET>`)
+- `POST /api/ingest/:slug` — site snapshot (`Bearer` = `SITE_<SLUG>_SECRET`)
 - `GET /api/history?range=24h` — chart series + totals (**session required**)
 - `GET /api/devices` — switches/lights visible to the viewer (ACL-filtered)
 - `POST /api/devices/:entityId/toggle` — queue a HA toggle (Pi agent executes)
@@ -102,6 +129,9 @@ Pi `.env`: `SITE_INGEST_URL=http://127.0.0.1:8787/api/ingest` (through the tunne
 - `POST /api/agent/commands/:id/complete` — Pi reports command result
 - `GET /` — dashboard (**approved session**)
 - `WS /ws` — live sample + `devices` push (**approved session**)
+- `POST /api/diag/zbgw` — Zigbee gateway diagnostics (`X-ZBGW-Diag` product token)
+- `GET /api/admin/zbgw` — gateway list + events (**admin**)
+- `POST /api/admin/zbgw/:deviceId/restart` — queue remote restart (**admin**)
 - `GET /api/health` — public liveness
 - `GET /login`, `/auth/microsoft`, `/auth/callback`, `POST /logout`
 - Passkey + `/admin` routes as above
@@ -111,6 +141,16 @@ Pi `.env`: `SITE_INGEST_URL=http://127.0.0.1:8787/api/ingest` (through the tunne
 Dashboard buttons at the bottom show live on/off (yellow fill = on, outline = off). Toggle clicks enqueue a command on solarstats; **solarstatsapi** on the Pi claims and calls Home Assistant `switch`/`light` `toggle`, then the next ingest refreshes state.
 
 Seeded entities ship with useful defaults; **Admin → Switches & lights** lists every HA `switch`/`light` the Pi discovers. Check **User** (everyone on the board) or **Admin** (admin only); leave both unchecked to hide from the board.
+
+## HA field catalog
+
+Ingest no longer depends on a single hard-coded inverter entity id. Each snapshot upserts every reported HA sensor into `ha_catalog` (state + last seen + HA `last_updated`). Logical fields (`pvPower`, `batterySoc`, …) bind to an entity and auto-heal when a rename leaves exactly one strong match. Found values still write; missing ones stay empty and show as stale/missing.
+
+Admin → **HA inverter fields** lists bindings, age, and candidates. Pick a candidate to pin a manual bind.
+
+## Zigbee gateway diagnostics
+
+Opted-in ESP32-C6 gateways POST to `https://solarstats.percolate.one/api/diag/zbgw` (header `X-ZBGW-Diag`). Failures are stored immediately; a clean unit sends **Device working correctly** about once an hour. Polls every two minutes only refresh last-seen and pick up a remote **Restart**. Admin → **Zigbee gateways** shows the list. Nothing in the payload is a Wi-Fi or MQTT password — the device id is the STA MAC.
 
 ## Energy
 

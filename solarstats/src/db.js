@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { ensureHaFieldTables, resolveInverterFields, upsertHaCatalog } from "./ha_fields.js";
 
 const MAX_GAP_MS = 5 * 60 * 1000;
 
@@ -23,13 +24,12 @@ export const LOAD_DEFS = [
   { key: "pi5", label: "Pi5 Server", color: "#7e57c2", defaultSource: "grid", entityId: "sensor.pi5_server_energy_daily_2", powerEntityId: "sensor.ts011f_power" },
   { key: "motorbike", label: "Motorbike", color: "#26a69a", defaultSource: "grid", entityId: "sensor.motorbike_charger_energy_daily_2", powerEntityId: "sensor.zigbeesensor_power" },
   { key: "fridge", label: "Fridge", color: "#66bb6a", defaultSource: "grid", entityId: "sensor.fridge_energy_daily_2", powerEntityId: "sensor.kitchen_refrigerator_power" },
-  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", defaultSource: "inverter", entityId: "sensor.inverter_loads_energy_daily", powerEntityId: "sensor.laundry_room_washer_power_approx" },
-  { key: "otherInverter", label: "Other inverter", color: "#cddc39", defaultSource: "inverter", entityId: "sensor.inverter_unmetered_energy_daily", powerEntityId: "sensor.inverter_unmetered_power" },
+  { key: "washingMachine", label: "Washing machine", color: "#8bc34a", defaultSource: "inverter", entityId: "sensor.inverter_loads", powerEntityId: "sensor.laundry_room_washer_power_approx" },
+  { key: "otherInverter", label: "Other inverter", color: "#cddc39", defaultSource: "inverter", entityId: "sensor.inverter_unmetered", powerEntityId: "sensor.inverter_unmetered_power" },
 ];
 
 /** Extra daily-energy sensors → their live power (W) entity. */
 const EXTRA_POWER_BY_ENERGY_ID = {
-  "sensor.nbn_modem_energy_daily": "sensor.ts011f_power_3",
   "sensor.router_energy_daily": "sensor.zigbeesensor_power_2",
   "sensor.tv_energy_daily": "sensor.ts011f_power_2",
   "sensor.white_robot_energy_daily": "sensor.ts011f_power_5",
@@ -166,6 +166,7 @@ export function openDatabase(dbPath) {
   ensureColumn(db, "samples", "loads_daily_kwh", "TEXT");
   ensureColumn(db, "ha_devices", "device_class", "TEXT");
   ensureColumn(db, "ha_devices", "unit", "TEXT");
+  ensureHaFieldTables(db);
 
   if (getMeta(db, "allow_new_accounts") == null) {
     setMeta(db, "allow_new_accounts", "1");
@@ -175,7 +176,6 @@ export function openDatabase(dbPath) {
   }
 
   seedAdmin(db);
-  seedDevices(db);
   return db;
 }
 
@@ -205,63 +205,6 @@ function seedAdmin(db) {
   ).run(adminEmail, now, now);
 }
 
-/** Default HA entities; ACL flags prepare for future admin UI checkboxes. */
-const DEFAULT_HA_DEVICES = [
-  {
-    entity_id: "switch.smart_socket_socket_1",
-    domain: "switch",
-    name: "Smart socket 1",
-    allow_users: 1,
-    allow_admin: 1,
-  },
-  {
-    entity_id: "switch.zigbeesensor_switch_2",
-    domain: "switch",
-    name: "Zigbee switch 2",
-    allow_users: 1,
-    allow_admin: 1,
-  },
-  {
-    entity_id: "switch.smart_socket_2_socket_1",
-    domain: "switch",
-    name: "Office PC socket",
-    allow_users: 0,
-    allow_admin: 1,
-  },
-  {
-    entity_id: "light.office_office",
-    domain: "light",
-    name: "Office",
-    allow_users: 1,
-    allow_admin: 1,
-  },
-  {
-    entity_id: "light.front_bedroom",
-    domain: "light",
-    name: "Front bedroom",
-    allow_users: 1,
-    allow_admin: 1,
-  },
-  {
-    entity_id: "light.living_room_floor_lamp_2",
-    domain: "light",
-    name: "Living room floor lamp",
-    allow_users: 1,
-    allow_admin: 1,
-  },
-];
-
-function seedDevices(db) {
-  const insert = db.prepare(
-    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at)
-     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, NULL, NULL)
-     ON CONFLICT(entity_id) DO NOTHING`,
-  );
-  for (const d of DEFAULT_HA_DEVICES) {
-    insert.run(d);
-  }
-}
-
 /** Pack voltage below this means the inverter is not talking (not a real 48/24/12V reading). */
 const MIN_LIVE_BATTERY_V = 8;
 
@@ -281,9 +224,11 @@ function holdNumber(incoming, previous) {
   return incoming != null ? incoming : previous ?? null;
 }
 
-function isLiveInverter({ batteryVoltage, batterySoc }) {
+function isLiveInverter({ batteryVoltage, batterySoc, pvPower, outputPower }) {
   if (batteryVoltage != null && batteryVoltage >= MIN_LIVE_BATTERY_V) return true;
   if (batterySoc != null && batterySoc > 1) return true;
+  if (pvPower != null && pvPower > 0) return true;
+  if (outputPower != null && outputPower > 0) return true;
   return false;
 }
 
@@ -292,6 +237,8 @@ function isDeadSampleRow(row) {
   return !isLiveInverter({
     batteryVoltage: row.battery_voltage,
     batterySoc: row.battery_soc,
+    pvPower: row.pv_power,
+    outputPower: row.output_power,
   });
 }
 
@@ -542,6 +489,10 @@ export function setPieExtra(db, entityId, onPie) {
   return next;
 }
 
+function usesBuiltinLoads(db) {
+  return getMeta(db, "use_builtin_loads") !== "0";
+}
+
 export function getPieAdminRows(db) {
   const latest = getLatestLoadsDaily(db) || {};
   const power = getLatestLoadsPower(db);
@@ -549,8 +500,9 @@ export function getPieAdminRows(db) {
   const visibility = getPieVisibility(db);
   const { childrenByParent, parentByChild } = getPieMerges(db);
   const labelByKey = Object.fromEntries(LOAD_DEFS.map((d) => [d.key, d.label]));
+  const showBuiltins = usesBuiltinLoads(db);
 
-  const builtin = LOAD_DEFS.map((d) => ({
+  const builtin = (showBuiltins ? LOAD_DEFS : []).map((d) => ({
     key: d.key,
     label: d.label,
     color: d.color,
@@ -575,7 +527,7 @@ export function getPieAdminRows(db) {
         entityId: d.entityId,
         powerEntityId: EXTRA_POWER_BY_ENERGY_ID[d.entityId] || null,
         builtin: false,
-        onPie: isPieVisible(visibility, d.entityId, false),
+        onPie: isPieVisible(visibility, d.entityId, !showBuiltins),
         kwh: latest[d.entityId] ?? toNumber(d.state),
         watts: power[d.entityId] ?? null,
       };
@@ -772,17 +724,56 @@ function loadKeysOf(...maps) {
   return keys;
 }
 
-function parseLoadsDaily(payload) {
-  const src = payload.loadsDailyKwh || payload.loads_daily_kwh || null;
-  if (!src || typeof src !== "object") return null;
+function energyKwh(device) {
+  const n = toNumber(device?.state);
+  if (n == null) return null;
+  const unit = String(device?.unit || "").toLowerCase().replace(/\s+/g, "");
+  if (unit === "wh") return n / 1000;
+  if (unit === "mwh") return n * 1000;
+  return n;
+}
+
+function loadsFromDevices(devices) {
+  if (!Array.isArray(devices) || !devices.length) return null;
+  const byEntity = new Map(LOAD_DEFS.map((d) => [d.entityId, d.key]));
   const out = {};
   let any = false;
-  for (const key of loadKeysOf(src)) {
-    const n = toNumber(src[key]);
+  for (const d of devices) {
+    const id = String(d?.entity_id || d?.entityId || "");
+    if (!id) continue;
+    const row = {
+      entityId: id,
+      domain: d.domain || id.split(".")[0],
+      deviceClass: d.device_class || d.deviceClass,
+      unit: d.unit,
+      state: d.state,
+      name: d.name,
+    };
+    if (!isEnergySensor(row)) continue;
+    const n = energyKwh(row);
+    if (n == null) continue;
+    const key = byEntity.get(id) || (isPieEnergyCandidate(row) ? id : null);
+    if (!key) continue;
     out[key] = n;
-    if (n != null) any = true;
+    any = true;
   }
   return any ? out : null;
+}
+
+function parseLoadsDaily(payload) {
+  const src = payload.loadsDailyKwh || payload.loads_daily_kwh || null;
+  const named = {};
+  let anyNamed = false;
+  if (src && typeof src === "object") {
+    for (const key of loadKeysOf(src)) {
+      const n = toNumber(src[key]);
+      named[key] = n;
+      if (n != null) anyNamed = true;
+    }
+  }
+  const fromDevices = loadsFromDevices(payload.devices);
+  if (!anyNamed && !fromDevices) return null;
+  return { ...(fromDevices || {}), ...(anyNamed ? named : {}) };
 }
 
 /** Keep last-good daily kWh when a meter drops to unavailable/0 mid-day. Accept a true midnight reset. */
@@ -832,19 +823,6 @@ function loadsFromRow(row) {
 
 export function insertSample(db, payload) {
   const ts = Date.parse(payload.ts || "") || Date.now();
-  const incomingOutput = toNumber(payload.outputPower);
-  const incoming = {
-    grid_voltage: toNumber(payload.gridVoltage),
-    pv_voltage: toNumber(payload.pvVoltage),
-    battery_voltage: toNumber(payload.batteryVoltage),
-    battery_soc: toNumber(payload.batterySoc),
-    battery_charge_current: toNumber(payload.batteryChargeCurrent),
-    load_percent: toNumber(payload.loadPercent),
-    ac_frequency: toNumber(payload.acFrequency),
-    pv_power: toNumber(payload.pvPower),
-    battery_discharge_current: toNumber(payload.batteryDischargeCurrent),
-    output_power: incomingOutput != null ? Math.max(0, incomingOutput) : null,
-  };
 
   const prev = db
     .prepare(`SELECT * FROM samples ORDER BY ts DESC LIMIT 1`)
@@ -852,7 +830,27 @@ export function insertSample(db, payload) {
 
   if (Array.isArray(payload.devices)) {
     upsertDeviceStates(db, payload.devices);
+    upsertHaCatalog(db, payload.devices, ts);
+  } else if (Array.isArray(payload.states)) {
+    upsertDeviceStates(db, payload.states);
+    upsertHaCatalog(db, payload.states, ts);
   }
+
+  const resolved = resolveInverterFields(db, payload, ts);
+  const incoming = {
+    grid_voltage: resolved.values.gridVoltage,
+    pv_voltage: resolved.values.pvVoltage,
+    battery_voltage: resolved.values.batteryVoltage,
+    battery_soc: resolved.values.batterySoc,
+    battery_charge_current: resolved.values.batteryChargeCurrent,
+    load_percent: resolved.values.loadPercent,
+    ac_frequency: resolved.values.acFrequency,
+    pv_power: resolved.values.pvPower,
+    battery_discharge_current: resolved.values.batteryDischargeCurrent,
+    output_power:
+      resolved.values.outputPower != null ? Math.max(0, resolved.values.outputPower) : null,
+  };
+  setMeta(db, "ha_fields_latest", JSON.stringify(resolved.fields));
 
   const prevLoads = getLatestLoadsDaily(db) || loadsFromRow(prev);
   const loads = mergeLoadsDaily(parseLoadsDaily(payload), prevLoads);
@@ -863,6 +861,8 @@ export function insertSample(db, payload) {
   const live = isLiveInverter({
     batteryVoltage: incoming.battery_voltage,
     batterySoc: incoming.battery_soc,
+    pvPower: incoming.pv_power,
+    outputPower: incoming.output_power,
   });
 
   const lastGood =
@@ -872,6 +872,8 @@ export function insertSample(db, payload) {
           .prepare(
             `SELECT * FROM samples
              WHERE IFNULL(battery_voltage, 0) >= ?
+                OR IFNULL(pv_power, 0) > 0
+                OR IFNULL(output_power, 0) > 0
              ORDER BY ts DESC LIMIT 1`,
           )
           .get(MIN_LIVE_BATTERY_V);
@@ -1132,7 +1134,6 @@ export function listTrackedEntityIds(db) {
 export function upsertDeviceStates(db, devices) {
   if (!Array.isArray(devices) || !devices.length) return;
   const now = new Date().toISOString();
-  const defaultsById = new Map(DEFAULT_HA_DEVICES.map((d) => [d.entity_id, d]));
   const upsert = db.prepare(
     `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit)
      VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at, @device_class, @unit)
@@ -1145,22 +1146,20 @@ export function upsertDeviceStates(db, devices) {
   );
   const tx = db.transaction((rows) => {
     for (const d of rows) {
-      if (!d?.entity_id) continue;
-      const entityId = String(d.entity_id);
-      const seed = defaultsById.get(entityId);
-      const domain = entityId.split(".")[0] || "switch";
+      const entityId = String(d?.entity_id || d?.entityId || "").trim();
+      if (!entityId) continue;
+      const domain = entityId.split(".")[0] || "sensor";
       const state = d.state == null ? null : String(d.state);
       upsert.run({
         entity_id: entityId,
-        domain: seed?.domain || domain,
-        name: d.name || seed?.name || entityId,
-        // New discoveries stay off the board until Admin ACL is set.
-        allow_users: seed ? seed.allow_users : 0,
-        allow_admin: seed ? seed.allow_admin : 0,
+        domain,
+        name: d.name || d.friendly_name || entityId,
+        allow_users: 0,
+        allow_admin: 0,
         state,
         updated_at: now,
-        device_class: d.device_class || null,
-        unit: d.unit || null,
+        device_class: d.device_class || d.deviceClass || null,
+        unit: d.unit || d.unit_of_measurement || null,
       });
     }
   });
@@ -1287,4 +1286,4 @@ export function completeDeviceCommand(db, id, ok) {
   ).run(ok ? "done" : "error", now, id);
 }
 
-export { LOAD_KEYS, DEFAULT_HA_DEVICES, MIN_LIVE_BATTERY_V };
+export { LOAD_KEYS, MIN_LIVE_BATTERY_V };

@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Solarstats — PowMr</title>
+    <title>Solarstats — {{SITE_NAME}}</title>
+    <meta name="solarstats-site" content="{{SITE_SLUG}}" />
+    <meta name="solarstats-name" content="{{SITE_NAME}}" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -22,7 +24,7 @@
       <header class="top">
         <div>
           <h1 class="brand">Solar<span>stats</span></h1>
-          <p class="sub">PowMr inverter · live feed every 15s</p>
+          <p class="sub" id="siteSub">{{SITE_NAME}} · live feed every 15s</p>
         </div>
         <div class="status">
           <div class="pill">

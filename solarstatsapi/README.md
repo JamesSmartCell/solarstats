@@ -1,6 +1,6 @@
 # solarstatsapi
 
-Polls Home Assistant PowMr sensors (and daily load kWh meters) every **15s** and POSTs a JSON snapshot to the remote `solarstats` ingest endpoint.
+Polls Home Assistant every **15s** (`GET /api/states`) and POSTs every switch, light, sensor, and binary sensor as-is (id, name, state, unit, class, `last_updated`) to `solarstats`. Binding and healing happen on the site admin page.
 
 ## Setup (Raspberry Pi)
 
@@ -8,7 +8,7 @@ Polls Home Assistant PowMr sensors (and daily load kWh meters) every **15s** and
 cd solarstatsapi
 cp .env.example .env
 # edit .env — set HA_TOKEN, SITE_INGEST_URL, INGEST_SECRET
-npm install
+npm install   # better-sqlite3 needs build-essential / Python on Linux
 npm start
 ```
 
@@ -32,6 +32,7 @@ sudo systemctl status solarstatsapi
 | `SITE_INGEST_URL` | `http://127.0.0.1:8787/api/ingest` | Remote site ingest (often via SSH tunnel) |
 | `POLL_INTERVAL_MS` | `15000` | Match ESPHome / HA update interval |
 | `INGEST_SECRET` | shared secret | Must match `solarstats` `INGEST_SECRET` |
+| `CATALOG_PATH` | `./data/catalog.db` | SQLite catalog of HA entities + field bindings |
 
 ## SSH tunnel example (push to server)
 
@@ -50,32 +51,19 @@ Each tick POSTs JSON like:
 ```json
 {
   "ts": "2026-08-08T01:22:30.000Z",
-  "batterySoc": 85,
-  "pvPower": 148,
-  "outputPower": 36,
-  "batteryVoltage": 26.1,
-  "loadsDailyKwh": {
-    "officePc": 0.42,
-    "frontRoomPc": 0.31,
-    "pi5": 0.18,
-    "motorbike": 0,
-    "fridge": 0.55,
-    "washingMachine": 0.12,
-    "otherInverter": 0.9
-  }
+  "devices": [
+    {
+      "entity_id": "sensor.garden_powmr_inverter_pv_power",
+      "state": "197.0",
+      "name": "PV Power",
+      "device_class": "power",
+      "unit": "W",
+      "last_updated": "2026-09-10T22:49:40.853256+00:00"
+    }
+  ]
 }
 ```
 
-Daily load entities (edit IDs in [`src/index.js`](src/index.js) if HA renames them):
+`solarstats` stores the dump, binds inverter fields, and builds the load pie. Admin → **HA inverter fields** heals a rename; Admin → **Devices** decides which switches/lights appear on the board.
 
-| Key | Entity |
-|-----|--------|
-| `officePc` | `sensor.office_pc_synth_energy_daily` |
-| `frontRoomPc` | `sensor.front_room_pc_synth_energy_daily` |
-| `pi5` | `sensor.pi5_server_energy_daily_2` |
-| `motorbike` | `sensor.motorbike_charger_energy_daily_2` |
-| `fridge` | `sensor.fridge_energy_daily_2` |
-| `washingMachine` | `sensor.inverter_loads_energy_daily` |
-| `otherInverter` | `sensor.inverter_unmetered_energy_daily` |
-
-Missing or `unavailable` / `unknown` sensors are sent as `null` (logged as warnings). The ingest server keeps the last live inverter reading instead of writing zeros.
+The agent keeps a local SQLite cache (`CATALOG_PATH`, default `./data/catalog.db`) so a failed HA dump can still forward the last seen names and values. Field bindings and healing live on the solarstats site. The ingest server keeps the last live inverter reading instead of writing zeros.
