@@ -235,6 +235,20 @@
   text-overflow: ellipsis;
 }
 
+.admin-table .pie-color-cell {
+  width: 3.2rem;
+  text-align: center;
+}
+
+.admin-table .pie-color {
+  width: 2.1rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid var(--line, #3a4550);
+  background: transparent;
+  cursor: pointer;
+}
+
 .admin-table .acl-cell {
   text-align: center;
   width: 4.5rem;

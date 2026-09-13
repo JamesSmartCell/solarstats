@@ -23,6 +23,7 @@ import {
   getPieAdminRows,
   setLoadSources,
   setPieExtra,
+  setPieColor,
   addPieMerge,
   removePieMerge,
   getUserById,
@@ -77,6 +78,48 @@ const HAS_MS_COOKIE = "solarstats_ms";
 
 const ZBGW_DIAG_TOKEN = process.env.ZBGW_DIAG_TOKEN || "zbgw-anon-v1";
 const ZBGW_DIAG_DB_PATH = process.env.ZBGW_DIAG_DB_PATH || "./data/zbgw_diag.db";
+const ZBGW_FW_DIR = process.env.ZBGW_FW_DIR || path.join(__dirname, "..", "data", "fw");
+const ZBGW_FW_FILE = "zigbee-gateway.bin";
+const ZBGW_FW_PATH = path.join(ZBGW_FW_DIR, ZBGW_FW_FILE);
+const ZBGW_FW_PUBLIC = "/fw/zigbee-gateway.bin";
+const ORIGIN = process.env.ORIGIN || "";
+const ESP_APP_DESC_MAGIC = Buffer.from([0x32, 0x54, 0xcd, 0xab]);
+
+function parseEspFirmware(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 256 || buf[0] !== 0xe9) {
+    return null;
+  }
+  let idx = 0;
+  while (idx < buf.length - 80) {
+    idx = buf.indexOf(ESP_APP_DESC_MAGIC, idx);
+    if (idx < 0) {
+      return null;
+    }
+    const version = buf.subarray(idx + 16, idx + 48).toString("utf8").replace(/\0+$/, "");
+    const name = buf.subarray(idx + 48, idx + 80).toString("utf8").replace(/\0+$/, "");
+    if (name === "zigbee-gateway" && version) {
+      return { version, name };
+    }
+    idx += 1;
+  }
+  return null;
+}
+
+function zbgwFwMeta() {
+  if (!fs.existsSync(ZBGW_FW_PATH)) {
+    return { present: false, publicPath: ZBGW_FW_PUBLIC };
+  }
+  const st = fs.statSync(ZBGW_FW_PATH);
+  const parsed = parseEspFirmware(fs.readFileSync(ZBGW_FW_PATH));
+  return {
+    present: true,
+    size: st.size,
+    mtime: st.mtime.toISOString(),
+    version: parsed?.version || null,
+    publicPath: ZBGW_FW_PUBLIC,
+    publicUrl: ORIGIN ? `${ORIGIN}${ZBGW_FW_PUBLIC}` : ZBGW_FW_PUBLIC,
+  };
+}
 const zbgwDiag = openZbgwDiagDb(ZBGW_DIAG_DB_PATH);
 const diagHits = new Map();
 
@@ -623,6 +666,15 @@ app.post("/api/admin/settings", requireAdmin, (req, res) => {
       broadcast({ type: "loadConfig", loadConfig });
     }
   }
+  if (req.body?.pieColor) {
+    try {
+      setPieColor(db, req.body.pieColor.key || req.body.pieColor.entityId, req.body.pieColor.color);
+      loadConfig = getLoadConfig(db);
+      broadcast({ type: "loadConfig", loadConfig });
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message || "colour_failed" });
+    }
+  }
   try {
     if (req.body?.pieMerge) {
       addPieMerge(db, req.body.pieMerge.parentKey, req.body.pieMerge.childKey);
@@ -671,6 +723,32 @@ app.post("/api/admin/zbgw/:deviceId/restart", requireAdmin, (req, res) => {
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || "restart_failed" });
   }
+});
+
+app.get("/api/admin/fw", requireAdmin, (_req, res) => {
+  res.json(zbgwFwMeta());
+});
+
+app.put("/api/admin/fw/zigbee-gateway", requireAdmin, express.raw({ type: "*/*", limit: "2mb" }), (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
+  const parsed = parseEspFirmware(buf);
+  if (!parsed) {
+    return res.status(400).json({ error: "not_a_zigbee_gateway_bin" });
+  }
+  fs.mkdirSync(ZBGW_FW_DIR, { recursive: true });
+  const tmp = `${ZBGW_FW_PATH}.tmp`;
+  fs.writeFileSync(tmp, buf);
+  fs.renameSync(tmp, ZBGW_FW_PATH);
+  res.json({ ok: true, ...zbgwFwMeta() });
+});
+
+app.get(ZBGW_FW_PUBLIC, (_req, res) => {
+  if (!fs.existsSync(ZBGW_FW_PATH)) {
+    return res.status(404).type("text").send("firmware not published");
+  }
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Cache-Control", "no-store");
+  res.sendFile(path.resolve(ZBGW_FW_PATH));
 });
 
 function authorizeZbgwDiag(req, res, next) {

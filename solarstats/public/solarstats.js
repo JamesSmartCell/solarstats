@@ -21,7 +21,8 @@ const RANGE_LABELS = {
   "30d": "30 days",
 };
 
-const INVERTER_PIE_OFFSET = 18;
+const PIE_GAP_COLOR = "#12181e";
+const PIE_GAP_FRACTION = 0.018;
 
 const LOAD_SLICES = [
   { key: "officePc", label: "Office PC", color: "#42a5f5", source: "grid" },
@@ -67,6 +68,7 @@ const state = {
   loadSlices: LOAD_SLICES.map((s) => ({ ...s })),
   devices: [],
   pendingToggles: new Map(),
+  pieRows: [],
 };
 
 const TOGGLE_LOCK_MS = 20000;
@@ -150,8 +152,26 @@ function currentLoadSlices() {
   return state.loadSlices.length ? state.loadSlices : LOAD_SLICES;
 }
 
-function slicePieOffset(slice) {
-  return slice?.source === "inverter" ? INVERTER_PIE_OFFSET : 0;
+function pieChartModel(slices, kwhMap) {
+  const inverter = [];
+  const grid = [];
+  for (const slice of slices) {
+    (slice.source === "inverter" ? inverter : grid).push(slice);
+  }
+  const invVals = inverter.map((s) => sumMapValues(kwhMap, sliceKeys(s)));
+  const gridVals = grid.map((s) => sumMapValues(kwhMap, sliceKeys(s)));
+  const invSum = invVals.reduce((a, b) => a + b, 0);
+  const gridSum = gridVals.reduce((a, b) => a + b, 0);
+  const rows = [];
+  inverter.forEach((slice, i) => rows.push({ slice, value: invVals[i] }));
+  if (invSum > 0 && gridSum > 0) {
+    rows.push({
+      slice: { key: "__pie_gap__", label: "", color: PIE_GAP_COLOR, gap: true },
+      value: Math.max((invSum + gridSum) * PIE_GAP_FRACTION, 0.002),
+    });
+  }
+  grid.forEach((slice, i) => rows.push({ slice, value: gridVals[i] }));
+  return rows;
 }
 
 function rangeToMs(range) {
@@ -338,29 +358,35 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
         backgroundColor: LOAD_SLICES.map((s) => s.color),
         borderColor: "#12181e",
         borderWidth: 2,
-        offset: LOAD_SLICES.map(slicePieOffset),
+        offset: 0,
       },
     ],
   },
   options: {
     responsive: true,
     maintainAspectRatio: false,
-    layout: { padding: INVERTER_PIE_OFFSET },
     plugins: {
       legend: {
         position: "bottom",
-        labels: { color: "#8b9aab", boxWidth: 12, font: { size: 11 } },
+        labels: {
+          color: "#8b9aab",
+          boxWidth: 12,
+          font: { size: 11 },
+          filter: (item) => !!item.text,
+        },
       },
       tooltip: {
         backgroundColor: "#12181e",
         borderColor: "#2a3540",
         borderWidth: 1,
+        filter: (item) => !!item.label,
         callbacks: {
           label(ctx) {
             const v = Number(ctx.raw);
-            const slice = currentLoadSlices()[ctx.dataIndex];
-            const extra = slice?.members?.length
-              ? ` · ${slice.members.length} merged`
+            const row = state.pieRows?.[ctx.dataIndex];
+            if (row?.slice?.gap) return "";
+            const extra = row?.slice?.members?.length
+              ? ` · ${row.slice.members.length} merged`
               : "";
             return `${ctx.label}: ${Number.isFinite(v) ? v.toFixed(3) : "—"} kWh${extra}`;
           },
@@ -392,12 +418,13 @@ function formatWatts(value) {
 function updateLoadsPie(loads) {
   if (loads) state.loadsDailyKwh = loads;
   const src = state.loadsDailyKwh || {};
-  const slices = currentLoadSlices();
+  const rows = pieChartModel(currentLoadSlices(), src);
+  state.pieRows = rows;
   const ds = loadsPieChart.data.datasets[0];
-  loadsPieChart.data.labels = slices.map((s) => s.label);
-  ds.backgroundColor = slices.map((s) => s.color);
-  ds.offset = slices.map(slicePieOffset);
-  ds.data = slices.map((s) => sumMapValues(src, sliceKeys(s)));
+  loadsPieChart.data.labels = rows.map((r) => (r.slice.gap ? "" : r.slice.label));
+  ds.backgroundColor = rows.map((r) => r.slice.color);
+  ds.offset = rows.map(() => 0);
+  ds.data = rows.map((r) => r.value);
   loadsPieChart.update("none");
   updateCurrentLoads();
 }

@@ -3,11 +3,12 @@ import { formatHaState, isSensorDomain, stateTone } from "./ha-display.js";
 let selectedGateway = "";
 
 async function load() {
-  const [usersRes, devicesRes, zbgwRes, fieldsRes] = await Promise.all([
+  const [usersRes, devicesRes, zbgwRes, fieldsRes, fwRes] = await Promise.all([
     fetch("/api/admin/users"),
     fetch("/api/admin/devices"),
     fetch(zbgwUrl()),
     fetch("/api/admin/fields"),
+    fetch("/api/admin/fw"),
   ]);
 
   if (usersRes.status === 401 || usersRes.status === 403) {
@@ -43,6 +44,26 @@ async function load() {
     console.warn("fields HTTP", fieldsRes.status);
     renderHaFields({ fields: [] });
   }
+
+  if (fwRes.ok) {
+    renderFw(await fwRes.json());
+  } else {
+    console.warn("fw HTTP", fwRes.status);
+    renderFw({ present: false });
+  }
+}
+
+function renderFw(info) {
+  const el = document.getElementById("fwMeta");
+  if (!el) return;
+  if (!info?.present) {
+    el.textContent = "none — upload zigbee-gateway.bin from the IDF build";
+    return;
+  }
+  const mb = ((info.size || 0) / 1048576).toFixed(2);
+  const ver = info.version || "unknown";
+  const url = info.publicUrl || info.publicPath || "/fw/zigbee-gateway.bin";
+  el.textContent = `${ver} · ${mb} MB · ${url}`;
 }
 
 function renderHaFields(data) {
@@ -271,6 +292,16 @@ function renderPieRows(rows) {
     const nameTd = document.createElement("td");
     nameTd.textContent = load.label || load.key;
 
+    const colorTd = document.createElement("td");
+    colorTd.className = "pie-color-cell";
+    const color = document.createElement("input");
+    color.type = "color";
+    color.className = "pie-color";
+    color.value = /^#[0-9a-fA-F]{6}$/.test(load.color || "") ? load.color : "#90a4ae";
+    color.title = "Doughnut slice colour";
+    color.addEventListener("change", () => savePieColor(key, color.value));
+    colorTd.appendChild(color);
+
     const entityTd = document.createElement("td");
     entityTd.className = "entity-id";
     entityTd.textContent = load.entityId || "—";
@@ -316,7 +347,7 @@ function renderPieRows(rows) {
     });
     includeTd.appendChild(cb);
 
-    tr.append(nameTd, entityTd, kwhTd, invTd, gridTd, includeTd, renderMergeCell(load, list));
+    tr.append(nameTd, colorTd, entityTd, kwhTd, invTd, gridTd, includeTd, renderMergeCell(load, list));
     tbody.appendChild(tr);
   }
 }
@@ -354,6 +385,10 @@ async function postPieSettings(body) {
 
 async function savePieExtra(entityId, onPie) {
   return postPieSettings({ pieExtra: { entityId, onPie } });
+}
+
+async function savePieColor(key, color) {
+  return postPieSettings({ pieColor: { key, color } });
 }
 
 async function savePieMerge(parentKey, childKey) {
@@ -621,6 +656,26 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+document.getElementById("fwUpload")?.addEventListener("click", async () => {
+  const input = document.getElementById("fwFile");
+  const file = input?.files?.[0];
+  if (!file) {
+    alert("Choose zigbee-gateway.bin first");
+    return;
+  }
+  const res = await fetch("/api/admin/fw/zigbee-gateway", {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Upload failed");
+    return;
+  }
+  renderFw(await res.json());
+  flashSaved("fwSaved");
+});
 
 load().catch((err) => {
   console.error(err);

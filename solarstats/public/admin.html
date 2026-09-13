@@ -72,6 +72,15 @@
           Anonymous diagnostics from opted-in C6 gateways.
           Health ping is hourly; a restart is delivered on the next 2-minute poll.
         </p>
+        <p class="hint">
+          OTA image (public at <code>/fw/zigbee-gateway.bin</code>):
+          <span id="fwMeta">…</span>
+        </p>
+        <p>
+          <input type="file" id="fwFile" accept=".bin,application/octet-stream" />
+          <button type="button" class="toolbar-btn" id="fwUpload">Upload firmware</button>
+        </p>
+        <p class="hint" id="fwSaved" hidden>Firmware published</p>
         <div class="table-wrap">
           <table class="admin-table" id="zbgwTable">
             <thead>
@@ -129,6 +138,7 @@
           All synthetic daily energy sensors appear here after solarstatsapi syncs HA.
           <strong>Inverter / Grid</strong> classifies the load ·
           <strong>On pie</strong> shows it on the dashboard doughnut ·
+          <strong>Colour</strong> is the doughnut slice ·
           <strong>+</strong> merges another feed into this one (energy and watts).
         </p>
         <div class="table-wrap">
@@ -136,6 +146,7 @@
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Colour</th>
                 <th>Entity</th>
                 <th>Today</th>
                 <th>Inverter</th>

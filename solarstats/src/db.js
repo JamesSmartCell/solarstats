@@ -323,6 +323,49 @@ export function getPieExtraIds(db) {
   return [...new Set(parsed.map((id) => String(id || "").trim()).filter(Boolean))];
 }
 
+function normalizeHexColor(value) {
+  const s = String(value || "").trim();
+  const short = /^#([0-9a-fA-F]{3})$/.exec(s);
+  if (short) {
+    const [r, g, b] = short[1];
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  const full = /^#([0-9a-fA-F]{6})$/.exec(s);
+  return full ? `#${full[1]}`.toLowerCase() : null;
+}
+
+export function getPieColors(db) {
+  const raw = getMeta(db, "pie_colors");
+  let parsed = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    parsed = {};
+  }
+  const out = {};
+  if (parsed && typeof parsed === "object") {
+    for (const [key, v] of Object.entries(parsed)) {
+      const hex = normalizeHexColor(v);
+      if (key && hex) out[key] = hex;
+    }
+  }
+  return out;
+}
+
+export function setPieColor(db, key, color) {
+  const id = String(key || "").trim();
+  const hex = normalizeHexColor(color);
+  if (!id || !hex) {
+    const err = new Error("A valid #RGB or #RRGGBB colour is required");
+    err.status = 400;
+    throw err;
+  }
+  const colors = getPieColors(db);
+  colors[id] = hex;
+  setMeta(db, "pie_colors", JSON.stringify(colors));
+  return colors;
+}
+
 export function getPieVisibility(db) {
   const raw = getMeta(db, "pie_visibility");
   let parsed = {};
@@ -498,6 +541,7 @@ export function getPieAdminRows(db) {
   const power = getLatestLoadsPower(db);
   const sources = getLoadSources(db);
   const visibility = getPieVisibility(db);
+  const colors = getPieColors(db);
   const { childrenByParent, parentByChild } = getPieMerges(db);
   const labelByKey = Object.fromEntries(LOAD_DEFS.map((d) => [d.key, d.label]));
   const showBuiltins = usesBuiltinLoads(db);
@@ -505,7 +549,7 @@ export function getPieAdminRows(db) {
   const builtin = (showBuiltins ? LOAD_DEFS : []).map((d) => ({
     key: d.key,
     label: d.label,
-    color: d.color,
+    color: colors[d.key] || d.color,
     source: sources[d.key] || d.defaultSource,
     entityId: d.entityId,
     powerEntityId: d.powerEntityId || null,
@@ -522,7 +566,7 @@ export function getPieAdminRows(db) {
       return {
         key: d.entityId,
         label: d.name || d.entityId,
-        color: colorForKey(d.entityId),
+        color: colors[d.entityId] || colorForKey(d.entityId),
         source: sources[d.entityId] || "grid",
         entityId: d.entityId,
         powerEntityId: EXTRA_POWER_BY_ENERGY_ID[d.entityId] || null,

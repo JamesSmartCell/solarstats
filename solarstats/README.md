@@ -71,7 +71,7 @@ SITE_RIVERMILL_NAME=Rivermill
 
 Login is still the existing solarstats accounts. Site data is isolated.
 
-On the Rivermill LAN run [`../solarshim`](../solarshim) with `SITE_INGEST_URL=https://solarstats.percolate.one/api/ingest/rivermill`.
+On the Rivermill LAN run [`../solarshim`](../solarshim) with `SITE_INGEST_URL=https://homesolar.percolate.one/api/ingest/rivermill`.
 
 ## Caddy (DNS → TLS → Node on 8787)
 
@@ -130,8 +130,10 @@ Pi `.env`: `SITE_INGEST_URL=http://127.0.0.1:8787/api/ingest` (through the tunne
 - `GET /` — dashboard (**approved session**)
 - `WS /ws` — live sample + `devices` push (**approved session**)
 - `POST /api/diag/zbgw` — Zigbee gateway diagnostics (`X-ZBGW-Diag` product token)
+- `GET /fw/zigbee-gateway.bin` — public OTA image (admin-uploaded)
 - `GET /api/admin/zbgw` — gateway list + events (**admin**)
 - `POST /api/admin/zbgw/:deviceId/restart` — queue remote restart (**admin**)
+- `GET /api/admin/fw` / `PUT /api/admin/fw/zigbee-gateway` — OTA image metadata / upload (**admin**)
 - `GET /api/health` — public liveness
 - `GET /login`, `/auth/microsoft`, `/auth/callback`, `POST /logout`
 - Passkey + `/admin` routes as above
@@ -150,7 +152,7 @@ Admin → **HA inverter fields** lists bindings, age, and candidates. Pick a can
 
 ## Zigbee gateway diagnostics
 
-Opted-in ESP32-C6 gateways POST to `https://solarstats.percolate.one/api/diag/zbgw` (header `X-ZBGW-Diag`). Failures are stored immediately; a clean unit sends **Device working correctly** about once an hour. Polls every two minutes only refresh last-seen and pick up a remote **Restart**. Admin → **Zigbee gateways** shows the list. Nothing in the payload is a Wi-Fi or MQTT password — the device id is the STA MAC.
+Opted-in ESP32-C6 gateways POST to `https://homesolar.percolate.one/api/diag/zbgw` (header `X-ZBGW-Diag`). Failures are stored immediately; a clean unit sends **Device working correctly** about once an hour. Polls every two minutes only refresh last-seen and pick up a remote **Restart**. Admin → **Zigbee gateways** shows the list and accepts a `zigbee-gateway.bin` upload, served at `https://homesolar.percolate.one/fw/zigbee-gateway.bin`. Nothing in the payload is a Wi-Fi or MQTT password — the device id is the STA MAC.
 
 ## Energy
 
