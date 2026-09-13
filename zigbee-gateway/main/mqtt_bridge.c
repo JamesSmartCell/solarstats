@@ -5,12 +5,15 @@
 
 #include "config.h"
 #include "device_registry.h"
+#include "diag.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_discovery.h"
+#include "nvs_creds.h"
+#include "ota_update.h"
 #include "wifi_net.h"
 #include "zigbee_coordinator.h"
 #include "lwip/inet.h"
@@ -45,6 +48,10 @@ static bool s_discovery_done;
 static int64_t s_last_discovery_ms;
 /* Resolved once at start so reconnects do not re-hit flaky .local DNS. */
 static char s_broker_host[64];
+static char s_mqtt_cfg_host[64];
+static char s_mqtt_user[NVS_CREDS_USER_MAX + 1];
+static char s_mqtt_pass[NVS_CREDS_PASS_MAX + 1];
+static char s_mqtt_uri[128];
 
 typedef struct {
     uint32_t gen;
@@ -60,7 +67,7 @@ static bool host_looks_like_ipv4(const char *s)
 
 static esp_err_t resolve_broker_host(void)
 {
-    const char *cfg = CONFIG_ZBGW_MQTT_HOST;
+    const char *cfg = s_mqtt_cfg_host;
     snprintf(s_broker_host, sizeof(s_broker_host), "%s", cfg);
     if (host_looks_like_ipv4(cfg)) {
         ESP_LOGI(TAG, "MQTT broker IP %s", s_broker_host);
@@ -265,6 +272,58 @@ static void handle_switch_set_topic(const char *topic, int topic_len, const char
     s_switch_cb(ieee, on);
 }
 
+static void handle_power_on_set_topic(const char *topic, int topic_len, const char *data, int data_len)
+{
+    if (!topic || topic_len <= 0 || !data) {
+        return;
+    }
+
+    const char *prefix = ZBGW_TOPIC_PREFIX;
+    size_t prefix_len = strlen(prefix);
+    const char *suffix = "/power_on_behavior/set";
+    size_t suffix_len = strlen(suffix);
+    if ((size_t)topic_len < prefix_len + 1 + 16 + suffix_len) {
+        return;
+    }
+    if (strncmp(topic, prefix, prefix_len) != 0 || topic[prefix_len] != '/') {
+        return;
+    }
+
+    const char *ieee_start = topic + prefix_len + 1;
+    if (strncmp(ieee_start + 16, suffix, suffix_len) != 0) {
+        return;
+    }
+
+    char ieee_str[17] = {0};
+    memcpy(ieee_str, ieee_start, 16);
+    uint64_t ieee = 0;
+    if (!device_registry_ieee_from_str(ieee_str, &ieee)) {
+        ESP_LOGW(TAG, "Bad IEEE in power_on_behavior topic: %s", ieee_str);
+        return;
+    }
+
+    char name[24] = {0};
+    int n = data_len < (int)sizeof(name) - 1 ? data_len : (int)sizeof(name) - 1;
+    if (n > 0) {
+        memcpy(name, data, n);
+    }
+    while (n > 0 && (name[n - 1] == '\n' || name[n - 1] == '\r' || name[n - 1] == ' ' || name[n - 1] == '"')) {
+        name[--n] = '\0';
+    }
+    if (name[0] == '"') {
+        memmove(name, name + 1, n);
+        n--;
+        if (n > 0 && name[n - 1] == '"') {
+            name[--n] = '\0';
+        }
+    }
+    if (!name[0]) {
+        return;
+    }
+    ESP_LOGI(TAG, "MQTT power_on_behavior ieee=%s -> %s", ieee_str, name);
+    (void)zigbee_coordinator_set_power_on_behavior(ieee, name);
+}
+
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     (void)handler_args;
@@ -279,8 +338,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         wifi_net_on_mqtt_up();
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_PERMIT_JOIN, 1);
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_SWITCH_SET_WILDCARD, 1);
+        esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_POWER_ON_SET_WILDCARD, 1);
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_REMOVE, 1);
         esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_REDISCOVER, 1);
+        esp_mqtt_client_subscribe(s_client, ZBGW_TOPIC_OTA, 1);
         mqtt_bridge_publish_status("online");
         mqtt_bridge_publish_permit_state(false);
         zigbee_coordinator_on_mqtt_connected();
@@ -337,12 +398,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             if (s_rediscover_cb) {
                 s_rediscover_cb();
             }
+        } else if (event->topic_len == (int)strlen(ZBGW_TOPIC_OTA) &&
+                   strncmp(event->topic, ZBGW_TOPIC_OTA, event->topic_len) == 0) {
+            ESP_LOGI(TAG, "MQTT OTA trigger");
+            (void)ota_update_start();
         } else {
             handle_switch_set_topic(event->topic, event->topic_len, event->data, event->data_len);
+            handle_power_on_set_topic(event->topic, event->topic_len, event->data, event->data_len);
         }
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGE(TAG, "MQTT error");
+        diag_report_error("mqtt_error", "MQTT client error");
         break;
     default:
         break;
@@ -366,11 +433,10 @@ static void mqtt_watchdog_task(void *arg)
             continue;
         }
         s_fail_count++;
-        ESP_LOGW(TAG, "MQTT watchdog: still down, reconnect (%d/%d)", s_fail_count, MQTT_WD_FAIL_LIMIT);
-        if (s_fail_count >= MQTT_WD_FAIL_LIMIT) {
-            ESP_LOGE(TAG, "MQTT watchdog: %d failed reconnects - restarting", s_fail_count);
-            vTaskDelay(pdMS_TO_TICKS(250));
-            esp_restart();
+        ESP_LOGW(TAG, "MQTT watchdog: still down, reconnect (%d)", s_fail_count);
+        if (s_fail_count == MQTT_WD_FAIL_LIMIT) {
+            ESP_LOGE(TAG, "MQTT unreachable at this broker — not restarting. Hold BOOT 3s to reopen setup.");
+            diag_report_error("mqtt_watchdog", "MQTT broker unreachable — retrying, no reboot");
         }
         /* Client often stops retrying after ECONNABORTED — kick it. */
         (void)esp_mqtt_client_reconnect(s_client);
@@ -417,17 +483,22 @@ esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_
     s_remove_cb = remove_cb;
     s_rediscover_cb = rediscover_cb;
 
+    zbgw_creds_t creds;
+    ESP_ERROR_CHECK(nvs_creds_get(&creds));
+    snprintf(s_mqtt_cfg_host, sizeof(s_mqtt_cfg_host), "%s", creds.mqtt_host);
+    snprintf(s_mqtt_user, sizeof(s_mqtt_user), "%s", creds.mqtt_user);
+    snprintf(s_mqtt_pass, sizeof(s_mqtt_pass), "%s", creds.mqtt_pass);
+
     /* Wait for Wi-Fi BA / DHCP to settle before the first TCP connect. */
     vTaskDelay(pdMS_TO_TICKS(5000));
     (void)resolve_broker_host();
 
-    char uri[128];
-    snprintf(uri, sizeof(uri), "mqtt://%s:%d", s_broker_host, CONFIG_ZBGW_MQTT_PORT);
+    snprintf(s_mqtt_uri, sizeof(s_mqtt_uri), "mqtt://%s:%d", s_broker_host, CONFIG_ZBGW_MQTT_PORT);
 
     esp_mqtt_client_config_t cfg = {
-        .broker.address.uri = uri,
-        .credentials.username = CONFIG_ZBGW_MQTT_USERNAME,
-        .credentials.authentication.password = CONFIG_ZBGW_MQTT_PASSWORD,
+        .broker.address.uri = s_mqtt_uri,
+        .credentials.username = s_mqtt_user[0] ? s_mqtt_user : NULL,
+        .credentials.authentication.password = s_mqtt_pass[0] ? s_mqtt_pass : NULL,
         .session.last_will =
             {
                 .topic = ZBGW_TOPIC_STATUS,
@@ -452,7 +523,7 @@ esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_
     if (xTaskCreate(mqtt_watchdog_task, "mqtt_wd", 2048, NULL, 4, NULL) != pdPASS) {
         ESP_LOGW(TAG, "MQTT watchdog task failed to start");
     }
-    ESP_LOGI(TAG, "MQTT client started -> %s (watchdog %d fails)", uri, MQTT_WD_FAIL_LIMIT);
+    ESP_LOGI(TAG, "MQTT client started -> %s (watchdog %d fails)", s_mqtt_uri, MQTT_WD_FAIL_LIMIT);
     return ESP_OK;
 }
 

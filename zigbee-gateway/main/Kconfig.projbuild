@@ -1,25 +1,25 @@
 menu "Zigbee Gateway Configuration"
 
     config ZBGW_WIFI_SSID
-        string "WiFi SSID"
+        string "WiFi SSID (setup form default)"
         default "YOUR_WIFI_SSID"
         help
-            Home Wi-Fi network SSID (STA mode).
+            Prefills the ZIGBEE_SETUP form only. Never auto-joins.
+            If NVS has no stored network, the SoftAP portal always opens.
 
     config ZBGW_WIFI_PASSWORD
-        string "WiFi password"
+        string "WiFi password (setup form default)"
         default "YOUR_WIFI_PASSWORD"
         help
-            Home Wi-Fi password.
+            Prefills the setup form only. Runtime password is stored in NVS.
 
     config ZBGW_MQTT_HOST
-        string "MQTT broker hostname or IP"
+        string "MQTT broker hostname or IP (seed only)"
         default "192.168.50.41"
         help
-            Mosquitto / Home Assistant MQTT broker address.
-            Prefer a LAN IP (e.g. 192.168.50.10) on ESP32-C6 — .local mDNS is
-            unreliable with Zigbee Wi-Fi coexistence. Hostname still works when
-            DNS/mDNS succeeds; the firmware resolves it to an IP at boot.
+            Seed for NVS / the setup form. Runtime host is stored in NVS.
+            Prefer a LAN IP on ESP32-C6 — .local mDNS is unreliable with
+            Zigbee Wi-Fi coexistence.
 
     config ZBGW_MQTT_PORT
         int "MQTT broker port"
@@ -27,16 +27,53 @@ menu "Zigbee Gateway Configuration"
         default 1883
 
     config ZBGW_MQTT_USERNAME
-        string "MQTT username"
+        string "MQTT username (seed only)"
         default "zigbee-gw"
         help
-            MQTT user created in the Mosquitto add-on.
+            Seed only. Runtime username is stored in NVS.
 
     config ZBGW_MQTT_PASSWORD
-        string "MQTT password"
+        string "MQTT password (seed only)"
         default "change-me"
         help
-            MQTT password for the gateway user.
+            Seed only. Runtime password is stored in NVS.
+
+    config ZBGW_SETUP_AP_SSID
+        string "First-boot setup SoftAP name"
+        default "ZIGBEE_SETUP"
+        help
+            Open AP broadcast when NVS has no Wi-Fi/MQTT credentials.
+
+    config ZBGW_OTA_URL
+        string "HTTPS OTA firmware URL"
+        default "https://homesolar.percolate.one/fw/zigbee-gateway.bin"
+        help
+            Public HTTPS URL for zigbee-gateway.bin on solarstats
+            (homesolar). Same image is used for every gateway; Wi-Fi
+            and MQTT stay in NVS across updates.
+
+    config ZBGW_DIAG_URL
+        string "Anonymous diagnostics HTTPS URL"
+        default "https://homesolar.percolate.one/api/diag/zbgw"
+        help
+            POST target for failures, boot, and hourly health. Only used
+            when the setup checkbox "Allow anonymous diagnostics" is on
+            (default). No Wi-Fi or MQTT passwords are sent.
+
+    config ZBGW_DIAG_TOKEN
+        string "Diagnostics product token"
+        default "zbgw-anon-v1"
+        help
+            Sent as X-ZBGW-Diag. Must match solarstats ZBGW_DIAG_TOKEN.
+
+    config ZBGW_OTA_CHECK_ON_BOOT
+        bool "Check the OTA URL ~90s after Wi-Fi is up"
+        default n
+        help
+            Compare the remote image version to this build. No flash if
+            they match. A different version is installed even if older, so
+            leave this off until the hosted .bin is this firmware or newer.
+            Publish ON to zigbee-gw/bridge/ota to force a check.
 
     config ZBGW_MQTT_TOPIC_PREFIX
         string "MQTT topic prefix"

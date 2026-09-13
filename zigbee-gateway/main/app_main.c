@@ -1,13 +1,19 @@
 #include "board_io.h"
 #include "config.h"
 #include "device_registry.h"
+#include "diag.h"
+#include "esp_app_desc.h"
 #include "esp_coexist.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mqtt_bridge.h"
+#include "nvs_creds.h"
 #include "nvs_flash.h"
+#include "ota_update.h"
 #include "sdkconfig.h"
+#include "setup_ap.h"
 #include "wifi_net.h"
 #include "zigbee_coordinator.h"
 
@@ -17,6 +23,14 @@ static void on_boot_button(void)
 {
     ESP_LOGI(TAG, "BOOT pressed - opening permit join");
     zigbee_coordinator_permit_join(true);
+}
+
+static void on_boot_long_press(void)
+{
+    ESP_LOGW(TAG, "BOOT held 3s - opening setup portal");
+    (void)nvs_creds_request_setup();
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_restart();
 }
 
 static void on_mqtt_permit_join(bool enable)
@@ -109,7 +123,9 @@ void app_main(void)
 #if CONFIG_ZBGW_ZIGBEE_ONLY_DIAG
     ESP_LOGI(TAG, "ESP32-C6 Zigbee-only join diagnostic starting");
 #else
-    ESP_LOGI(TAG, "ESP32-C6 Zigbee -> MQTT gateway starting (join-restore)");
+    const esp_app_desc_t *app = esp_app_get_description();
+    ESP_LOGI(TAG, "ESP32-C6 Zigbee -> MQTT gateway starting (join-restore) fw=%s diag=%s",
+             (app && app->version[0]) ? app->version : "?", CONFIG_ZBGW_DIAG_URL);
 #endif
 
     esp_err_t ret = nvs_flash_init();
@@ -118,8 +134,16 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
+    ESP_ERROR_CHECK(nvs_creds_init());
+#if !CONFIG_ZBGW_ZIGBEE_ONLY_DIAG
+    if (!nvs_creds_is_configured()) {
+        ESP_ERROR_CHECK(board_io_init(NULL, NULL));
+        setup_ap_run();
+    }
+#endif
+
     ESP_ERROR_CHECK(device_registry_init());
-    ESP_ERROR_CHECK(board_io_init(on_boot_button));
+    ESP_ERROR_CHECK(board_io_init(on_boot_button, on_boot_long_press));
 
     ESP_ERROR_CHECK(zigbee_coordinator_start());
     wait_for_zigbee_network();
@@ -140,5 +164,10 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(mqtt_bridge_start(on_mqtt_permit_join, on_mqtt_switch, on_mqtt_remove, on_mqtt_rediscover));
+    diag_start();
+    if (!zigbee_coordinator_network_ready()) {
+        diag_report_error("zigbee_not_ready", "Zigbee network not ready after formation wait");
+    }
+    ota_update_schedule_boot_check();
     ESP_LOGI(TAG, "Gateway running. Press BOOT or publish ON to %s to pair devices.", ZBGW_TOPIC_PERMIT_JOIN);
 }

@@ -23,6 +23,8 @@
 #define ZBGW_TOPIC_INFO         ZBGW_TOPIC_PREFIX "/bridge/info"
 #define ZBGW_TOPIC_REMOVE       ZBGW_TOPIC_PREFIX "/bridge/remove"
 #define ZBGW_TOPIC_REDISCOVER   ZBGW_TOPIC_PREFIX "/bridge/rediscover"
+#define ZBGW_TOPIC_OTA          ZBGW_TOPIC_PREFIX "/bridge/ota"
+#define ZBGW_TOPIC_OTA_STATE    ZBGW_TOPIC_PREFIX "/bridge/ota/state"
 
 #define ZBGW_HA_DISCOVERY_PREFIX "homeassistant"
 
@@ -40,8 +42,10 @@
 #define ZBGW_CAP_TAMPER      (1U << 9)
 #define ZBGW_CAP_SMOKE_TEST  (1U << 10)
 #define ZBGW_CAP_BATTERY_LOW (1U << 11)
+#define ZBGW_CAP_POWER_ON_BEHAVIOR (1U << 12)
 
 #define ZBGW_TOPIC_SWITCH_SET_WILDCARD ZBGW_TOPIC_PREFIX "/+/switch/set"
+#define ZBGW_TOPIC_POWER_ON_SET_WILDCARD ZBGW_TOPIC_PREFIX "/+/power_on_behavior/set"
 
 #define ZBGW_ZC_CONFIG()                                \
     {                                                   \

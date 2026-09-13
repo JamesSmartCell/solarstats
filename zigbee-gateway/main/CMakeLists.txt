@@ -7,6 +7,10 @@ idf_component_register(
         "ha_discovery.c"
         "wifi_net.c"
         "board_io.c"
+        "nvs_creds.c"
+        "setup_ap.c"
+        "ota_update.c"
+        "diag.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES
         nvs_flash
@@ -20,4 +24,9 @@ idf_component_register(
         esp_driver_gpio
         mdns
         lwip
+        app_update
+        esp_http_client
+        esp_https_ota
+        esp_http_server
+        esp-tls
 )

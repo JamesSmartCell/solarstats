@@ -7,5 +7,6 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 list(PREPEND SDKCONFIG_DEFAULTS "sdkconfig.defaults")
 
 set(COMPONENTS main)
+set(PROJECT_VER "1.2.1")
 
 project(zigbee-gateway)

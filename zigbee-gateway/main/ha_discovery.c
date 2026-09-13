@@ -143,6 +143,40 @@ static esp_err_t publish_switch(const zbgw_device_t *dev)
     return publish_config("switch", object_id, root);
 }
 
+static esp_err_t publish_power_on_select(const zbgw_device_t *dev)
+{
+    char ieee[20];
+    device_registry_ieee_to_str(dev->ieee, ieee, sizeof(ieee));
+
+    char object_id[64];
+    snprintf(object_id, sizeof(object_id), "zbgw_%s_power_on_behavior", ieee);
+
+    char state_topic[96];
+    snprintf(state_topic, sizeof(state_topic), "%s/%s/power_on_behavior", ZBGW_TOPIC_PREFIX, ieee);
+
+    char command_topic[96];
+    snprintf(command_topic, sizeof(command_topic), "%s/%s/power_on_behavior/set", ZBGW_TOPIC_PREFIX, ieee);
+
+    char unique_id[64];
+    snprintf(unique_id, sizeof(unique_id), "zbgw_%s_power_on_behavior", ieee);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "name", "Power-on behavior");
+    cJSON_AddStringToObject(root, "unique_id", unique_id);
+    cJSON_AddStringToObject(root, "state_topic", state_topic);
+    cJSON_AddStringToObject(root, "command_topic", command_topic);
+    cJSON *opts = cJSON_AddArrayToObject(root, "options");
+    cJSON_AddItemToArray(opts, cJSON_CreateString("power_off"));
+    cJSON_AddItemToArray(opts, cJSON_CreateString("power_on"));
+    cJSON_AddItemToArray(opts, cJSON_CreateString("last"));
+    cJSON_AddStringToObject(root, "availability_topic", ZBGW_TOPIC_STATUS);
+    cJSON_AddStringToObject(root, "payload_available", "online");
+    cJSON_AddStringToObject(root, "payload_not_available", "offline");
+    cJSON_AddStringToObject(root, "icon", "mdi:power-settings");
+    add_device_object(root, dev);
+    return publish_config("select", object_id, root);
+}
+
 static esp_err_t unpublish_config(const char *component, const char *object_id)
 {
     char topic[160];
@@ -199,6 +233,9 @@ esp_err_t ha_discovery_publish_device(const zbgw_device_t *dev)
     if (dev->capabilities & ZBGW_CAP_ON_OFF) {
         err |= publish_switch(dev);
     }
+    if (dev->capabilities & ZBGW_CAP_POWER_ON_BEHAVIOR) {
+        err |= publish_power_on_select(dev);
+    }
     if (dev->capabilities & ZBGW_CAP_POWER) {
         err |= publish_sensor(dev, "power", "Power", "power", "W", "measurement");
     }
@@ -237,6 +274,8 @@ esp_err_t ha_discovery_unpublish_device(uint64_t ieee)
     err |= unpublish_config("sensor", object_id);
     snprintf(object_id, sizeof(object_id), "zbgw_%s_switch", ieee_str);
     err |= unpublish_config("switch", object_id);
+    snprintf(object_id, sizeof(object_id), "zbgw_%s_power_on_behavior", ieee_str);
+    err |= unpublish_config("select", object_id);
     snprintf(object_id, sizeof(object_id), "zbgw_%s_power", ieee_str);
     err |= unpublish_config("sensor", object_id);
     snprintf(object_id, sizeof(object_id), "zbgw_%s_energy", ieee_str);
@@ -244,7 +283,8 @@ esp_err_t ha_discovery_unpublish_device(uint64_t ieee)
 
     /* Clear retained state topics so HA does not revive stale values. */
     static const char *suffixes[] = {"temperature", "humidity", "contact", "occupancy", "smoke", "tamper",
-                                     "test",        "battery_low", "battery", "switch",  "power", "energy"};
+                                     "test",        "battery_low", "battery", "switch",  "power", "energy",
+                                     "power_on_behavior"};
     for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
         snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee_str, suffixes[i]);
         err |= mqtt_bridge_publish(state_topic, "", 1, true);

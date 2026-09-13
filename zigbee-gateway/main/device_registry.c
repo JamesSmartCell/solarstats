@@ -212,7 +212,7 @@ bool device_registry_sanitize(void)
         const bool orphan_junk = !dev->ias_ep && !has_smoke && (dev->capabilities & junk_bits) != 0;
 
         if (has_plug_caps || has_on_off_eps || multiple_alarms) {
-            uint32_t cleaned = plug_bits;
+            uint32_t cleaned = plug_bits | (before_caps & ZBGW_CAP_POWER_ON_BEHAVIOR);
             /* Reject ASCII/garbage on_off_eps from NVS layout shifts (e.g. 0x5f303031). */
             const bool bad_eps = dev->on_off_eps != 0 && (dev->on_off_eps & ~0xFFFFu) != 0;
             if (cleaned != before_caps || dev->ias_ep || dev->ias_zone_id || dev->ias_zone_type || bad_eps) {

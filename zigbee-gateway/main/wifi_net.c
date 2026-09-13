@@ -1,5 +1,6 @@
 #include "wifi_net.h"
 #include "mqtt_bridge.h"
+#include "nvs_creds.h"
 
 #include <string.h>
 
@@ -81,7 +82,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         }
         s_retry_count++;
         if (s_retry_count > 7) {
-            ESP_LOGE(TAG, "WiFi failed %d times - restarting", s_retry_count);
+            ESP_LOGE(TAG, "WiFi failed %d times - opening setup portal", s_retry_count);
+            (void)nvs_creds_request_setup();
             vTaskDelay(pdMS_TO_TICKS(200));
             esp_restart();
         }
@@ -112,10 +114,13 @@ esp_err_t wifi_net_start(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
 
+    zbgw_creds_t creds;
+    ESP_ERROR_CHECK(nvs_creds_get(&creds));
+
     wifi_config_t wifi_config = {0};
-    strncpy((char *)wifi_config.sta.ssid, CONFIG_ZBGW_WIFI_SSID, sizeof(wifi_config.sta.ssid));
-    strncpy((char *)wifi_config.sta.password, CONFIG_ZBGW_WIFI_PASSWORD, sizeof(wifi_config.sta.password));
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    strncpy((char *)wifi_config.sta.ssid, creds.wifi_ssid, sizeof(wifi_config.sta.ssid));
+    strncpy((char *)wifi_config.sta.password, creds.wifi_pass, sizeof(wifi_config.sta.password));
+    wifi_config.sta.threshold.authmode = creds.wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -128,7 +133,7 @@ esp_err_t wifi_net_start(void)
     (void)esp_wifi_set_max_tx_power(WIFI_TX_HIGH_QDBM);
     s_started = true;
 
-    ESP_LOGI(TAG, "Connecting to SSID:%s", CONFIG_ZBGW_WIFI_SSID);
+    ESP_LOGI(TAG, "Connecting to SSID:%s", creds.wifi_ssid);
     return ESP_OK;
 }
 

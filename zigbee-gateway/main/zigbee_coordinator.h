@@ -7,6 +7,7 @@
 esp_err_t zigbee_coordinator_start(void);
 esp_err_t zigbee_coordinator_permit_join(bool enable);
 esp_err_t zigbee_coordinator_set_on_off(uint64_t ieee, bool on);
+esp_err_t zigbee_coordinator_set_power_on_behavior(uint64_t ieee, const char *name);
 esp_err_t zigbee_coordinator_remove_device(uint64_t ieee);
 esp_err_t zigbee_coordinator_remove_all_switches(void);
 esp_err_t zigbee_coordinator_rediscover(void);

@@ -29,6 +29,20 @@ Mains sockets / power monitoring are deferred.
 
 ## Configure credentials
 
+Wi-Fi SSID/password and MQTT host/user/password are stored in **NVS** (flash), not baked into OTA images. Port `1883`, topic prefix, and Zigbee channel stay compile-time.
+
+**First boot** (empty NVS): the C6 broadcasts open AP **`ZIGBEE_SETUP`**. Connect and open `http://192.168.4.1` (or the captive page). Enter Wi-Fi, MQTT host, username, and password. **Allow anonymous diagnostics** is on by default (failures plus an hourly health ping to `homesolar.percolate.one`; no Wi-Fi/MQTT passwords). It saves and reboots onto STA. Boards that already have credentials keep diagnostics on until you re-enter setup and uncheck it.
+
+**Re-enter setup:** hold **BOOT** for 3 seconds at power-on (clears only those credentials, not the Zigbee mesh).
+
+Kconfig Wi-Fi/MQTT fields are seeds only. If you flash a board that already has a real SSID in Kconfig, that seed is copied into NVS once so existing units keep working.
+
+## OTA
+
+The partition table is dual-slot (`ota_0` / `ota_1`). The **first** OTA-capable image must be USB-flashed (and `erase-flash` if you are moving off the old factory layout). After that, upload `zigbee-gateway.bin` in Solarstats **Admin → Zigbee gateways**. It is served at `https://homesolar.percolate.one/fw/zigbee-gateway.bin`.
+
+`CONFIG_ZBGW_OTA_URL` defaults to that path. Auto-check on boot is off; publish ON to `zigbee-gw/bridge/ota` to pull a newer version. Same version is skipped. Credentials stay in NVS across updates.
+
 ```powershell
 cd zigbee-gateway
 # After ESP-IDF export.ps1:
@@ -36,13 +50,7 @@ idf.py set-target esp32c6
 idf.py menuconfig
 ```
 
-Under **Zigbee Gateway Configuration** set:
-
-- WiFi SSID / password
-- MQTT host (Pi hostname or IP), port `1883`, username / password
-- Zigbee primary channel (default **15**)
-
-Or edit `sdkconfig` after the first configure.
+Under **Zigbee Gateway Configuration** set the OTA URL and (optionally) seed credentials. Zigbee primary channel default is **15**.
 
 ## Build & flash
 
@@ -99,6 +107,8 @@ Short version:
 | `zigbee-gw/bridge/permit_join` | subscribe | `ON` / `OFF` |
 | `zigbee-gw/bridge/permit_join/state` | publish | current permit-join state |
 | `zigbee-gw/bridge/info` | publish | PAN / channel JSON |
+| `zigbee-gw/bridge/ota` | subscribe | any payload starts an HTTPS OTA check |
+| `zigbee-gw/bridge/ota/state` | publish | `checking` / `up_to_date` / `updating` / `failed` |
 | `zigbee-gw/<ieee>/temperature` | publish | °C |
 | `zigbee-gw/<ieee>/humidity` | publish | % |
 | `zigbee-gw/<ieee>/contact` | publish | `ON` / `OFF` |
@@ -115,6 +125,17 @@ Short version:
 Network keys and the joined-device table live in NVS (`zb_storage` + default NVS). Sensors should survive a gateway reboot without re-pairing.
 
 If MQTT stays down after **4** failed reconnects, a watchdog restarts the C6 (Zigbee NVS is kept). Pairing pauses Wi‑Fi/MQTT and does not trip the watchdog.
+
+## Anonymous diagnostics
+
+When the setup checkbox is on (default), the gateway POSTs to `CONFIG_ZBGW_DIAG_URL` (default `https://homesolar.percolate.one/api/diag/zbgw`):
+
+- boot after Wi-Fi is up
+- operational errors (MQTT watchdog, MQTT client error, Zigbee not ready, OTA failure)
+- hourly **Device working correctly** if the last hour was clean
+- a quiet poll every 2 minutes so **Admin → Zigbee gateways → Restart** arrives without waiting for the hour
+
+The report is the STA MAC, firmware version, uptime, reset reason, heap, Wi-Fi RSSI, MQTT/Zigbee flags, and joined-device count. Solarstats `ZBGW_DIAG_TOKEN` must match `CONFIG_ZBGW_DIAG_TOKEN`.
 
 ## Limitations
 

@@ -12,6 +12,7 @@
 static const char *TAG = "board_io";
 
 static board_io_button_cb_t s_boot_cb;
+static board_io_button_cb_t s_boot_long_cb;
 static QueueHandle_t s_btn_q;
 static int64_t s_last_press_us;
 
@@ -37,16 +38,24 @@ static void button_task(void *arg)
     uint8_t evt;
     while (true) {
         if (xQueueReceive(s_btn_q, &evt, portMAX_DELAY) == pdTRUE) {
-            if (s_boot_cb) {
+            int held_ms = 0;
+            while (gpio_get_level(CONFIG_ZBGW_BOOT_GPIO) == 0 && held_ms < 3000) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                held_ms += 50;
+            }
+            if (held_ms >= 3000 && s_boot_long_cb) {
+                s_boot_long_cb();
+            } else if (s_boot_cb) {
                 s_boot_cb();
             }
         }
     }
 }
 
-esp_err_t board_io_init(board_io_button_cb_t boot_cb)
+esp_err_t board_io_init(board_io_button_cb_t boot_cb, board_io_button_cb_t boot_long_cb)
 {
     s_boot_cb = boot_cb;
+    s_boot_long_cb = boot_long_cb;
     s_btn_q = xQueueCreate(4, sizeof(uint8_t));
     if (!s_btn_q) {
         return ESP_ERR_NO_MEM;
