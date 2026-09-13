@@ -59,7 +59,8 @@ modbus_controller:
 # Mapping (addr = 4501 + index):
 #   4501 mode, 4502 AC V /10, 4503 AC Hz /10, 4504 PV V /10, 4505 PV W,
 #   4506 batt V /10, 4507 batt %, 4508 charge A, 4509 discharge A, b
-#   4512 output W, 4513 load % /20
+#   4512 output W, 4513 load VA, 4514 load %
+#   (powmr_comm treated 4513 as %/20; that register is VA, not percent.)
 
 sensor:
   - platform: modbus_controller
@@ -237,18 +238,38 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: inverter
-    name: "Load Percent"
+    name: "Load VA"
     address: 4513
     register_type: holding
     value_type: U_WORD
-    unit_of_measurement: "%"
+    unit_of_measurement: "VA"
+    device_class: apparent_power
     state_class: measurement
-    accuracy_decimals: 1
+    accuracy_decimals: 0
     filters:
       - lambda: |-
           uint16_t raw = (uint16_t) x;
           return (float) (uint16_t) ((raw >> 8) | (raw << 8));
-      - multiply: 0.05
+      - lambda: |-
+          if (isnan(x) || x < 0.0f || x > ${max_inverter_power_w}) return {};
+          return x;
+      - timeout:
+          timeout: ${power_stale_timeout}
+          value: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: inverter
+    name: "Load Percent"
+    address: 4514
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - lambda: |-
+          uint16_t raw = (uint16_t) x;
+          return (float) (uint16_t) ((raw >> 8) | (raw << 8));
       - lambda: |-
           if (isnan(x) || x < 0.0f || x > 150.0f) return {};
           return x;
