@@ -4,6 +4,7 @@
 
 #include "config.h"
 #include "diag.h"
+#include "gw_id.h"
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_https_ota.h"
@@ -20,7 +21,7 @@ static volatile bool s_busy;
 
 static void publish_ota(const char *state)
 {
-    (void)mqtt_bridge_publish(ZBGW_TOPIC_OTA_STATE, state, 1, false);
+    (void)mqtt_bridge_publish(zbgw_topic_ota_state(), state, 1, false);
 }
 
 static void ota_task(void *arg)

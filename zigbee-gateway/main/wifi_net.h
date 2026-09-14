@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -11,6 +12,8 @@
 esp_err_t wifi_net_start(void);
 bool wifi_net_is_connected(void);
 esp_err_t wifi_net_wait_connected(TickType_t ticks_to_wait);
+/* Network-byte-order IPv4 + netmask for the STA interface. */
+bool wifi_net_get_sta_ipv4(uint32_t *ip_addr, uint32_t *netmask);
 
 /* Pause Wi‑Fi so Zigbee can use the RF path during pairing. */
 esp_err_t wifi_net_pause_for_zigbee(void);

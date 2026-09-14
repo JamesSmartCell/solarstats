@@ -6,6 +6,7 @@
 #include "esp_coexist.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "gw_id.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mqtt_bridge.h"
@@ -134,6 +135,7 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
+    zbgw_id_init();
     ESP_ERROR_CHECK(nvs_creds_init());
 #if !CONFIG_ZBGW_ZIGBEE_ONLY_DIAG
     if (!nvs_creds_is_configured()) {
@@ -169,5 +171,6 @@ void app_main(void)
         diag_report_error("zigbee_not_ready", "Zigbee network not ready after formation wait");
     }
     ota_update_schedule_boot_check();
-    ESP_LOGI(TAG, "Gateway running. Press BOOT or publish ON to %s to pair devices.", ZBGW_TOPIC_PERMIT_JOIN);
+    ESP_LOGI(TAG, "Gateway running. Press BOOT or publish ON to %s to pair devices.",
+             zbgw_topic_permit_join());
 }

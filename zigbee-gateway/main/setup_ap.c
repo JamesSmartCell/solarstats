@@ -8,6 +8,7 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
@@ -27,6 +28,21 @@ static const char s_captive_uri[] = "http://" SETUP_AP_IP;
 
 static volatile bool s_dns_run;
 static httpd_handle_t s_httpd;
+
+static void ap_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    (void)arg;
+    if (event_base != WIFI_EVENT) {
+        return;
+    }
+    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t *e = event_data;
+        ESP_LOGI(TAG, "Phone joined " MACSTR " aid=%d", MAC2STR(e->mac), e->aid);
+    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t *e = event_data;
+        ESP_LOGW(TAG, "Phone left " MACSTR " aid=%d", MAC2STR(e->mac), e->aid);
+    }
+}
 
 static int hex_nibble(char c)
 {
@@ -129,11 +145,12 @@ static const char *PAGE_FMT =
     "button{margin-top:1.2rem;width:100%;padding:.7rem;font-size:1rem}"
     "p{color:#444;font-size:.9rem}</style></head><body>"
     "<h1>Zigbee gateway setup</h1>"
-    "<p>Wi-Fi and MQTT only. Port 1883 and Zigbee settings stay as flashed.</p>"
+    "<p>Wi-Fi and MQTT only. Port 1883 and Zigbee settings stay as flashed. "
+    "Leave MQTT host blank to scan this LAN for port 1883 after Wi-Fi connects.</p>"
     "<form method=post action=/save>"
     "<label>Wi-Fi name (SSID)</label><input name=ssid required value=\"%s\">"
     "<label>Wi-Fi password</label><input name=wpass type=password value=\"%s\">"
-    "<label>MQTT host (IP or name)</label><input name=mhost required value=\"%s\">"
+    "<label>MQTT host (IP or name, blank = scan LAN)</label><input name=mhost value=\"%s\">"
     "<label>MQTT username</label><input name=muser value=\"%s\">"
     "<label>MQTT password</label><input name=mpass type=password value=\"%s\">"
     "<label class=check><input type=checkbox name=diag value=1%s>"
@@ -163,6 +180,7 @@ static esp_err_t send_form(httpd_req_t *req)
     html_escape(pass, sizeof(pass), creds.mqtt_pass);
     const char *diag_checked = creds.diag_opt_in ? " checked" : "";
 
+    ESP_LOGI(TAG, "HTTP %s", req->uri ? req->uri : "?");
     char *page = malloc(4096);
     if (!page) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
@@ -266,8 +284,8 @@ static esp_err_t post_save(httpd_req_t *req)
     creds.diag_opt_in = form_get(body, "diag", diag, sizeof(diag));
     free(body);
 
-    if (!creds.wifi_ssid[0] || !creds.mqtt_host[0]) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SSID and MQTT host are required");
+    if (!creds.wifi_ssid[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SSID is required");
         return ESP_FAIL;
     }
 
@@ -382,11 +400,17 @@ static void blink_task(void *arg)
 
 void setup_ap_run(void)
 {
-    ESP_LOGW(TAG, "Starting setup AP \"%s\" — connect and open http://%s", CONFIG_ZBGW_SETUP_AP_SSID, SETUP_AP_IP);
+    ESP_LOGW(TAG, "Starting setup AP \"%s\" (open) - connect and open http://%s", CONFIG_ZBGW_SETUP_AP_SSID,
+             SETUP_AP_IP);
+    ESP_LOGW(TAG, "Forget any WPA2 ZIGBEE_SETUP profile - this AP has no password");
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &ap_event_handler, NULL));
     esp_netif_create_default_wifi_ap();
+    /* DHCP + option 114 before the SSID is on the air. Bouncing DHCP after
+     * wifi_start is why phones joined, got no lease, and showed no portal. */
+    dhcp_set_captiveportal_url();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -400,22 +424,18 @@ void setup_ap_run(void)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    /* After start: stay on 11b/g/n so older phones still run captive detection. */
-    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-    dhcp_set_captiveportal_url();
 
     s_dns_run = true;
     (void)xTaskCreate(dns_task, "setup_dns", 3072, NULL, 3, NULL);
     (void)xTaskCreate(blink_task, "setup_led", 2048, NULL, 2, NULL);
 
-    /* Captive probes hit many hosts/paths; keep httpd quiet. */
     esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
     esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
     esp_log_level_set("httpd_parse", ESP_LOG_ERROR);
 
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     http.max_uri_handlers = 16;
+    http.stack_size = 8192;
     http.lru_purge_enable = true;
     http.uri_match_fn = httpd_uri_match_wildcard;
     ESP_ERROR_CHECK(httpd_start(&s_httpd, &http));
@@ -442,6 +462,20 @@ void setup_ap_run(void)
     }
     ESP_ERROR_CHECK(httpd_register_err_handler(s_httpd, HTTPD_404_NOT_FOUND, http_404_error_handler));
 
+    ESP_ERROR_CHECK(esp_wifi_start());
+    /* C6 defaults to 11ax SoftAP. Phones then fail with "unsuccessful auth/assoc". */
+    (void)esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY);
+    uint8_t proto = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N;
+    esp_err_t perr = esp_wifi_set_protocol(WIFI_IF_AP, proto);
+    if (perr != ESP_OK) {
+        wifi_protocols_t protocols = {.ghz_2g = proto, .ghz_5g = 0};
+        perr = esp_wifi_set_protocols(WIFI_IF_AP, &protocols);
+    }
+    uint8_t now = 0;
+    (void)esp_wifi_get_protocol(WIFI_IF_AP, &now);
+    ESP_LOGI(TAG, "AP protocol set %s bitmap=0x%02x (11ax bit is 0x40)", esp_err_to_name(perr), now);
+    ESP_ERROR_CHECK(esp_wifi_stop());
+    ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "Setup portal ready on http://%s (captive)", SETUP_AP_IP);
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(10000));

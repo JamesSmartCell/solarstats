@@ -41,7 +41,7 @@ Kconfig Wi-Fi/MQTT fields are seeds only. If you flash a board that already has 
 
 The partition table is dual-slot (`ota_0` / `ota_1`). The **first** OTA-capable image must be USB-flashed (and `erase-flash` if you are moving off the old factory layout). After that, upload `zigbee-gateway.bin` in Solarstats **Admin → Zigbee gateways**. It is served at `https://homesolar.percolate.one/fw/zigbee-gateway.bin`.
 
-`CONFIG_ZBGW_OTA_URL` defaults to that path. Auto-check on boot is off; publish ON to `zigbee-gw/bridge/ota` to pull a newer version. Same version is skipped. Credentials stay in NVS across updates.
+`CONFIG_ZBGW_OTA_URL` defaults to that path. Auto-check on boot is off; publish ON to `zigbee-gw/<mac>/bridge/ota` to pull a newer version. Same version is skipped. Credentials stay in NVS across updates.
 
 ```powershell
 cd zigbee-gateway
@@ -73,8 +73,9 @@ Replace `COMx` with the FireBeetle USB serial port.
 2. Create a user matching `CONFIG_ZBGW_MQTT_USERNAME` / password.
 3. Settings → Devices & services → **MQTT** → enable discovery.
 4. Flash the C6; within a minute you should see:
-   - Topic `zigbee-gw/bridge/status` = `online`
-   - Device **ESP32-C6 Zigbee Gateway** with a **Permit join** switch
+   - Topic `zigbee-gw/<sta-mac>/bridge/status` = `online` (MAC is 12 hex, no colons)
+   - Device **ESP32-C6 Zigbee Gateway xxxxxx** (last 3 MAC bytes) with a **Permit join** switch
+   - A second C6 on the same broker gets its own topics and HA device; same `.bin` on both.
 
 ## Channel planning (Wi-Fi coexistence)
 
@@ -103,16 +104,16 @@ Short version:
 
 | Topic | Direction | Purpose |
 |-------|-----------|---------|
-| `zigbee-gw/bridge/status` | publish (LWT) | `online` / `offline` |
-| `zigbee-gw/bridge/permit_join` | subscribe | `ON` / `OFF` |
-| `zigbee-gw/bridge/permit_join/state` | publish | current permit-join state |
-| `zigbee-gw/bridge/info` | publish | PAN / channel JSON |
-| `zigbee-gw/bridge/ota` | subscribe | any payload starts an HTTPS OTA check |
-| `zigbee-gw/bridge/ota/state` | publish | `checking` / `up_to_date` / `updating` / `failed` |
-| `zigbee-gw/<ieee>/temperature` | publish | °C |
-| `zigbee-gw/<ieee>/humidity` | publish | % |
-| `zigbee-gw/<ieee>/contact` | publish | `ON` / `OFF` |
-| `zigbee-gw/<ieee>/occupancy` | publish | `ON` / `OFF` |
+| `zigbee-gw/<mac>/bridge/status` | publish (LWT) | `online` / `offline` |
+| `zigbee-gw/<mac>/bridge/permit_join` | subscribe | `ON` / `OFF` |
+| `zigbee-gw/<mac>/bridge/permit_join/state` | publish | current permit-join state |
+| `zigbee-gw/<mac>/bridge/info` | publish | PAN / channel JSON |
+| `zigbee-gw/<mac>/bridge/ota` | subscribe | any payload starts an HTTPS OTA check |
+| `zigbee-gw/<mac>/bridge/ota/state` | publish | `checking` / `up_to_date` / `updating` / `failed` |
+| `zigbee-gw/<mac>/<ieee>/temperature` | publish | °C |
+| `zigbee-gw/<mac>/<ieee>/humidity` | publish | % |
+| `zigbee-gw/<mac>/<ieee>/contact` | publish | `ON` / `OFF` |
+| `zigbee-gw/<mac>/<ieee>/occupancy` | publish | `ON` / `OFF` |
 | `homeassistant/.../config` | publish | HA MQTT discovery |
 
 ## Hardware notes (FireBeetle 2)

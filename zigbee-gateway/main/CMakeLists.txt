@@ -11,6 +11,7 @@ idf_component_register(
         "setup_ap.c"
         "ota_update.c"
         "diag.c"
+        "gw_id.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES
         nvs_flash

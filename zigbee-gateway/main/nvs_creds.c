@@ -90,7 +90,7 @@ esp_err_t nvs_creds_get(zbgw_creds_t *out)
 
 esp_err_t nvs_creds_set(const zbgw_creds_t *in)
 {
-    if (!in || !in->wifi_ssid[0] || !in->mqtt_host[0]) {
+    if (!in || !in->wifi_ssid[0]) {
         return ESP_ERR_INVALID_ARG;
     }
     nvs_handle_t h;
@@ -194,6 +194,21 @@ esp_err_t nvs_creds_request_setup(void)
 /* Bump to force one more Wi-Fi/MQTT wipe + setup portal. Leave at 1 after this flash. */
 #define ZBGW_CREDS_WIPE_ONCE 2
 
+/* Old LAN leftover. HA Mosquitto is CONFIG_ZBGW_MQTT_HOST (192.168.50.41). */
+static void migrate_stale_mqtt_host(void)
+{
+    zbgw_creds_t creds;
+    if (nvs_creds_get(&creds) != ESP_OK || !creds.mqtt_host[0]) {
+        return;
+    }
+    if (strcmp(creds.mqtt_host, "192.168.0.184") != 0) {
+        return;
+    }
+    snprintf(creds.mqtt_host, sizeof(creds.mqtt_host), "%s", CONFIG_ZBGW_MQTT_HOST);
+    ESP_LOGW(TAG, "Replacing stale MQTT host 192.168.0.184 with %s", creds.mqtt_host);
+    (void)nvs_creds_set(&creds);
+}
+
 static void wipe_creds_once(void)
 {
     nvs_handle_t h;
@@ -230,10 +245,12 @@ esp_err_t nvs_creds_init(void)
     }
 
     if (!force && nvs_has_ssid() && nvs_user_saved()) {
+        migrate_stale_mqtt_host();
         zbgw_creds_t creds;
-        if (nvs_creds_get(&creds) == ESP_OK && creds.wifi_ssid[0] && creds.mqtt_host[0]) {
+        if (nvs_creds_get(&creds) == ESP_OK && creds.wifi_ssid[0]) {
             s_configured = true;
-            ESP_LOGI(TAG, "NVS credentials SSID=%s MQTT=%s", creds.wifi_ssid, creds.mqtt_host);
+            ESP_LOGI(TAG, "NVS credentials SSID=%s MQTT=%s", creds.wifi_ssid,
+                     creds.mqtt_host[0] ? creds.mqtt_host : "(scan LAN)");
             return ESP_OK;
         }
     }

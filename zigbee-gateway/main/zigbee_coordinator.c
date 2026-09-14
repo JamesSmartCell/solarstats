@@ -24,11 +24,13 @@
 static const char *TAG = "zb_coord";
 
 /* Power-on behaviour: ZCL StartUpOnOff 0x4003 (0=off, 1=on, 2=toggle, 0xFF=previous).
- * Tuya sockets usually omit that and use manufacturer attr 0x8002 (0=off, 1=on, 2=last). */
+ * Tuya sockets use genOnOff 0x8002 (0=off, 1=on, 2=last) as a standard ENUM8 write.
+ * Manufacturer-specific 0x1141 is a one-shot fallback if that write does not stick. */
 #ifndef EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID
 #define EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID 0x4003
 #endif
 #define ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID 0x8002
+#define ZBGW_TUYA_MANUF_CODE_DEV             0x1141
 
 static bool s_network_ready;
 static bool s_permit_join_pending;
@@ -96,6 +98,15 @@ typedef struct {
 
 static power_on_beh_t s_power_on[ZBGW_MAX_DEVICES];
 static esp_timer_handle_t s_power_poll_timer;
+static esp_timer_handle_t s_power_on_verify_timer;
+static uint16_t s_power_on_verify_short;
+static uint8_t s_power_on_verify_ep;
+static uint8_t s_power_on_expected_raw;
+static bool s_power_on_confirmed;
+static bool s_power_on_did_verify_read;
+static bool s_power_on_tried_manuf;
+static bool s_power_on_allow_manuf_fallback;
+static int64_t s_power_on_expect_until_us;
 static esp_timer_handle_t s_energy_mqtt_timer;
 #define ENERGY_MQTT_DEFER_US (600 * 1000ULL)
 static uint16_t s_interview_queue[ZBGW_MAX_DEVICES];
@@ -331,17 +342,21 @@ static void apply_power_on_behavior(zbgw_device_t *dev, uint16_t attr_id, uint8_
                  dev ? dev->short_addr : 0);
         return;
     }
+    if (s_power_on_expect_until_us && esp_timer_get_time() < s_power_on_expect_until_us &&
+        raw != s_power_on_expected_raw) {
+        return;
+    }
     power_on_beh_t *beh = power_on_for_ieee(dev->ieee, true);
     if (beh) {
-        /* Prefer Tuya 0x8002 when both attrs answer — that is what the TS011F sockets use. */
         if (beh->attr_id == ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID &&
             attr_id == EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID) {
-            ESP_LOGI(TAG, "Power-on behaviour ignoring ZCL 0x4003 (already have Tuya 0x8002) short=0x%04x",
-                     dev->short_addr);
             return;
         }
         beh->attr_id = attr_id;
         beh->raw = raw;
+    }
+    if (raw == s_power_on_expected_raw) {
+        s_power_on_confirmed = true;
     }
     device_registry_add_capability(dev, ZBGW_CAP_POWER_ON_BEHAVIOR);
     ESP_LOGI(TAG, "Power-on behaviour %s attr=0x%04x raw=%u short=0x%04x", name, attr_id, raw, dev->short_addr);
@@ -372,6 +387,8 @@ static void interview_timer_cb(void *arg);
 static void interview_request_active_eps(void);
 static void interview_request_next_simple_desc(void);
 static void read_on_off_attr(uint16_t short_addr, uint8_t endpoint);
+static void write_on_off_u8_attr(uint16_t short_addr, uint8_t endpoint, uint16_t attr_id, uint8_t value,
+                                 uint16_t manuf_code);
 static void read_ias_zone_status(uint16_t short_addr, uint8_t endpoint);
 static void read_battery_percentage(uint16_t short_addr, uint8_t endpoint);
 static void ias_write_cie_address(uint16_t short_addr, uint8_t endpoint);
@@ -1823,6 +1840,43 @@ static void zcl_action_handler(ezb_zcl_core_action_callback_id_t callback_id, vo
     case EZB_ZCL_CORE_READ_ATTR_RSP_CB_ID:
         zcl_read_attr_rsp(message);
         break;
+    case EZB_ZCL_CORE_WRITE_ATTR_RSP_CB_ID: {
+        ezb_zcl_cmd_write_attr_rsp_message_t *wr = message;
+        if (!s_power_on_expect_until_us || !wr || wr->info.cluster_id != EZB_ZCL_CLUSTER_ID_ON_OFF) {
+            break;
+        }
+        ezb_zcl_write_attr_rsp_variable_t *var = wr->in.variables;
+        bool ok = !var;
+        while (var) {
+            if (var->status == EZB_ZCL_STATUS_SUCCESS || var->attr_id == 0xFFFF) {
+                ok = true;
+            } else {
+                ESP_LOGW(TAG, "Power-on write rsp attr=0x%04x status=0x%02x", var->attr_id, var->status);
+            }
+            var = var->next;
+        }
+        if (ok) {
+            s_power_on_confirmed = true;
+            zbgw_device_t *dev = device_registry_find_short(s_power_on_verify_short);
+            if (dev) {
+                uint16_t attr = EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID;
+                power_on_beh_t *beh = power_on_for_ieee(dev->ieee, false);
+                if (beh && beh->attr_id) {
+                    attr = beh->attr_id;
+                } else {
+                    attr = ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID;
+                }
+                apply_power_on_behavior(dev, attr, s_power_on_expected_raw);
+            }
+        }
+    } break;
+    case EZB_ZCL_CORE_DEFAULT_RSP_CB_ID: {
+        ezb_zcl_cmd_default_rsp_message_t *dr = message;
+        if (dr && dr->in.header && dr->in.status_code != EZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGW(TAG, "ZCL default rsp cmd=0x%02x status=0x%02x cluster=0x%04x short=0x%04x", dr->in.rsp_to_cmd,
+                     dr->in.status_code, dr->in.header->cluster_id, dr->in.header->src_addr.u.short_addr);
+        }
+    } break;
     case EZB_ZCL_CORE_REPORT_ATTR_CB_ID:
         zcl_report_attr(message);
         break;
@@ -1993,19 +2047,66 @@ bool zigbee_coordinator_network_ready(void)
     return s_network_ready;
 }
 
-static void write_on_off_u8_attr(uint16_t short_addr, uint8_t endpoint, uint16_t attr_id, uint8_t value)
+static void power_on_verify_timer_cb(void *arg)
 {
-    static uint8_t s_write_zcl;
-    static uint8_t s_write_tuya;
-    uint8_t *slot = (attr_id == ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID) ? &s_write_tuya : &s_write_zcl;
-    *slot = value;
+    (void)arg;
+    if (!s_power_on_verify_short) {
+        return;
+    }
+    uint8_t ep = s_power_on_verify_ep ? s_power_on_verify_ep : 1;
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+    if (!s_power_on_did_verify_read) {
+        s_power_on_did_verify_read = true;
+        read_on_off_attr(s_power_on_verify_short, ep);
+        if (s_power_on_verify_timer) {
+            esp_timer_start_once(s_power_on_verify_timer, 400 * 1000ULL);
+        }
+    } else if (!s_power_on_confirmed && s_power_on_allow_manuf_fallback && !s_power_on_tried_manuf) {
+        s_power_on_tried_manuf = true;
+        ESP_LOGW(TAG, "Power-on not confirmed - one manuf 0x%04x retry raw=%u", ZBGW_TUYA_MANUF_CODE_DEV,
+                 s_power_on_expected_raw);
+        write_on_off_u8_attr(s_power_on_verify_short, ep, ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID, s_power_on_expected_raw,
+                             ZBGW_TUYA_MANUF_CODE_DEV);
+        if (s_power_on_verify_timer) {
+            esp_timer_start_once(s_power_on_verify_timer, 700 * 1000ULL);
+        }
+    } else if (!s_power_on_confirmed) {
+        read_on_off_attr(s_power_on_verify_short, ep);
+    }
+    esp_zigbee_lock_release();
+}
+
+static void schedule_power_on_verify(uint16_t short_addr, uint8_t endpoint)
+{
+    s_power_on_verify_short = short_addr;
+    s_power_on_verify_ep = endpoint;
+    s_power_on_did_verify_read = false;
+    s_power_on_tried_manuf = false;
+    if (!s_power_on_verify_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &power_on_verify_timer_cb,
+            .name = "zb_pob_verify",
+        };
+        if (esp_timer_create(&args, &s_power_on_verify_timer) != ESP_OK) {
+            return;
+        }
+    }
+    esp_timer_stop(s_power_on_verify_timer);
+    esp_timer_start_once(s_power_on_verify_timer, 700 * 1000ULL);
+}
+
+static void write_on_off_u8_attr(uint16_t short_addr, uint8_t endpoint, uint16_t attr_id, uint8_t value,
+                                 uint16_t manuf_code)
+{
+    static uint8_t s_write_val;
+    s_write_val = value;
     ezb_zcl_attribute_t attr = {
         .id = attr_id,
         .data =
             {
-                .type = EZB_ZCL_ATTR_TYPE_UINT8,
+                .type = EZB_ZCL_ATTR_TYPE_ENUM8,
                 .size = 1,
-                .value = slot,
+                .value = &s_write_val,
             },
     };
     ezb_zcl_write_attr_cmd_t cmd = {
@@ -2016,13 +2117,17 @@ static void write_on_off_u8_attr(uint16_t short_addr, uint8_t endpoint, uint16_t
                 .dst_addr.u.short_addr = short_addr,
                 .dst_ep = endpoint,
                 .cluster_id = EZB_ZCL_CLUSTER_ID_ON_OFF,
+                .manuf_code = manuf_code,
             },
         .payload.attr_number = 1,
         .payload.attr_field = &attr,
     };
-    ESP_LOGI(TAG, "Writing power-on behaviour attr=0x%04x raw=%u short=0x%04x ep=%u", attr_id, value, short_addr,
-             endpoint);
-    ezb_zcl_write_attr_cmd_req(&cmd);
+    if (manuf_code) {
+        cmd.cmd_ctrl.fc.manuf_specific = 1;
+    }
+    ezb_err_t err = ezb_zcl_write_attr_cmd_req(&cmd);
+    ESP_LOGI(TAG, "Writing power-on behaviour attr=0x%04x raw=%u manuf=0x%04x short=0x%04x ep=%u err=0x%x", attr_id,
+             value, manuf_code, short_addr, endpoint, (unsigned)err);
 }
 
 esp_err_t zigbee_coordinator_set_power_on_behavior(uint64_t ieee, const char *name)
@@ -2038,26 +2143,21 @@ esp_err_t zigbee_coordinator_set_power_on_behavior(uint64_t ieee, const char *na
     uint8_t raw = 0;
 
     esp_zigbee_lock_acquire(portMAX_DELAY);
-    if (attr_id && power_on_raw_from_name(attr_id, name, &raw)) {
-        write_on_off_u8_attr(dev->short_addr, ep, attr_id, raw);
+    if (attr_id == EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID && power_on_raw_from_name(attr_id, name, &raw)) {
+        s_power_on_allow_manuf_fallback = false;
+        write_on_off_u8_attr(dev->short_addr, ep, attr_id, raw, EZB_ZCL_STD_MANUF_CODE);
+    } else if (power_on_raw_from_name(ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID, name, &raw)) {
+        s_power_on_allow_manuf_fallback = true;
+        write_on_off_u8_attr(dev->short_addr, ep, ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID, raw, EZB_ZCL_STD_MANUF_CODE);
     } else {
-        uint8_t tuya_raw = 0;
-        uint8_t zcl_raw = 0;
-        bool have_tuya = power_on_raw_from_name(ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID, name, &tuya_raw);
-        bool have_zcl = power_on_raw_from_name(EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID, name, &zcl_raw);
-        if (!have_tuya && !have_zcl) {
-            esp_zigbee_lock_release();
-            ESP_LOGW(TAG, "set_power_on_behavior: bad value '%s'", name);
-            return ESP_ERR_INVALID_ARG;
-        }
-        if (have_tuya) {
-            write_on_off_u8_attr(dev->short_addr, ep, ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID, tuya_raw);
-        }
-        if (have_zcl) {
-            write_on_off_u8_attr(dev->short_addr, ep, EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID, zcl_raw);
-        }
+        esp_zigbee_lock_release();
+        ESP_LOGW(TAG, "set_power_on_behavior: bad value '%s'", name);
+        return ESP_ERR_INVALID_ARG;
     }
-    read_on_off_attr(dev->short_addr, ep);
+    s_power_on_expected_raw = raw;
+    s_power_on_confirmed = false;
+    s_power_on_expect_until_us = esp_timer_get_time() + 3 * 1000 * 1000LL;
+    schedule_power_on_verify(dev->short_addr, ep);
     esp_zigbee_lock_release();
 
     ha_discovery_publish_sensor_state(dev, "power_on_behavior", name);

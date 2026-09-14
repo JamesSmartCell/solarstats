@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "esp_log.h"
+#include "gw_id.h"
 #include "mqtt_bridge.h"
 #include "sdkconfig.h"
 
@@ -25,7 +26,7 @@ static void add_device_object(cJSON *root, const zbgw_device_t *dev)
     cJSON_AddStringToObject(device, "name", dev->model[0] ? dev->model : fallback_name);
     cJSON_AddStringToObject(device, "manufacturer", dev->manufacturer[0] ? dev->manufacturer : "Zigbee");
     cJSON_AddStringToObject(device, "model", dev->model[0] ? dev->model : "device");
-    cJSON_AddStringToObject(device, "via_device", "zbgw_bridge");
+    cJSON_AddStringToObject(device, "via_device", zbgw_id_bridge());
 }
 
 static esp_err_t publish_config(const char *component, const char *object_id, cJSON *root)
@@ -54,7 +55,7 @@ static esp_err_t publish_sensor(const zbgw_device_t *dev, const char *suffix, co
     snprintf(object_id, sizeof(object_id), "zbgw_%s_%s", ieee, suffix);
 
     char state_topic[96];
-    snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee, suffix);
+    snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", zbgw_topic_prefix(), ieee, suffix);
 
     char unique_id[64];
     snprintf(unique_id, sizeof(unique_id), "zbgw_%s_%s", ieee, suffix);
@@ -72,7 +73,7 @@ static esp_err_t publish_sensor(const zbgw_device_t *dev, const char *suffix, co
     if (state_class) {
         cJSON_AddStringToObject(root, "state_class", state_class);
     }
-    cJSON_AddStringToObject(root, "availability_topic", ZBGW_TOPIC_STATUS);
+    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
     cJSON_AddStringToObject(root, "payload_available", "online");
     cJSON_AddStringToObject(root, "payload_not_available", "offline");
     add_device_object(root, dev);
@@ -88,7 +89,7 @@ static esp_err_t publish_binary(const zbgw_device_t *dev, const char *suffix, co
     snprintf(object_id, sizeof(object_id), "zbgw_%s_%s", ieee, suffix);
 
     char state_topic[96];
-    snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee, suffix);
+    snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", zbgw_topic_prefix(), ieee, suffix);
 
     char unique_id[64];
     snprintf(unique_id, sizeof(unique_id), "zbgw_%s_%s", ieee, suffix);
@@ -102,7 +103,7 @@ static esp_err_t publish_binary(const zbgw_device_t *dev, const char *suffix, co
     if (device_class) {
         cJSON_AddStringToObject(root, "device_class", device_class);
     }
-    cJSON_AddStringToObject(root, "availability_topic", ZBGW_TOPIC_STATUS);
+    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
     cJSON_AddStringToObject(root, "payload_available", "online");
     cJSON_AddStringToObject(root, "payload_not_available", "offline");
     add_device_object(root, dev);
@@ -118,10 +119,10 @@ static esp_err_t publish_switch(const zbgw_device_t *dev)
     snprintf(object_id, sizeof(object_id), "zbgw_%s_switch", ieee);
 
     char state_topic[96];
-    snprintf(state_topic, sizeof(state_topic), "%s/%s/switch", ZBGW_TOPIC_PREFIX, ieee);
+    snprintf(state_topic, sizeof(state_topic), "%s/%s/switch", zbgw_topic_prefix(), ieee);
 
     char command_topic[96];
-    snprintf(command_topic, sizeof(command_topic), "%s/%s/switch/set", ZBGW_TOPIC_PREFIX, ieee);
+    snprintf(command_topic, sizeof(command_topic), "%s/%s/switch/set", zbgw_topic_prefix(), ieee);
 
     char unique_id[64];
     snprintf(unique_id, sizeof(unique_id), "zbgw_%s_switch", ieee);
@@ -136,7 +137,7 @@ static esp_err_t publish_switch(const zbgw_device_t *dev)
     cJSON_AddStringToObject(root, "state_on", "ON");
     cJSON_AddStringToObject(root, "state_off", "OFF");
     cJSON_AddBoolToObject(root, "optimistic", false);
-    cJSON_AddStringToObject(root, "availability_topic", ZBGW_TOPIC_STATUS);
+    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
     cJSON_AddStringToObject(root, "payload_available", "online");
     cJSON_AddStringToObject(root, "payload_not_available", "offline");
     add_device_object(root, dev);
@@ -152,10 +153,10 @@ static esp_err_t publish_power_on_select(const zbgw_device_t *dev)
     snprintf(object_id, sizeof(object_id), "zbgw_%s_power_on_behavior", ieee);
 
     char state_topic[96];
-    snprintf(state_topic, sizeof(state_topic), "%s/%s/power_on_behavior", ZBGW_TOPIC_PREFIX, ieee);
+    snprintf(state_topic, sizeof(state_topic), "%s/%s/power_on_behavior", zbgw_topic_prefix(), ieee);
 
     char command_topic[96];
-    snprintf(command_topic, sizeof(command_topic), "%s/%s/power_on_behavior/set", ZBGW_TOPIC_PREFIX, ieee);
+    snprintf(command_topic, sizeof(command_topic), "%s/%s/power_on_behavior/set", zbgw_topic_prefix(), ieee);
 
     char unique_id[64];
     snprintf(unique_id, sizeof(unique_id), "zbgw_%s_power_on_behavior", ieee);
@@ -169,7 +170,7 @@ static esp_err_t publish_power_on_select(const zbgw_device_t *dev)
     cJSON_AddItemToArray(opts, cJSON_CreateString("power_off"));
     cJSON_AddItemToArray(opts, cJSON_CreateString("power_on"));
     cJSON_AddItemToArray(opts, cJSON_CreateString("last"));
-    cJSON_AddStringToObject(root, "availability_topic", ZBGW_TOPIC_STATUS);
+    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
     cJSON_AddStringToObject(root, "payload_available", "online");
     cJSON_AddStringToObject(root, "payload_not_available", "offline");
     cJSON_AddStringToObject(root, "icon", "mdi:power-settings");
@@ -286,7 +287,7 @@ esp_err_t ha_discovery_unpublish_device(uint64_t ieee)
                                      "test",        "battery_low", "battery", "switch",  "power", "energy",
                                      "power_on_behavior"};
     for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
-        snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee_str, suffixes[i]);
+        snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", zbgw_topic_prefix(), ieee_str, suffixes[i]);
         err |= mqtt_bridge_publish(state_topic, "", 1, true);
     }
 
@@ -296,28 +297,31 @@ esp_err_t ha_discovery_unpublish_device(uint64_t ieee)
 
 esp_err_t ha_discovery_publish_bridge(void)
 {
+    char unique_id[40];
+    snprintf(unique_id, sizeof(unique_id), "%s_permit_join", zbgw_id_bridge());
+
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "name", "Permit join");
-    cJSON_AddStringToObject(root, "unique_id", "zbgw_bridge_permit_join");
-    cJSON_AddStringToObject(root, "command_topic", ZBGW_TOPIC_PERMIT_JOIN);
-    cJSON_AddStringToObject(root, "state_topic", ZBGW_TOPIC_PERMIT_STATE);
+    cJSON_AddStringToObject(root, "unique_id", unique_id);
+    cJSON_AddStringToObject(root, "command_topic", zbgw_topic_permit_join());
+    cJSON_AddStringToObject(root, "state_topic", zbgw_topic_permit_state());
     cJSON_AddStringToObject(root, "payload_on", "ON");
     cJSON_AddStringToObject(root, "payload_off", "OFF");
     cJSON_AddBoolToObject(root, "optimistic", false);
-    cJSON_AddStringToObject(root, "availability_topic", ZBGW_TOPIC_STATUS);
+    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
     cJSON_AddStringToObject(root, "payload_available", "online");
     cJSON_AddStringToObject(root, "payload_not_available", "offline");
     cJSON_AddStringToObject(root, "icon", "mdi:zigbee");
 
     cJSON *device = cJSON_AddObjectToObject(root, "device");
     cJSON *ids = cJSON_AddArrayToObject(device, "identifiers");
-    cJSON_AddItemToArray(ids, cJSON_CreateString("zbgw_bridge"));
-    cJSON_AddStringToObject(device, "name", "ESP32-C6 Zigbee Gateway");
+    cJSON_AddItemToArray(ids, cJSON_CreateString(zbgw_id_bridge()));
+    cJSON_AddStringToObject(device, "name", zbgw_id_name());
     cJSON_AddStringToObject(device, "manufacturer", "DFRobot / Espressif");
     cJSON_AddStringToObject(device, "model", "FireBeetle 2 ESP32-C6");
     cJSON_AddStringToObject(device, "sw_version", "1.0.0");
 
-    return publish_config("switch", "zbgw_bridge_permit_join", root);
+    return publish_config("switch", unique_id, root);
 }
 
 esp_err_t ha_discovery_publish_sensor_state(const zbgw_device_t *dev, const char *suffix, const char *value)
@@ -328,7 +332,7 @@ esp_err_t ha_discovery_publish_sensor_state(const zbgw_device_t *dev, const char
     char ieee[20];
     device_registry_ieee_to_str(dev->ieee, ieee, sizeof(ieee));
     char topic[96];
-    snprintf(topic, sizeof(topic), "%s/%s/%s", ZBGW_TOPIC_PREFIX, ieee, suffix);
+    snprintf(topic, sizeof(topic), "%s/%s/%s", zbgw_topic_prefix(), ieee, suffix);
     /* QoS 0: live power/energy used to block 20s on PUBACK and drop the MQTT session. */
     bool live = strcmp(suffix, "power") == 0 || strcmp(suffix, "energy") == 0;
     return mqtt_bridge_publish(topic, value, live ? 0 : 1, !live);

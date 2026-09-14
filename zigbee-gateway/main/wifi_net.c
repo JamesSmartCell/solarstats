@@ -6,6 +6,7 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -140,6 +141,25 @@ esp_err_t wifi_net_start(void)
 bool wifi_net_is_connected(void)
 {
     return s_connected && !s_paused;
+}
+
+bool wifi_net_get_sta_ipv4(uint32_t *ip_addr, uint32_t *netmask)
+{
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!netif) {
+        return false;
+    }
+    esp_netif_ip_info_t info = {0};
+    if (esp_netif_get_ip_info(netif, &info) != ESP_OK || info.ip.addr == 0) {
+        return false;
+    }
+    if (ip_addr) {
+        *ip_addr = info.ip.addr;
+    }
+    if (netmask) {
+        *netmask = info.netmask.addr;
+    }
+    return true;
 }
 
 esp_err_t wifi_net_wait_connected(TickType_t ticks_to_wait)

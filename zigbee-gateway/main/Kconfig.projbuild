@@ -18,8 +18,9 @@ menu "Zigbee Gateway Configuration"
         default "192.168.50.41"
         help
             Seed for NVS / the setup form. Runtime host is stored in NVS.
-            Prefer a LAN IP on ESP32-C6 — .local mDNS is unreliable with
-            Zigbee Wi-Fi coexistence.
+            Empty or unreachable hosts trigger a sequential LAN scan of
+            port 1883 on the STA /24. Prefer a LAN IP on ESP32-C6 — .local
+            mDNS is unreliable with Zigbee Wi-Fi coexistence.
 
     config ZBGW_MQTT_PORT
         int "MQTT broker port"
@@ -40,9 +41,9 @@ menu "Zigbee Gateway Configuration"
 
     config ZBGW_SETUP_AP_SSID
         string "First-boot setup SoftAP name"
-        default "ZIGBEE_SETUP"
+        default "ZBGW-SETUP"
         help
-            Open AP broadcast when NVS has no Wi-Fi/MQTT credentials.
+            Open AP when NVS has no Wi-Fi credentials.
 
     config ZBGW_OTA_URL
         string "HTTPS OTA firmware URL"
@@ -79,7 +80,8 @@ menu "Zigbee Gateway Configuration"
         string "MQTT topic prefix"
         default "zigbee-gw"
         help
-            Base topic for bridge status, permit_join, and device state.
+            First path segment. The STA MAC is appended at runtime
+            (zigbee-gw/<mac>/...) so several C6s can share one broker.
 
     config ZBGW_PRIMARY_CHANNEL
         int "Zigbee primary channel"
