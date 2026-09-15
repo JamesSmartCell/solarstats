@@ -191,8 +191,6 @@ bool device_registry_sanitize(void)
 {
     bool changed = false;
     const uint32_t plug_bits = ZBGW_CAP_ON_OFF | ZBGW_CAP_POWER | ZBGW_CAP_ENERGY;
-    const uint32_t junk_bits = ZBGW_CAP_TEMPERATURE | ZBGW_CAP_HUMIDITY | ZBGW_CAP_CONTACT | ZBGW_CAP_OCCUPANCY |
-                               ZBGW_CAP_TAMPER | ZBGW_CAP_SMOKE_TEST | ZBGW_CAP_BATTERY_LOW | ZBGW_CAP_BATTERY;
     /* Zone-type mapping picks one alarm class — never both contact and occupancy. */
     const uint32_t exclusive_alarms = ZBGW_CAP_CONTACT | ZBGW_CAP_OCCUPANCY | ZBGW_CAP_SMOKE;
 
@@ -209,7 +207,6 @@ bool device_registry_sanitize(void)
         const bool has_smoke = (dev->capabilities & ZBGW_CAP_SMOKE) != 0;
         const uint32_t alarms = dev->capabilities & exclusive_alarms;
         const bool multiple_alarms = alarms && (alarms & (alarms - 1)) != 0;
-        const bool orphan_junk = !dev->ias_ep && !has_smoke && (dev->capabilities & junk_bits) != 0;
 
         if (has_plug_caps || has_on_off_eps || multiple_alarms) {
             uint32_t cleaned = plug_bits | (before_caps & ZBGW_CAP_POWER_ON_BEHAVIOR);
@@ -229,13 +226,6 @@ bool device_registry_sanitize(void)
                 dev->discovery_published = false;
                 changed = true;
             }
-        } else if (orphan_junk) {
-            uint32_t cleaned = before_caps & ~junk_bits;
-            ESP_LOGW(TAG, "Sanitized orphan sensor caps 0x%lx -> 0x%lx ieee=%016llx", (unsigned long)before_caps,
-                     (unsigned long)cleaned, (unsigned long long)dev->ieee);
-            dev->capabilities = cleaned;
-            dev->discovery_published = false;
-            changed = true;
         } else if (dev->ias_ep && (dev->capabilities & ZBGW_CAP_CONTACT)) {
             uint32_t cleaned = ZBGW_CAP_CONTACT | ZBGW_CAP_BATTERY_LOW;
             if (cleaned != before_caps) {

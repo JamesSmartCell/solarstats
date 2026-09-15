@@ -307,6 +307,18 @@ void diag_report_error(const char *code, const char *detail)
     (void)enqueue_error(code, detail);
 }
 
+void diag_report_action(const char *code, const char *detail)
+{
+    if (!s_enabled || !s_queue) {
+        return;
+    }
+    diag_event_t ev;
+    fill_event(&ev, "device", code, detail);
+    if (xQueueSend(s_queue, &ev, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Action queue full (%s)", code ? code : "?");
+    }
+}
+
 void diag_report_error_blocking(const char *code, const char *detail)
 {
     if (!s_enabled) {

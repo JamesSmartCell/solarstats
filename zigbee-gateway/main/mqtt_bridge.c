@@ -45,6 +45,7 @@ static bool s_suspended;
 static bool s_client_started;
 static bool s_resume_from_pairing;
 static int64_t s_ignore_permit_on_until_us;
+static esp_timer_handle_t s_permit_off_timer;
 static int s_fail_count;
 static mqtt_bridge_permit_join_cb_t s_permit_cb;
 static mqtt_bridge_switch_cb_t s_switch_cb;
@@ -388,6 +389,30 @@ static bool parse_ieee_payload(const char *data, int len, uint64_t *ieee)
     return device_registry_ieee_from_str(p, ieee);
 }
 
+static void permit_off_confirm_cb(void *arg)
+{
+    (void)arg;
+    if (s_connected) {
+        (void)mqtt_bridge_publish_permit_state(false);
+        ESP_LOGI(TAG, "HA permit join -> OFF (confirm after outbox)");
+    }
+}
+
+static void schedule_permit_off_confirm(void)
+{
+    if (!s_permit_off_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &permit_off_confirm_cb,
+            .name = "permit_off",
+        };
+        if (esp_timer_create(&args, &s_permit_off_timer) != ESP_OK) {
+            return;
+        }
+    }
+    esp_timer_stop(s_permit_off_timer);
+    (void)esp_timer_start_once(s_permit_off_timer, 400 * 1000ULL);
+}
+
 static void handle_permit_join_payload(const char *data, int len)
 {
     if (!s_permit_cb) {
@@ -522,6 +547,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         if (mqtt_bridge_publish_permit_state(false) == ESP_OK) {
             ESP_LOGI(TAG, "HA permit join -> OFF (WiFi/MQTT back)");
         }
+        schedule_permit_off_confirm();
         if (ha_discovery_publish_bridge() == ESP_OK) {
             ESP_LOGI(TAG, "HA permit join switch advertised");
         }
@@ -752,7 +778,10 @@ esp_err_t mqtt_bridge_publish_status(const char *status)
 
 esp_err_t mqtt_bridge_publish_permit_state(bool open)
 {
-    return mqtt_bridge_publish(zbgw_topic_permit_state(), open ? "ON" : "OFF", 1, true);
+    /* ON is QoS 0: exclusive pairing stops MQTT immediately. A QoS 1 ON stays
+     * in the outbox and is retransmitted after the reconnect OFF, so HA flips
+     * back to ON while the join window is already closed. */
+    return mqtt_bridge_publish(zbgw_topic_permit_state(), open ? "ON" : "OFF", open ? 0 : 1, true);
 }
 
 esp_err_t mqtt_bridge_publish_info(const char *json)

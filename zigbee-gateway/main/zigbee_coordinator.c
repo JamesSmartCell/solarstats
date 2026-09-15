@@ -7,6 +7,7 @@
 #include "board_io.h"
 #include "config.h"
 #include "device_registry.h"
+#include "diag.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -88,6 +89,18 @@ static void set_device_reachable(uint64_t ieee, bool online)
     int8_t want = online ? 1 : 0;
     if (slot->ieee == ieee && slot->online == want) {
         return;
+    }
+    if (!online) {
+        zbgw_device_t *dev = device_registry_find_ieee(ieee);
+        bool sleepy = dev && !(dev->capabilities & ZBGW_CAP_ON_OFF) &&
+                      (dev->ias_ep ||
+                       (dev->capabilities & (ZBGW_CAP_OCCUPANCY | ZBGW_CAP_CONTACT | ZBGW_CAP_SMOKE |
+                                             ZBGW_CAP_TEMPERATURE | ZBGW_CAP_HUMIDITY | ZBGW_CAP_BATTERY)));
+        if (sleepy) {
+            ESP_LOGI(TAG, "Sleepy device keep listed ieee=%016llx (wait for report)",
+                     (unsigned long long)ieee);
+            return;
+        }
     }
     slot->ieee = ieee;
     slot->online = want;
@@ -1082,6 +1095,12 @@ static void broadcast_ha_on_first_status(zbgw_device_t *dev)
         ha_discovery_publish_availability(dev->ieee, true);
         ESP_LOGI(TAG, "HA discovery broadcast ieee=%016llx short=0x%04x caps=0x%lx ias_ep=%u",
                  (unsigned long long)dev->ieee, dev->short_addr, (unsigned long)dev->capabilities, dev->ias_ep);
+        {
+            char detail[128];
+            snprintf(detail, sizeof(detail), "ieee=%016llx short=0x%04x caps=0x%lx",
+                     (unsigned long long)dev->ieee, dev->short_addr, (unsigned long)dev->capabilities);
+            diag_report_action("added", detail);
+        }
     } else {
         flag_ha_broadcast(dev->ieee);
         dev->discovery_published = false;
