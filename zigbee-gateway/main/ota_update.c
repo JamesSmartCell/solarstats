@@ -1,5 +1,6 @@
 #include "ota_update.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "config.h"
@@ -10,6 +11,7 @@
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mqtt_bridge.h"
@@ -18,6 +20,27 @@
 
 static const char *TAG = "ota";
 static volatile bool s_busy;
+static esp_timer_handle_t s_period_timer;
+
+#define OTA_PERIOD_US (12ULL * 60 * 60 * 1000000ULL)
+
+/* Compare dotted numeric versions (1.2.10 > 1.2.9). Extra suffix is ignored. */
+static int version_cmp(const char *a, const char *b)
+{
+    int am = 0, an = 0, ap = 0, bm = 0, bn = 0, bp = 0;
+    int na = a ? sscanf(a, "%d.%d.%d", &am, &an, &ap) : 0;
+    int nb = b ? sscanf(b, "%d.%d.%d", &bm, &bn, &bp) : 0;
+    if (na < 2 || nb < 2) {
+        return strcmp(a ? a : "", b ? b : "");
+    }
+    if (am != bm) {
+        return am - bm;
+    }
+    if (an != bn) {
+        return an - bn;
+    }
+    return ap - bp;
+}
 
 static void publish_ota(const char *state)
 {
@@ -70,26 +93,28 @@ static void ota_task(void *arg)
     esp_app_desc_t new_app = {0};
     err = esp_https_ota_get_img_desc(handle, &new_app);
     const esp_app_desc_t *cur = esp_app_get_description();
-    if (err == ESP_OK && cur && strcmp(new_app.version, cur->version) == 0) {
-        ESP_LOGI(TAG, "OTA already on %s", cur->version);
+    if (err != ESP_OK || !cur || !new_app.version[0]) {
+        ESP_LOGE(TAG, "OTA image version unread: %s", esp_err_to_name(err));
+        publish_ota("failed");
+        (void)esp_https_ota_abort(handle);
+        s_busy = false;
+        vTaskDelete(NULL);
+        return;
+    }
+    int cmp = version_cmp(new_app.version, cur->version);
+    if (cmp <= 0) {
+        if (cmp < 0) {
+            ESP_LOGW(TAG, "OTA skip downgrade %s -> %s", cur->version, new_app.version);
+        } else {
+            ESP_LOGI(TAG, "OTA already on %s", cur->version);
+        }
         publish_ota("up_to_date");
         (void)esp_https_ota_abort(handle);
         s_busy = false;
         vTaskDelete(NULL);
         return;
     }
-    if (err == ESP_OK && cur && new_app.version[0] &&
-        strcmp(new_app.version, cur->version) < 0) {
-        ESP_LOGW(TAG, "OTA skip downgrade %s -> %s", cur->version, new_app.version);
-        publish_ota("up_to_date");
-        (void)esp_https_ota_abort(handle);
-        s_busy = false;
-        vTaskDelete(NULL);
-        return;
-    }
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "OTA %s -> %s", cur ? cur->version : "?", new_app.version);
-    }
+    ESP_LOGI(TAG, "OTA %s -> %s", cur->version, new_app.version);
 
     publish_ota("updating");
     while (true) {
@@ -147,11 +172,26 @@ static void boot_check_task(void *arg)
     vTaskDelete(NULL);
 }
 
+static void period_check_cb(void *arg)
+{
+    (void)arg;
+    (void)ota_update_start();
+}
+
 void ota_update_schedule_boot_check(void)
 {
 #if CONFIG_ZBGW_OTA_CHECK_ON_BOOT
     if (xTaskCreate(boot_check_task, "ota_boot", 3072, NULL, 3, NULL) != pdPASS) {
         ESP_LOGW(TAG, "OTA boot check task failed");
+    }
+    if (!s_period_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &period_check_cb,
+            .name = "ota_period",
+        };
+        if (esp_timer_create(&args, &s_period_timer) == ESP_OK) {
+            (void)esp_timer_start_periodic(s_period_timer, OTA_PERIOD_US);
+        }
     }
 #else
     ESP_LOGI(TAG, "OTA boot check disabled");

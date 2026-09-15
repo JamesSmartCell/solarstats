@@ -42,6 +42,9 @@ static const char *TAG = "mqtt_bridge";
 static esp_mqtt_client_handle_t s_client;
 static bool s_connected;
 static bool s_suspended;
+static bool s_client_started;
+static bool s_resume_from_pairing;
+static int64_t s_ignore_permit_on_until_us;
 static int s_fail_count;
 static mqtt_bridge_permit_join_cb_t s_permit_cb;
 static mqtt_bridge_switch_cb_t s_switch_cb;
@@ -395,6 +398,11 @@ static void handle_permit_join_payload(const char *data, int len)
         ESP_LOGW(TAG, "Unknown permit_join payload: %.*s", len, data);
         return;
     }
+    if (enable && esp_timer_get_time() < s_ignore_permit_on_until_us) {
+        ESP_LOGI(TAG, "Ignoring stale permit_join ON after pairing reconnect");
+        (void)mqtt_bridge_publish_permit_state(false);
+        return;
+    }
     s_permit_cb(enable);
 }
 
@@ -496,6 +504,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT connected");
         s_connected = true;
+        s_client_started = true;
         s_fail_count = 0;
         wifi_net_on_mqtt_up();
         esp_mqtt_client_subscribe(s_client, zbgw_topic_permit_join(), 1);
@@ -505,14 +514,25 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         esp_mqtt_client_subscribe(s_client, zbgw_topic_rediscover(), 1);
         esp_mqtt_client_subscribe(s_client, zbgw_topic_ota(), 1);
         mqtt_bridge_publish_status("online");
-        mqtt_bridge_publish_permit_state(false);
+        /* State first so HA does not restore the last ON command when the entity appears. */
+        if (s_resume_from_pairing) {
+            s_ignore_permit_on_until_us = esp_timer_get_time() + 4 * 1000 * 1000LL;
+            s_resume_from_pairing = false;
+        }
+        if (mqtt_bridge_publish_permit_state(false) == ESP_OK) {
+            ESP_LOGI(TAG, "HA permit join -> OFF (WiFi/MQTT back)");
+        }
+        if (ha_discovery_publish_bridge() == ESP_OK) {
+            ESP_LOGI(TAG, "HA permit join switch advertised");
+        }
+        zigbee_coordinator_flush_discovery();
         zigbee_coordinator_on_mqtt_connected();
         {
             int64_t now_ms = esp_timer_get_time() / 1000;
             bool cooldown_ok =
                 s_discovery_done && (now_ms - s_last_discovery_ms) < MQTT_DISCOVERY_COOLDOWN_MS;
             if (cooldown_ok) {
-                ESP_LOGI(TAG, "MQTT reconnected - skipping discovery (cooldown)");
+                ESP_LOGI(TAG, "MQTT reconnected - skipping full discovery (cooldown)");
                 zigbee_coordinator_on_discovery_complete();
             } else {
                 schedule_discovery();
@@ -617,7 +637,9 @@ void mqtt_bridge_suspend(void)
     }
     ESP_LOGW(TAG, "Suspending MQTT during Zigbee pairing");
     s_suspended = true;
+    s_resume_from_pairing = true;
     s_connected = false;
+    s_client_started = false;
     s_fail_count = 0;
     s_discovery_gen++;
     (void)esp_mqtt_client_stop(s_client);
@@ -630,16 +652,21 @@ void mqtt_bridge_resume(void)
     }
     s_fail_count = 0;
     s_suspended = false;
+    if (s_connected || s_client_started) {
+        return;
+    }
     if (!wifi_net_is_connected()) {
         ESP_LOGI(TAG, "MQTT resume armed - waiting for WiFi IP");
         return;
     }
     ESP_LOGI(TAG, "Resuming MQTT after Zigbee pairing");
     esp_err_t err = esp_mqtt_client_start(s_client);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "MQTT start %s - reconnect", esp_err_to_name(err));
-        (void)esp_mqtt_client_reconnect(s_client);
+    if (err == ESP_OK) {
+        s_client_started = true;
+        return;
     }
+    ESP_LOGW(TAG, "MQTT start %s - reconnect", esp_err_to_name(err));
+    (void)esp_mqtt_client_reconnect(s_client);
 }
 
 esp_err_t mqtt_bridge_start(mqtt_bridge_permit_join_cb_t permit_cb, mqtt_bridge_switch_cb_t switch_cb,

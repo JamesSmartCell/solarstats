@@ -32,10 +32,72 @@ static const char *TAG = "zb_coord";
 #define ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID 0x8002
 #define ZBGW_TUYA_MANUF_CODE_DEV             0x1141
 
+/* Broadcast to Rx-on-when-idle (routers + mains plugs). Sleepy EDs will not hear this. */
+#define ZBGW_NWK_BCAST_RX_ON_WHEN_IDLE 0xFFFD
+#define ZBGW_ADDR_REFRESH_PACE_MS      200
+#define ZBGW_WIFI_ZB_TX_HOLD_MS        400
+#define ZBGW_PERMIT_JOIN_WINDOW_S      30
+#define ZBGW_PAIRING_RF_HOLD_S         25
+
 static bool s_network_ready;
 static bool s_permit_join_pending;
+static bool s_exclusive_pairing;
+static esp_timer_handle_t s_permit_timer;
+static esp_timer_handle_t s_pairing_hold_timer;
 static esp_timer_handle_t s_commission_timer;
 static esp_timer_handle_t s_ias_enroll_timer;
+static esp_timer_handle_t s_addr_refresh_timer;
+static bool s_addr_refresh_active;
+static bool s_addr_refresh_done;
+static bool s_refresh_waiting_zdo;
+static bool s_match_sweep_sent;
+static bool s_power_poll_hold;
+static uint16_t s_match_onoff_clusters[] = {EZB_ZCL_CLUSTER_ID_ON_OFF};
+static int64_t s_zdo_last_us;
+static uint64_t s_zdo_last_ieee;
+static uint64_t s_pending_onoff_ieee;
+static bool s_pending_onoff_on;
+static bool s_pending_onoff;
+#define ZBGW_PENDING_HA_MAX 8
+static uint64_t s_pending_ha_bcast[ZBGW_PENDING_HA_MAX];
+
+typedef struct {
+    uint64_t ieee;
+    int8_t online; /* -1 unknown, 0 offline, 1 online */
+} reach_t;
+static reach_t s_reach[ZBGW_MAX_DEVICES];
+
+static void set_device_reachable(uint64_t ieee, bool online)
+{
+    if (!ieee) {
+        return;
+    }
+    reach_t *slot = NULL;
+    for (int i = 0; i < ZBGW_MAX_DEVICES; ++i) {
+        if (s_reach[i].ieee == ieee) {
+            slot = &s_reach[i];
+            break;
+        }
+        if (!slot && s_reach[i].ieee == 0) {
+            slot = &s_reach[i];
+        }
+    }
+    if (!slot) {
+        return;
+    }
+    int8_t want = online ? 1 : 0;
+    if (slot->ieee == ieee && slot->online == want) {
+        return;
+    }
+    slot->ieee = ieee;
+    slot->online = want;
+    ha_discovery_publish_availability(ieee, online);
+    if (online) {
+        ESP_LOGI(TAG, "Device available ieee=%016llx", (unsigned long long)ieee);
+    } else {
+        ESP_LOGW(TAG, "Device unavailable ieee=%016llx", (unsigned long long)ieee);
+    }
+}
 static uint16_t s_ias_enroll_short;
 static uint8_t s_pending_commission_mode;
 
@@ -107,6 +169,8 @@ static bool s_power_on_did_verify_read;
 static bool s_power_on_tried_manuf;
 static bool s_power_on_allow_manuf_fallback;
 static int64_t s_power_on_expect_until_us;
+static void ensure_discovery(zbgw_device_t *dev);
+static void broadcast_ha_on_first_status(zbgw_device_t *dev);
 static esp_timer_handle_t s_energy_mqtt_timer;
 #define ENERGY_MQTT_DEFER_US (600 * 1000ULL)
 static uint16_t s_interview_queue[ZBGW_MAX_DEVICES];
@@ -347,20 +411,26 @@ static void apply_power_on_behavior(zbgw_device_t *dev, uint16_t attr_id, uint8_
         return;
     }
     power_on_beh_t *beh = power_on_for_ieee(dev->ieee, true);
+    bool changed = true;
     if (beh) {
         if (beh->attr_id == ZBGW_ZCL_ATTR_TUYA_POWER_ON_STATE_ID &&
             attr_id == EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID) {
             return;
         }
+        changed = (beh->attr_id != attr_id) || (beh->raw != raw);
         beh->attr_id = attr_id;
         beh->raw = raw;
     }
     if (raw == s_power_on_expected_raw) {
         s_power_on_confirmed = true;
     }
+    if (!changed) {
+        return;
+    }
     device_registry_add_capability(dev, ZBGW_CAP_POWER_ON_BEHAVIOR);
     ESP_LOGI(TAG, "Power-on behaviour %s attr=0x%04x raw=%u short=0x%04x", name, attr_id, raw, dev->short_addr);
     ha_discovery_publish_sensor_state(dev, "power_on_behavior", name);
+    ensure_discovery(dev);
 }
 
 static uint32_t read_u24_le(const void *value)
@@ -500,19 +570,527 @@ static uint64_t ieee_from_extended(const ezb_extaddr_t *addr)
     return addr ? addr->u64 : 0;
 }
 
-static void ensure_discovery(zbgw_device_t *dev)
+static esp_err_t send_on_off_and_followup(zbgw_device_t *dev, bool on);
+static void start_power_poll_timer(void);
+
+static bool short_from_neighbors(uint64_t ieee, uint16_t *out)
 {
-    if (!dev || dev->discovery_published || !dev->capabilities) {
+    if (!ieee || !out) {
+        return false;
+    }
+    ezb_nwk_info_iterator_t it = EZB_NWK_INFO_ITERATOR_INIT;
+    ezb_nwk_neighbor_info_t nbr;
+    while (ezb_nwk_get_next_neighbor(&it, &nbr) == EZB_ERR_NONE) {
+        if (nbr.ieee_addr.u64 == ieee && nbr.short_addr && nbr.short_addr != 0xffff) {
+            *out = nbr.short_addr;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool live_short_from_table(uint64_t ieee, uint16_t *out)
+{
+    if (!ieee || !out) {
+        return false;
+    }
+    ezb_extaddr_t ext = {0};
+    ext.u64 = ieee;
+    ezb_shortaddr_t short_addr = 0;
+    if (ezb_address_short_by_extended(&ext, &short_addr) != EZB_ERR_NONE || short_addr == 0 ||
+        short_addr == 0xffff) {
+        return false;
+    }
+    *out = short_addr;
+    return true;
+}
+
+static void apply_resolved_nwk(uint64_t ieee, uint16_t short_addr)
+{
+    if (!ieee || !short_addr || short_addr == 0xffff) {
         return;
     }
-    /* Avoid discovery storms before MQTT is up (also blocks permit_join). */
+    zbgw_device_t *dev = device_registry_find_ieee(ieee);
+    if (!dev) {
+        return;
+    }
+    if (dev->short_addr != short_addr) {
+        ESP_LOGI(TAG, "Resolved NWK ieee=%016llx 0x%04x -> 0x%04x", (unsigned long long)ieee, dev->short_addr,
+                 short_addr);
+        dev->short_addr = short_addr;
+        device_registry_save();
+    } else {
+        ESP_LOGI(TAG, "Confirmed NWK ieee=%016llx short=0x%04x", (unsigned long long)ieee, short_addr);
+    }
+    power_scale_t *scale = power_scale_for_dev(dev, false);
+    if (scale) {
+        scale->short_addr = short_addr;
+    }
+    set_device_reachable(ieee, true);
+    if (s_pending_onoff && s_pending_onoff_ieee == ieee) {
+        bool on = s_pending_onoff_on;
+        s_pending_onoff = false;
+        s_pending_onoff_ieee = 0;
+        (void)send_on_off_and_followup(dev, on);
+    }
+}
+
+static void schedule_addr_refresh_tick(uint32_t delay_ms);
+static void resume_after_exclusive_pairing(const char *reason);
+
+static void permit_timeout_cb(void *arg)
+{
+    (void)arg;
+    if (!s_exclusive_pairing) {
+        return;
+    }
+    ESP_LOGI(TAG, "Permit join %ds timeout", ZBGW_PERMIT_JOIN_WINDOW_S);
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+    ezb_bdb_open_network(0);
+    esp_zigbee_lock_release();
+    resume_after_exclusive_pairing("timeout");
+}
+
+static void start_permit_timer(void)
+{
+    if (!s_permit_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &permit_timeout_cb,
+            .name = "zb_permit",
+        };
+        if (esp_timer_create(&args, &s_permit_timer) != ESP_OK) {
+            return;
+        }
+    }
+    esp_timer_stop(s_permit_timer);
+    (void)esp_timer_start_once(s_permit_timer, (uint64_t)ZBGW_PERMIT_JOIN_WINDOW_S * 1000ULL * 1000ULL);
+}
+
+static void resume_after_exclusive_pairing(const char *reason)
+{
+    s_exclusive_pairing = false;
+    s_hold_wifi_for_interview = false;
+    if (s_permit_timer) {
+        esp_timer_stop(s_permit_timer);
+    }
+    if (s_pairing_hold_timer) {
+        esp_timer_stop(s_pairing_hold_timer);
+    }
+    ESP_LOGI(TAG, "Permit join closed (%s) - resuming WiFi", reason ? reason : "done");
+    wifi_net_resume();
+    mqtt_bridge_resume();
+}
+
+static void pairing_hold_timeout_cb(void *arg)
+{
+    (void)arg;
+    if (!s_hold_wifi_for_interview && !wifi_net_is_paused()) {
+        return;
+    }
+    ESP_LOGW(TAG, "Interview hold timeout (%ds) - resuming WiFi", ZBGW_PAIRING_RF_HOLD_S);
+    resume_after_exclusive_pairing("interview hold timeout");
+}
+
+static void hold_wifi_for_interview(const char *reason)
+{
+    s_hold_wifi_for_interview = true;
+    if (!s_pairing_hold_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &pairing_hold_timeout_cb,
+            .name = "zb_pair_hold",
+        };
+        if (esp_timer_create(&args, &s_pairing_hold_timer) != ESP_OK) {
+            return;
+        }
+    }
+    esp_timer_stop(s_pairing_hold_timer);
+    (void)esp_timer_start_once(s_pairing_hold_timer, (uint64_t)ZBGW_PAIRING_RF_HOLD_S * 1000ULL * 1000ULL);
+    ESP_LOGI(TAG, "Permit join closed (%s) - holding WiFi for interview", reason ? reason : "join");
+}
+
+static void zdo_addr_result_cb(const ezb_zdo_addr_req_result_t *result, void *user_ctx)
+{
+    (void)user_ctx;
+    bool ok = result && result->error == EZB_ERR_NONE && result->rsp &&
+              result->rsp->status == EZB_ZDP_STATUS_SUCCESS;
+    s_refresh_waiting_zdo = false;
+    if (!ok) {
+        ezb_err_t err = result ? result->error : EZB_ERR_FAIL;
+        ESP_LOGW(TAG, "ZDO addr req failed err=0x%x%s", (unsigned)err,
+                 err == EZB_ERR_TIMEOUT ? " (timeout)" : "");
+        if (s_zdo_last_ieee) {
+            set_device_reachable(s_zdo_last_ieee, false);
+        }
+        s_pending_onoff = false;
+        s_pending_onoff_ieee = 0;
+    } else {
+        apply_resolved_nwk(result->rsp->ieee_addr_remote_dev.u64, result->rsp->nwk_addr_remote_dev);
+    }
+}
+
+static void zdo_ieee_addr_cb(const ezb_zdo_ieee_addr_req_result_t *result, void *user_ctx)
+{
+    zdo_addr_result_cb(result, user_ctx);
+}
+
+/* Caller must hold the Zigbee lock. Unicast IEEE lookup to a short we just heard. */
+static void request_ieee_at_short(uint16_t short_addr)
+{
+    if (!short_addr || short_addr == 0xffff || s_refresh_waiting_zdo) {
+        return;
+    }
+    ezb_zdo_ieee_addr_req_t ieee_req = {0};
+    ieee_req.dst_nwk_addr = short_addr;
+    ieee_req.field.nwk_addr_of_interest = short_addr;
+    ieee_req.cb = zdo_ieee_addr_cb;
+    ezb_err_t err = ezb_zdo_ieee_addr_req(&ieee_req);
+    if (err != EZB_ERR_NONE) {
+        ESP_LOGW(TAG, "IEEE_addr_req short=0x%04x err=0x%x", short_addr, (unsigned)err);
+        return;
+    }
+    s_refresh_waiting_zdo = true;
+    ESP_LOGI(TAG, "IEEE_addr_req short=0x%04x (live)", short_addr);
+}
+
+/* Caller must hold the Zigbee lock. Broadcast NWK_addr_req — the plug answers if it is on this PAN. */
+static void request_live_nwk_addr(zbgw_device_t *dev, bool broadcast)
+{
+    (void)broadcast;
+    if (!dev || !dev->ieee) {
+        return;
+    }
+    int64_t now = esp_timer_get_time();
+    if (s_refresh_waiting_zdo) {
+        return;
+    }
+    if (s_zdo_last_ieee == dev->ieee && (now - s_zdo_last_us) < 8 * 1000 * 1000LL) {
+        return;
+    }
+
+    ezb_zdo_nwk_addr_req_t req = {0};
+    req.dst_nwk_addr = ZBGW_NWK_BCAST_RX_ON_WHEN_IDLE;
+    req.field.ieee_addr_of_interest.u64 = dev->ieee;
+    req.field.request_type = ZDO_ADDR_REQUEST_TYPE_SINGLE_DEVICE;
+    req.cb = zdo_addr_result_cb;
+    ezb_err_t err = ezb_zdo_nwk_addr_req(&req);
+    if (err != EZB_ERR_NONE) {
+        ESP_LOGW(TAG, "NWK_addr_req ieee=%016llx err=0x%x", (unsigned long long)dev->ieee, (unsigned)err);
+        return;
+    }
+    s_zdo_last_ieee = dev->ieee;
+    s_zdo_last_us = now;
+    s_refresh_waiting_zdo = true;
+    ESP_LOGI(TAG, "NWK_addr_req broadcast ieee=%016llx (find live short)", (unsigned long long)dev->ieee);
+}
+
+static void harvest_neighbor_shorts(void)
+{
+    ezb_nwk_info_iterator_t it = EZB_NWK_INFO_ITERATOR_INIT;
+    ezb_nwk_neighbor_info_t nbr;
+    while (ezb_nwk_get_next_neighbor(&it, &nbr) == EZB_ERR_NONE) {
+        if (nbr.ieee_addr.u64 && nbr.short_addr && nbr.short_addr != 0xffff) {
+            zbgw_device_t *dev = device_registry_find_ieee(nbr.ieee_addr.u64);
+            if (dev && dev->short_addr != nbr.short_addr) {
+                apply_resolved_nwk(nbr.ieee_addr.u64, nbr.short_addr);
+            }
+        }
+    }
+}
+
+static void log_unresolved_nwk(zbgw_device_t *dev, void *ctx)
+{
+    uint8_t *live_n = (uint8_t *)ctx;
+    if (!dev || !dev->in_use || !dev->ieee) {
+        return;
+    }
+    uint16_t live = 0;
+    if (live_short_from_table(dev->ieee, &live) || short_from_neighbors(dev->ieee, &live)) {
+        if (live_n) {
+            (*live_n)++;
+        }
+        return;
+    }
+    ESP_LOGW(TAG, "Still offline ieee=%016llx nvs_short=0x%04x - hold the plug button to pair",
+             (unsigned long long)dev->ieee, dev->short_addr);
+    set_device_reachable(dev->ieee, false);
+}
+
+static void addr_refresh_finish(void)
+{
+    uint8_t live_n = 0;
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+    harvest_neighbor_shorts();
+    device_registry_foreach(log_unresolved_nwk, &live_n);
+    esp_zigbee_lock_release();
+
+    s_addr_refresh_active = false;
+    s_addr_refresh_done = true;
+    s_refresh_waiting_zdo = false;
+    s_match_sweep_sent = false;
+    s_power_poll_hold = false;
+    start_power_poll_timer();
+    ESP_LOGI(TAG, "Address refresh finished (%u live mappings)", live_n);
+}
+
+static void schedule_addr_refresh_tick(uint32_t delay_ms)
+{
+    if (!s_addr_refresh_timer) {
+        return;
+    }
+    esp_timer_stop(s_addr_refresh_timer);
+    (void)esp_timer_start_once(s_addr_refresh_timer, (uint64_t)delay_ms * 1000ULL);
+}
+
+static void match_live_onoff_cb(const ezb_zdo_match_desc_req_result_t *result, void *user_ctx)
+{
+    (void)user_ctx;
+    if (!result || !result->rsp) {
+        ESP_LOGI(TAG, "On/Off match sweep complete");
+        schedule_addr_refresh_tick(1500);
+        return;
+    }
+    if (result->error != EZB_ERR_NONE || result->rsp->status != EZB_ZDP_STATUS_SUCCESS) {
+        return;
+    }
+    uint16_t short_addr = result->rsp->nwk_addr_of_interest;
+    if (!short_addr || short_addr == 0xffff) {
+        return;
+    }
+    ESP_LOGI(TAG, "Live On/Off device short=0x%04x eps=%u", short_addr, result->rsp->match_length);
+    ezb_extaddr_t ext = {0};
+    if (ezb_address_extended_by_short(short_addr, &ext) == EZB_ERR_NONE && ext.u64) {
+        apply_resolved_nwk(ext.u64, short_addr);
+        return;
+    }
+    request_ieee_at_short(short_addr);
+}
+
+static void start_onoff_match_sweep(void)
+{
+    ezb_zdo_match_desc_req_t req = {
+        .dst_nwk_addr = ZBGW_NWK_BCAST_RX_ON_WHEN_IDLE,
+        .field =
+            {
+                .nwk_addr_of_interest = ZBGW_NWK_BCAST_RX_ON_WHEN_IDLE,
+                .profile_id = EZB_AF_HA_PROFILE_ID,
+                .num_in_clusters = 1,
+                .num_out_clusters = 0,
+                .cluster_list = s_match_onoff_clusters,
+            },
+        .cb = match_live_onoff_cb,
+        .user_ctx = NULL,
+    };
+    ezb_err_t err = ezb_zdo_match_desc_req(&req);
+    if (err != EZB_ERR_NONE) {
+        ESP_LOGW(TAG, "On/Off match sweep failed err=0x%x", (unsigned)err);
+        schedule_addr_refresh_tick(200);
+        return;
+    }
+    ESP_LOGI(TAG, "Broadcast On/Off match to find live plugs");
+}
+
+static void addr_refresh_timer_cb(void *arg)
+{
+    (void)arg;
+    if (!s_addr_refresh_active) {
+        return;
+    }
+    if (!s_match_sweep_sent) {
+        esp_zigbee_lock_acquire(portMAX_DELAY);
+        harvest_neighbor_shorts();
+        start_onoff_match_sweep();
+        s_match_sweep_sent = true;
+        esp_zigbee_lock_release();
+        /* Watchdog if the sweep callback never arrives. */
+        schedule_addr_refresh_tick(8000);
+        return;
+    }
+    addr_refresh_finish();
+}
+
+static void schedule_addr_refresh(uint32_t delay_ms)
+{
+    if (s_addr_refresh_done || s_addr_refresh_active) {
+        return;
+    }
+    s_addr_refresh_active = true;
+    s_refresh_waiting_zdo = false;
+    s_match_sweep_sent = false;
+    if (!s_addr_refresh_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &addr_refresh_timer_cb,
+            .name = "zb_addr",
+        };
+        if (esp_timer_create(&args, &s_addr_refresh_timer) != ESP_OK) {
+            s_addr_refresh_active = false;
+            return;
+        }
+    }
+    esp_timer_stop(s_addr_refresh_timer);
+    ESP_LOGI(TAG, "Refreshing live NWK addresses in %u ms (WiFi stays up)", (unsigned)delay_ms);
+    ESP_ERROR_CHECK(esp_timer_start_once(s_addr_refresh_timer, (uint64_t)delay_ms * 1000ULL));
+}
+
+/* Caller must hold the Zigbee lock. Updates NVS if the live short changed. */
+static bool refresh_dev_short(zbgw_device_t *dev)
+{
+    if (!dev || !dev->ieee) {
+        return false;
+    }
+    uint16_t short_addr = 0;
+    if (!live_short_from_table(dev->ieee, &short_addr) && !short_from_neighbors(dev->ieee, &short_addr)) {
+        ESP_LOGW(TAG, "No live NWK addr ieee=%016llx nvs_short=0x%04x",
+                 (unsigned long long)dev->ieee, dev->short_addr);
+        set_device_reachable(dev->ieee, false);
+        return false;
+    }
+    if (dev->short_addr != short_addr) {
+        ESP_LOGW(TAG, "Short changed ieee=%016llx 0x%04x -> 0x%04x", (unsigned long long)dev->ieee, dev->short_addr,
+                 short_addr);
+        dev->short_addr = short_addr;
+        device_registry_save();
+    }
+    return true;
+}
+
+static void flag_ha_broadcast(uint64_t ieee)
+{
+    if (!ieee) {
+        return;
+    }
+    int empty = -1;
+    for (int i = 0; i < ZBGW_PENDING_HA_MAX; ++i) {
+        if (s_pending_ha_bcast[i] == ieee) {
+            return;
+        }
+        if (empty < 0 && s_pending_ha_bcast[i] == 0) {
+            empty = i;
+        }
+    }
+    if (empty < 0) {
+        empty = 0;
+        ESP_LOGW(TAG, "HA discovery pending table full - replacing ieee=%016llx",
+                 (unsigned long long)s_pending_ha_bcast[0]);
+    }
+    s_pending_ha_bcast[empty] = ieee;
+    ESP_LOGI(TAG, "HA discovery pending ieee=%016llx (wait for MQTT + first status)",
+             (unsigned long long)ieee);
+}
+
+static bool ha_broadcast_pending(uint64_t ieee)
+{
+    for (int i = 0; i < ZBGW_PENDING_HA_MAX; ++i) {
+        if (s_pending_ha_bcast[i] == ieee) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool consume_ha_broadcast(uint64_t ieee)
+{
+    for (int i = 0; i < ZBGW_PENDING_HA_MAX; ++i) {
+        if (s_pending_ha_bcast[i] == ieee) {
+            s_pending_ha_bcast[i] = 0;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void mark_ha_broadcast(zbgw_device_t *dev)
+{
+    if (!dev || !dev->ieee) {
+        return;
+    }
+    if (dev->discovery_published) {
+        dev->discovery_published = false;
+        device_registry_save();
+    }
+    flag_ha_broadcast(dev->ieee);
+}
+
+static void note_joined_during_pairing(uint64_t ieee)
+{
+    flag_ha_broadcast(ieee);
+    if (!s_exclusive_pairing && !wifi_net_is_paused()) {
+        return;
+    }
+    s_exclusive_pairing = false;
+    if (s_permit_timer) {
+        esp_timer_stop(s_permit_timer);
+    }
+    ezb_bdb_open_network(0);
+    /* Keep 802.15.4 exclusive until Active EP / simple desc / IAS enroll finish.
+     * Occupancy and other sleepy sensors miss that if Wi‑Fi comes back on announce. */
+    hold_wifi_for_interview("device joined");
+}
+
+/* Re-pair often keeps the IEEE but gets a new short. Device announce can be missed,
+ * so first live ZCL traffic has to learn the mapping and flag HA discovery. */
+static zbgw_device_t *device_from_short_or_learn(uint16_t short_addr, uint8_t src_ep)
+{
+    zbgw_device_t *dev = device_registry_find_short(short_addr);
+    if (dev) {
+        return dev;
+    }
+    ezb_extaddr_t ieee_addr = {0};
+    if (ezb_address_extended_by_short(short_addr, &ieee_addr) != EZB_ERR_NONE || !ieee_addr.u64) {
+        return NULL;
+    }
+    uint64_t ieee = ieee_from_extended(&ieee_addr);
+    dev = device_registry_find_ieee(ieee);
+    if (dev) {
+        ESP_LOGW(TAG, "Re-paired ieee=%016llx short 0x%04x -> 0x%04x", (unsigned long long)ieee, dev->short_addr,
+                 short_addr);
+        dev->short_addr = short_addr;
+        if (src_ep && !dev->endpoint) {
+            dev->endpoint = src_ep;
+        }
+        mark_ha_broadcast(dev);
+        device_registry_save();
+        note_joined_during_pairing(ieee);
+        return dev;
+    }
+    dev = device_registry_upsert(ieee, short_addr, src_ep);
+    if (dev) {
+        mark_ha_broadcast(dev);
+        note_joined_during_pairing(ieee);
+        ESP_LOGI(TAG, "Learned device ieee=%016llx short=0x%04x", (unsigned long long)ieee, short_addr);
+    }
+    return dev;
+}
+
+static void broadcast_ha_on_first_status(zbgw_device_t *dev)
+{
+    if (!dev || !dev->ieee || !dev->capabilities) {
+        return;
+    }
+    if (!ha_broadcast_pending(dev->ieee) && dev->discovery_published) {
+        return;
+    }
     if (!mqtt_bridge_is_connected()) {
+        flag_ha_broadcast(dev->ieee);
+        return;
+    }
+    if (!consume_ha_broadcast(dev->ieee) && dev->discovery_published) {
         return;
     }
     if (ha_discovery_publish_device(dev) == ESP_OK) {
         dev->discovery_published = true;
         device_registry_save();
+        ha_discovery_publish_availability(dev->ieee, true);
+        ESP_LOGI(TAG, "HA discovery broadcast ieee=%016llx short=0x%04x caps=0x%lx ias_ep=%u",
+                 (unsigned long long)dev->ieee, dev->short_addr, (unsigned long)dev->capabilities, dev->ias_ep);
+    } else {
+        flag_ha_broadcast(dev->ieee);
+        dev->discovery_published = false;
     }
+}
+
+static void ensure_discovery(zbgw_device_t *dev)
+{
+    mark_ha_broadcast(dev);
 }
 
 static void commission_timer_cb(void *arg)
@@ -895,6 +1473,7 @@ static void ias_apply_zone_type(zbgw_device_t *dev, uint16_t zone_type)
     ESP_LOGI(TAG, "IAS zone type=0x%04x -> %s ieee=%016llx", zone_type, ias_alarm_suffix(alarm_cap),
              (unsigned long long)dev->ieee);
     ensure_discovery(dev);
+    broadcast_ha_on_first_status(dev);
 }
 
 static void ias_publish_status(zbgw_device_t *dev, uint16_t status)
@@ -921,6 +1500,7 @@ static void ias_publish_status(zbgw_device_t *dev, uint16_t status)
         device_registry_clear_capabilities(dev, ZBGW_CAP_TAMPER | ZBGW_CAP_SMOKE_TEST | ZBGW_CAP_BATTERY);
         ha_discovery_publish_binary_state(dev, "battery_low", batt_low);
         ensure_discovery(dev);
+        broadcast_ha_on_first_status(dev);
         return;
     }
 
@@ -929,6 +1509,7 @@ static void ias_publish_status(zbgw_device_t *dev, uint16_t status)
     ha_discovery_publish_binary_state(dev, "battery_low", batt_low);
     ha_discovery_publish_binary_state(dev, "test", test);
     ensure_discovery(dev);
+    broadcast_ha_on_first_status(dev);
 }
 
 static void ias_enroll_retry_timer_cb(void *arg)
@@ -1113,6 +1694,10 @@ static void apply_cluster_on_endpoint(uint16_t short_addr, uint8_t ep, uint16_t 
             }
             device_registry_save();
         }
+        /* ZoneType arrives later; default to occupancy so HA can publish now. */
+        if (!(dev->capabilities & (ZBGW_CAP_SMOKE | ZBGW_CAP_CONTACT | ZBGW_CAP_OCCUPANCY))) {
+            device_registry_add_capability(dev, ZBGW_CAP_OCCUPANCY);
+        }
     }
     power_scale_t *scale = power_scale_for_dev(dev, true);
     if (scale) {
@@ -1139,6 +1724,9 @@ static void resume_wifi_after_pairing_work(void)
         return;
     }
     s_hold_wifi_for_interview = false;
+    if (s_pairing_hold_timer) {
+        esp_timer_stop(s_pairing_hold_timer);
+    }
     ESP_LOGI(TAG, "Interview idle - resuming WiFi after pairing");
     wifi_net_resume();
     mqtt_bridge_resume();
@@ -1158,8 +1746,14 @@ static void interview_drain_queue(void)
 
 static void interview_finish(void)
 {
-    ESP_LOGI(TAG, "Interview complete short=0x%04x", s_interview_short);
+    uint16_t done = s_interview_short;
+    ESP_LOGI(TAG, "Interview complete short=0x%04x", done);
     s_interview_busy = false;
+    zbgw_device_t *dev = device_registry_find_short(done);
+    if (dev) {
+        mark_ha_broadcast(dev);
+        broadcast_ha_on_first_status(dev);
+    }
     interview_drain_queue();
     resume_wifi_after_pairing_work();
 }
@@ -1332,6 +1926,9 @@ static void power_poll_one(zbgw_device_t *dev, void *ctx)
     if (!(dev->capabilities & (ZBGW_CAP_POWER | ZBGW_CAP_ENERGY))) {
         return;
     }
+    if (!refresh_dev_short(dev)) {
+        return;
+    }
     power_scale_t *scale = power_scale_for_dev(dev, true);
     bool want_energy = s_poll_metering && (dev->capabilities & ZBGW_CAP_ENERGY);
     bool want_power = !want_energy && (dev->capabilities & ZBGW_CAP_POWER);
@@ -1381,8 +1978,6 @@ static void power_poll_nth(zbgw_device_t *dev, void *ctx)
     power_poll_one(dev, NULL);
 }
 
-static bool s_power_poll_hold;
-
 static void power_poll_timer_cb(void *arg)
 {
     (void)arg;
@@ -1431,11 +2026,43 @@ void zigbee_coordinator_on_mqtt_disconnected(void)
     s_power_poll_hold = true;
 }
 
+static void publish_initial_reach(zbgw_device_t *dev, void *ctx)
+{
+    (void)ctx;
+    if (!dev || !dev->in_use || !dev->ieee) {
+        return;
+    }
+    uint16_t live = 0;
+    bool ok = live_short_from_table(dev->ieee, &live) || short_from_neighbors(dev->ieee, &live);
+    set_device_reachable(dev->ieee, ok);
+}
+
+static void flush_discovery_one(zbgw_device_t *dev, void *ctx)
+{
+    (void)ctx;
+    if (!dev || !dev->in_use || !dev->ieee || !dev->capabilities) {
+        return;
+    }
+    if (dev->discovery_published && !ha_broadcast_pending(dev->ieee)) {
+        return;
+    }
+    broadcast_ha_on_first_status(dev);
+}
+
+void zigbee_coordinator_flush_discovery(void)
+{
+    device_registry_foreach(flush_discovery_one, NULL);
+}
+
 void zigbee_coordinator_on_discovery_complete(void)
 {
     s_power_poll_hold = false;
-    ESP_LOGI(TAG, "Resuming power poll");
     start_power_poll_timer();
+    ESP_LOGI(TAG, "Discovery complete");
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+    device_registry_foreach(publish_initial_reach, NULL);
+    esp_zigbee_lock_release();
+    schedule_addr_refresh(500);
 }
 
 static void reinterview_known_device(zbgw_device_t *dev, void *ctx)
@@ -1499,10 +2126,10 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
             /* Formation success -> steer (opens join), same as Espressif example. */
             ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
             s_permit_join_pending = false;
-            ezb_bdb_open_network(CONFIG_ZBGW_PERMIT_JOIN_SECONDS);
+            ezb_bdb_open_network(ZBGW_PERMIT_JOIN_WINDOW_S);
             mqtt_bridge_publish_permit_state(true);
             ESP_LOGI(TAG, "Network formed - join open %us (put plug in pairing mode NOW)",
-                     CONFIG_ZBGW_PERMIT_JOIN_SECONDS);
+                     ZBGW_PERMIT_JOIN_WINDOW_S);
             start_power_poll_timer();
         } else {
             ESP_LOGW(TAG, "Network formation failed 0x%02x", status);
@@ -1512,8 +2139,7 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
     case EZB_BDB_SIGNAL_STEERING: {
         ezb_bdb_comm_status_t status = *((ezb_bdb_comm_status_t *)ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
-            ESP_LOGI(TAG, "Network steering completed (permit join active)");
-            mqtt_bridge_publish_permit_state(true);
+            ESP_LOGI(TAG, "Network steering completed");
         } else {
             ESP_LOGW(TAG, "Steering failed 0x%02x", status);
         }
@@ -1529,16 +2155,17 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
         if (s_annce_events) {
             xEventGroupSetBits(s_annce_events, ZBGW_DEV_ANNCE_BIT);
         }
-        device_registry_upsert(annce->device_addr.u64, annce->short_addr, 0);
+        zbgw_device_t *joined = device_registry_upsert(annce->device_addr.u64, annce->short_addr, 0);
+        if (joined) {
+            mark_ha_broadcast(joined);
+        } else {
+            flag_ha_broadcast(annce->device_addr.u64);
+        }
+        set_device_reachable(annce->device_addr.u64, true);
         board_io_blink_led(2, 80, 80);
         board_io_set_led(true);
         find_clusters_on_device(annce->short_addr);
-        if (wifi_net_is_paused()) {
-            s_hold_wifi_for_interview = true;
-            ESP_LOGI(TAG, "Device joined - closing permit join, WiFi down until interview");
-            ezb_bdb_open_network(0);
-            mqtt_bridge_publish_permit_state(false);
-        }
+        note_joined_during_pairing(annce->device_addr.u64);
     } break;
     case EZB_ZDO_SIGNAL_LEAVE_INDICATION: {
         const ezb_zdo_signal_leave_indication_params_t *leave = ezb_app_signal_get_params(app_signal);
@@ -1557,6 +2184,11 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
             device_registry_upsert(auth->device_addr.u64, auth->short_addr, 0);
             dev = device_registry_find_short(auth->short_addr);
         }
+        if (dev) {
+            mark_ha_broadcast(dev);
+            find_clusters_on_device(auth->short_addr);
+            note_joined_during_pairing(dev->ieee);
+        }
         /* CIE/bind often race APS key install; retry IAS enroll after auth settles. */
         if (dev && dev->ias_ep) {
             schedule_ias_enroll_retry(auth->short_addr, 2500 * 1000ULL);
@@ -1564,16 +2196,12 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
     } break;
     case EZB_NWK_SIGNAL_PERMIT_JOIN_STATUS: {
         uint8_t duration = *(uint8_t *)ezb_app_signal_get_params(app_signal);
-        mqtt_bridge_publish_permit_state(duration != 0);
         if (duration) {
             ESP_LOGI(TAG, "Permit join open for %u s", duration);
         } else {
             ESP_LOGI(TAG, "Permit join closed");
-            if (s_hold_wifi_for_interview || s_interview_busy) {
-                ESP_LOGI(TAG, "Holding WiFi down until interview finishes");
-            } else {
-                wifi_net_resume();
-                mqtt_bridge_resume();
+            if (s_exclusive_pairing || wifi_net_is_paused()) {
+                resume_after_exclusive_pairing("join window ended");
             }
         }
     } break;
@@ -1587,10 +2215,11 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
 static void handle_basic_read(ezb_zcl_cmd_read_attr_rsp_message_t *message)
 {
     uint16_t short_addr = message->in.header->src_addr.u.short_addr;
-    zbgw_device_t *dev = device_registry_find_short(short_addr);
+    zbgw_device_t *dev = device_from_short_or_learn(short_addr, message->in.header->src_ep);
     if (!dev) {
         return;
     }
+    set_device_reachable(dev->ieee, true);
 
     char manufacturer[33] = {0};
     char model[33] = {0};
@@ -1609,17 +2238,19 @@ static void handle_basic_read(ezb_zcl_cmd_read_attr_rsp_message_t *message)
     }
     if (manufacturer[0] || model[0]) {
         device_registry_set_identity(dev, manufacturer[0] ? manufacturer : NULL, model[0] ? model : NULL);
-        ensure_discovery(dev);
+        mark_ha_broadcast(dev);
     }
+    broadcast_ha_on_first_status(dev);
 }
 
 static void publish_from_report(uint16_t short_addr, uint8_t src_ep, uint16_t cluster_id, uint16_t attr_id,
                                 const void *value)
 {
-    zbgw_device_t *dev = device_registry_find_short(short_addr);
+    zbgw_device_t *dev = device_from_short_or_learn(short_addr, src_ep);
     if (!dev || !value) {
         return;
     }
+    set_device_reachable(dev->ieee, true);
 
     char buf[32];
     if (cluster_id == EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT &&
@@ -1794,7 +2425,7 @@ static void publish_from_report(uint16_t short_addr, uint8_t src_ep, uint16_t cl
             }
         }
     }
-    ensure_discovery(dev);
+    broadcast_ha_on_first_status(dev);
 }
 
 static void zcl_read_attr_rsp(ezb_zcl_cmd_read_attr_rsp_message_t *message)
@@ -1890,13 +2521,7 @@ static void zcl_action_handler(ezb_zcl_core_action_callback_id_t callback_id, vo
         }
         uint16_t short_addr = ias->in.header->src_addr.u.short_addr;
         uint8_t src_ep = ias->in.header->src_ep;
-        zbgw_device_t *dev = device_registry_find_short(short_addr);
-        if (!dev) {
-            ezb_extaddr_t ieee_addr = {0};
-            if (ezb_address_extended_by_short(short_addr, &ieee_addr) == EZB_ERR_NONE) {
-                dev = device_registry_upsert(ieee_from_extended(&ieee_addr), short_addr, src_ep);
-            }
-        }
+        zbgw_device_t *dev = device_from_short_or_learn(short_addr, src_ep);
         if (dev) {
             if (!dev->ias_ep) {
                 dev->ias_ep = src_ep;
@@ -1911,13 +2536,7 @@ static void zcl_action_handler(ezb_zcl_core_action_callback_id_t callback_id, vo
         }
         uint16_t short_addr = req->in.header->src_addr.u.short_addr;
         uint8_t src_ep = req->in.header->src_ep;
-        zbgw_device_t *dev = device_registry_find_short(short_addr);
-        if (!dev) {
-            ezb_extaddr_t ieee_addr = {0};
-            if (ezb_address_extended_by_short(short_addr, &ieee_addr) == EZB_ERR_NONE) {
-                dev = device_registry_upsert(ieee_from_extended(&ieee_addr), short_addr, src_ep);
-            }
-        }
+        zbgw_device_t *dev = device_from_short_or_learn(short_addr, src_ep);
         uint8_t zone_id = 1;
         if (dev) {
             if (!dev->ias_ep) {
@@ -2017,28 +2636,32 @@ esp_err_t zigbee_coordinator_permit_join(bool enable)
         return ESP_ERR_INVALID_STATE;
     }
     if (enable) {
+        s_exclusive_pairing = true;
         mqtt_bridge_publish_permit_state(true);
         mqtt_bridge_suspend();
         wifi_net_pause_for_zigbee();
+        start_permit_timer();
     }
 
     esp_zigbee_lock_acquire(portMAX_DELAY);
     if (enable) {
-        ezb_bdb_open_network(CONFIG_ZBGW_PERMIT_JOIN_SECONDS);
+        ezb_bdb_open_network(ZBGW_PERMIT_JOIN_WINDOW_S);
         ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
         board_io_blink_led(3, 60, 60);
         board_io_set_led(true);
-        ESP_LOGI(TAG, "PAIR NOW: put the device in pairing mode next to the FireBeetle");
+        ESP_LOGI(TAG, "PAIR NOW: %ds window, WiFi down - put the device in pairing mode",
+                 ZBGW_PERMIT_JOIN_WINDOW_S);
     } else {
         ezb_bdb_open_network(0);
     }
     esp_zigbee_lock_release();
 
     if (!enable) {
-        wifi_net_resume();
-        mqtt_bridge_resume();
+        if (s_exclusive_pairing || wifi_net_is_paused()) {
+            resume_after_exclusive_pairing("HA/BOOT off");
+        }
+        mqtt_bridge_publish_permit_state(false);
     }
-    mqtt_bridge_publish_permit_state(enable);
     return ESP_OK;
 }
 
@@ -2143,6 +2766,10 @@ esp_err_t zigbee_coordinator_set_power_on_behavior(uint64_t ieee, const char *na
     uint8_t raw = 0;
 
     esp_zigbee_lock_acquire(portMAX_DELAY);
+    if (!refresh_dev_short(dev) && !s_refresh_waiting_zdo) {
+        request_live_nwk_addr(dev, false);
+    }
+    wifi_net_zigbee_tx_hold(ZBGW_WIFI_ZB_TX_HOLD_MS);
     if (attr_id == EZB_ZCL_ATTR_ON_OFF_START_UP_ON_OFF_ID && power_on_raw_from_name(attr_id, name, &raw)) {
         s_power_on_allow_manuf_fallback = false;
         write_on_off_u8_attr(dev->short_addr, ep, attr_id, raw, EZB_ZCL_STD_MANUF_CODE);
@@ -2164,33 +2791,43 @@ esp_err_t zigbee_coordinator_set_power_on_behavior(uint64_t ieee, const char *na
     return ESP_OK;
 }
 
-esp_err_t zigbee_coordinator_set_on_off(uint64_t ieee, bool on)
+static esp_err_t send_on_off_and_followup(zbgw_device_t *dev, bool on)
 {
-    zbgw_device_t *dev = device_registry_find_ieee(ieee);
-    if (!dev || !(dev->capabilities & ZBGW_CAP_ON_OFF)) {
-        ESP_LOGW(TAG, "set_on_off: unknown/unsupported ieee=%016llx", (unsigned long long)ieee);
-        return ESP_ERR_NOT_FOUND;
-    }
     uint8_t ep = dev->endpoint ? dev->endpoint : 1;
-    ezb_zcl_on_off_cmd_t cmd = {
-        .cmd_ctrl =
-            {
-                .dst_addr.addr_mode = EZB_ADDR_MODE_SHORT,
-                .src_ep = ZBGW_HA_GATEWAY_EP_ID,
-                .dst_addr.u.short_addr = dev->short_addr,
-                .dst_ep = ep,
-            },
-    };
+    bool have_live = refresh_dev_short(dev);
+    if (!have_live) {
+        s_pending_onoff = true;
+        s_pending_onoff_ieee = dev->ieee;
+        s_pending_onoff_on = on;
+        if (!s_refresh_waiting_zdo) {
+            request_live_nwk_addr(dev, true);
+        }
+    }
+    wifi_net_zigbee_tx_hold(ZBGW_WIFI_ZB_TX_HOLD_MS);
 
-    esp_zigbee_lock_acquire(portMAX_DELAY);
+    ezb_zcl_on_off_cmd_t cmd = {0};
+    cmd.cmd_ctrl.src_ep = ZBGW_HA_GATEWAY_EP_ID;
+    cmd.cmd_ctrl.dst_ep = ep;
+    if (have_live) {
+        cmd.cmd_ctrl.dst_addr.addr_mode = EZB_ADDR_MODE_SHORT;
+        cmd.cmd_ctrl.dst_addr.u.short_addr = dev->short_addr;
+    } else {
+        cmd.cmd_ctrl.dst_addr.addr_mode = EZB_ADDR_MODE_EXT;
+        cmd.cmd_ctrl.dst_addr.u.extended_addr.u64 = dev->ieee;
+    }
     ezb_err_t err = on ? ezb_zcl_on_off_on_cmd_req(&cmd) : ezb_zcl_on_off_off_cmd_req(&cmd);
-    esp_zigbee_lock_release();
     if (err != EZB_ERR_NONE) {
         ESP_LOGW(TAG, "On/Off cmd failed err=0x%x short=0x%04x ep=%u", (unsigned)err, dev->short_addr, ep);
+        set_device_reachable(dev->ieee, false);
         return ESP_FAIL;
     }
-    ha_discovery_publish_sensor_state(dev, "switch", on ? "ON" : "OFF");
-    ESP_LOGI(TAG, "On/Off cmd %s short=0x%04x ep=%u", on ? "ON" : "OFF", dev->short_addr, ep);
+    if (have_live) {
+        ha_discovery_publish_sensor_state(dev, "switch", on ? "ON" : "OFF");
+    } else {
+        set_device_reachable(dev->ieee, false);
+    }
+    ESP_LOGI(TAG, "On/Off cmd %s short=0x%04x ep=%u%s", on ? "ON" : "OFF", dev->short_addr, ep,
+             have_live ? "" : " (ieee dest, resolving)");
 
     power_scale_t *scale = power_scale_for_dev(dev, true);
     if (scale) {
@@ -2198,18 +2835,28 @@ esp_err_t zigbee_coordinator_set_on_off(uint64_t ieee, bool on)
         scale->switch_is_on = on;
     }
 
-    /* If we never learned power/energy clusters, interview now (no re-pair needed). */
     if (!(dev->capabilities & (ZBGW_CAP_POWER | ZBGW_CAP_ENERGY))) {
         ESP_LOGI(TAG, "Missing power/energy caps - starting interview short=0x%04x", dev->short_addr);
         find_clusters_on_device(dev->short_addr);
     } else if (!on) {
-        /* Final 0 W so HA / pie charts drop immediately (poll can lag with stale ActivePower). */
         publish_power_watts(dev, scale, 0.0f, "SwitchOffCmd");
-    } else {
-        /* Nudge a fresh power read on turn-on (helps when reporting is quiet). */
+    } else if (have_live) {
         power_poll_one(dev, NULL);
     }
     return ESP_OK;
+}
+
+esp_err_t zigbee_coordinator_set_on_off(uint64_t ieee, bool on)
+{
+    zbgw_device_t *dev = device_registry_find_ieee(ieee);
+    if (!dev || !(dev->capabilities & ZBGW_CAP_ON_OFF)) {
+        ESP_LOGW(TAG, "set_on_off: unknown/unsupported ieee=%016llx", (unsigned long long)ieee);
+        return ESP_ERR_NOT_FOUND;
+    }
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+    esp_err_t rc = send_on_off_and_followup(dev, on);
+    esp_zigbee_lock_release();
+    return rc;
 }
 
 esp_err_t zigbee_coordinator_remove_device(uint64_t ieee)

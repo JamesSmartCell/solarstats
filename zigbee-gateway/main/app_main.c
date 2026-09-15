@@ -121,6 +121,9 @@ static void zigbee_only_diag(void)
 
 void app_main(void)
 {
+#if !CONFIG_ZBGW_SERIAL_LOG
+    esp_log_level_set("*", ESP_LOG_NONE);
+#endif
 #if CONFIG_ZBGW_ZIGBEE_ONLY_DIAG
     ESP_LOGI(TAG, "ESP32-C6 Zigbee-only join diagnostic starting");
 #else

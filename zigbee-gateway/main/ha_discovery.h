@@ -8,3 +8,4 @@ esp_err_t ha_discovery_unpublish_device(uint64_t ieee);
 esp_err_t ha_discovery_publish_bridge(void);
 esp_err_t ha_discovery_publish_sensor_state(const zbgw_device_t *dev, const char *suffix, const char *value);
 esp_err_t ha_discovery_publish_binary_state(const zbgw_device_t *dev, const char *suffix, bool on);
+esp_err_t ha_discovery_publish_availability(uint64_t ieee, bool online);

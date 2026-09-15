@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -119,8 +120,8 @@ esp_err_t wifi_net_start(void)
     ESP_ERROR_CHECK(nvs_creds_get(&creds));
 
     wifi_config_t wifi_config = {0};
-    strncpy((char *)wifi_config.sta.ssid, creds.wifi_ssid, sizeof(wifi_config.sta.ssid));
-    strncpy((char *)wifi_config.sta.password, creds.wifi_pass, sizeof(wifi_config.sta.password));
+    memcpy(wifi_config.sta.ssid, creds.wifi_ssid, strnlen(creds.wifi_ssid, sizeof(wifi_config.sta.ssid)));
+    memcpy(wifi_config.sta.password, creds.wifi_pass, strnlen(creds.wifi_pass, sizeof(wifi_config.sta.password)));
     wifi_config.sta.threshold.authmode = creds.wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -231,4 +232,38 @@ void wifi_net_on_mqtt_down(void)
     (void)esp_wifi_set_ps(WIFI_PS_NONE);
     apply_tx_power_from_rssi();
     ESP_LOGI(TAG, "MQTT down - WiFi PS off, TX from RSSI");
+}
+
+static esp_timer_handle_t s_zb_tx_hold_timer;
+
+static void zigbee_tx_hold_end(void *arg)
+{
+    (void)arg;
+    if (!s_started || s_paused) {
+        return;
+    }
+    if (mqtt_bridge_is_connected()) {
+        (void)esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    }
+}
+
+void wifi_net_zigbee_tx_hold(uint32_t hold_ms)
+{
+    if (!s_started || s_paused) {
+        return;
+    }
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
+    if (!s_zb_tx_hold_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &zigbee_tx_hold_end,
+            .name = "wifi_zb_tx",
+        };
+        if (esp_timer_create(&args, &s_zb_tx_hold_timer) != ESP_OK) {
+            return;
+        }
+    }
+    esp_timer_stop(s_zb_tx_hold_timer);
+    if (hold_ms) {
+        (void)esp_timer_start_once(s_zb_tx_hold_timer, (uint64_t)hold_ms * 1000ULL);
+    }
 }

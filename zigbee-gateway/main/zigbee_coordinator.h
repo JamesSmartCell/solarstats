@@ -14,6 +14,7 @@ esp_err_t zigbee_coordinator_rediscover(void);
 void zigbee_coordinator_on_mqtt_connected(void);
 void zigbee_coordinator_on_mqtt_disconnected(void);
 void zigbee_coordinator_on_discovery_complete(void);
+void zigbee_coordinator_flush_discovery(void);
 bool zigbee_coordinator_network_ready(void);
 
 /* Dev pair-test helpers */

@@ -463,6 +463,7 @@ void setup_ap_run(void)
     ESP_ERROR_CHECK(httpd_register_err_handler(s_httpd, HTTPD_404_NOT_FOUND, http_404_error_handler));
 
     ESP_ERROR_CHECK(esp_wifi_start());
+    (void)esp_wifi_set_max_tx_power(40);
     /* C6 defaults to 11ax SoftAP. Phones then fail with "unsuccessful auth/assoc". */
     (void)esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY);
     uint8_t proto = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N;
@@ -476,6 +477,10 @@ void setup_ap_run(void)
     ESP_LOGI(TAG, "AP protocol set %s bitmap=0x%02x (11ax bit is 0x40)", esp_err_to_name(perr), now);
     ESP_ERROR_CHECK(esp_wifi_stop());
     ESP_ERROR_CHECK(esp_wifi_start());
+    /* Default SoftAP is 20 dBm. On USB FireBeetle that browns out as soon as a
+     * phone joins and the captive portal starts talking. Phones are close; 10 dBm is enough. */
+    (void)esp_wifi_set_max_tx_power(40);
+    ESP_LOGI(TAG, "AP TX capped ~10 dBm");
     ESP_LOGI(TAG, "Setup portal ready on http://%s (captive)", SETUP_AP_IP);
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(10000));

@@ -12,6 +12,33 @@
 
 static const char *TAG = "ha_disc";
 
+static void device_availability_topic(uint64_t ieee, char *out, size_t out_len)
+{
+    char ieee_str[20];
+    device_registry_ieee_to_str(ieee, ieee_str, sizeof(ieee_str));
+    snprintf(out, out_len, "%s/%s/availability", zbgw_topic_prefix(), ieee_str);
+}
+
+static void add_availability(cJSON *root, const zbgw_device_t *dev)
+{
+    cJSON *list = cJSON_AddArrayToObject(root, "availability");
+    cJSON *gw = cJSON_CreateObject();
+    cJSON_AddStringToObject(gw, "topic", zbgw_topic_status());
+    cJSON_AddStringToObject(gw, "payload_available", "online");
+    cJSON_AddStringToObject(gw, "payload_not_available", "offline");
+    cJSON_AddItemToArray(list, gw);
+    if (dev && dev->ieee) {
+        char topic[96];
+        device_availability_topic(dev->ieee, topic, sizeof(topic));
+        cJSON *node = cJSON_CreateObject();
+        cJSON_AddStringToObject(node, "topic", topic);
+        cJSON_AddStringToObject(node, "payload_available", "online");
+        cJSON_AddStringToObject(node, "payload_not_available", "offline");
+        cJSON_AddItemToArray(list, node);
+    }
+    cJSON_AddStringToObject(root, "availability_mode", "all");
+}
+
 static void add_device_object(cJSON *root, const zbgw_device_t *dev)
 {
     char ieee[20];
@@ -73,9 +100,7 @@ static esp_err_t publish_sensor(const zbgw_device_t *dev, const char *suffix, co
     if (state_class) {
         cJSON_AddStringToObject(root, "state_class", state_class);
     }
-    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
-    cJSON_AddStringToObject(root, "payload_available", "online");
-    cJSON_AddStringToObject(root, "payload_not_available", "offline");
+    add_availability(root, dev);
     add_device_object(root, dev);
     return publish_config("sensor", object_id, root);
 }
@@ -103,9 +128,7 @@ static esp_err_t publish_binary(const zbgw_device_t *dev, const char *suffix, co
     if (device_class) {
         cJSON_AddStringToObject(root, "device_class", device_class);
     }
-    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
-    cJSON_AddStringToObject(root, "payload_available", "online");
-    cJSON_AddStringToObject(root, "payload_not_available", "offline");
+    add_availability(root, dev);
     add_device_object(root, dev);
     return publish_config("binary_sensor", object_id, root);
 }
@@ -137,9 +160,7 @@ static esp_err_t publish_switch(const zbgw_device_t *dev)
     cJSON_AddStringToObject(root, "state_on", "ON");
     cJSON_AddStringToObject(root, "state_off", "OFF");
     cJSON_AddBoolToObject(root, "optimistic", false);
-    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
-    cJSON_AddStringToObject(root, "payload_available", "online");
-    cJSON_AddStringToObject(root, "payload_not_available", "offline");
+    add_availability(root, dev);
     add_device_object(root, dev);
     return publish_config("switch", object_id, root);
 }
@@ -170,9 +191,7 @@ static esp_err_t publish_power_on_select(const zbgw_device_t *dev)
     cJSON_AddItemToArray(opts, cJSON_CreateString("power_off"));
     cJSON_AddItemToArray(opts, cJSON_CreateString("power_on"));
     cJSON_AddItemToArray(opts, cJSON_CreateString("last"));
-    cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
-    cJSON_AddStringToObject(root, "payload_available", "online");
-    cJSON_AddStringToObject(root, "payload_not_available", "offline");
+    add_availability(root, dev);
     cJSON_AddStringToObject(root, "icon", "mdi:power-settings");
     add_device_object(root, dev);
     return publish_config("select", object_id, root);
@@ -233,8 +252,8 @@ esp_err_t ha_discovery_publish_device(const zbgw_device_t *dev)
     }
     if (dev->capabilities & ZBGW_CAP_ON_OFF) {
         err |= publish_switch(dev);
-    }
-    if (dev->capabilities & ZBGW_CAP_POWER_ON_BEHAVIOR) {
+        /* Tuya plugs often refuse a read of 0x8002/0x4003, so do not wait for
+         * ZBGW_CAP_POWER_ON_BEHAVIOR before advertising the select. */
         err |= publish_power_on_select(dev);
     }
     if (dev->capabilities & ZBGW_CAP_POWER) {
@@ -285,7 +304,7 @@ esp_err_t ha_discovery_unpublish_device(uint64_t ieee)
     /* Clear retained state topics so HA does not revive stale values. */
     static const char *suffixes[] = {"temperature", "humidity", "contact", "occupancy", "smoke", "tamper",
                                      "test",        "battery_low", "battery", "switch",  "power", "energy",
-                                     "power_on_behavior"};
+                                     "power_on_behavior", "availability"};
     for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
         snprintf(state_topic, sizeof(state_topic), "%s/%s/%s", zbgw_topic_prefix(), ieee_str, suffixes[i]);
         err |= mqtt_bridge_publish(state_topic, "", 1, true);
@@ -308,6 +327,7 @@ esp_err_t ha_discovery_publish_bridge(void)
     cJSON_AddStringToObject(root, "payload_on", "ON");
     cJSON_AddStringToObject(root, "payload_off", "OFF");
     cJSON_AddBoolToObject(root, "optimistic", false);
+    cJSON_AddBoolToObject(root, "retain", false);
     cJSON_AddStringToObject(root, "availability_topic", zbgw_topic_status());
     cJSON_AddStringToObject(root, "payload_available", "online");
     cJSON_AddStringToObject(root, "payload_not_available", "offline");
@@ -341,4 +361,14 @@ esp_err_t ha_discovery_publish_sensor_state(const zbgw_device_t *dev, const char
 esp_err_t ha_discovery_publish_binary_state(const zbgw_device_t *dev, const char *suffix, bool on)
 {
     return ha_discovery_publish_sensor_state(dev, suffix, on ? "ON" : "OFF");
+}
+
+esp_err_t ha_discovery_publish_availability(uint64_t ieee, bool online)
+{
+    if (!ieee) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char topic[96];
+    device_availability_topic(ieee, topic, sizeof(topic));
+    return mqtt_bridge_publish(topic, online ? "online" : "offline", 1, true);
 }

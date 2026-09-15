@@ -68,13 +68,13 @@ menu "Zigbee Gateway Configuration"
             Sent as X-ZBGW-Diag. Must match solarstats ZBGW_DIAG_TOKEN.
 
     config ZBGW_OTA_CHECK_ON_BOOT
-        bool "Check the OTA URL ~90s after Wi-Fi is up"
-        default n
+        bool "Auto-check OTA (~90s after Wi-Fi, then every 12h)"
+        default y
         help
-            Compare the remote image version to this build. No flash if
-            they match. A different version is installed even if older, so
-            leave this off until the hosted .bin is this firmware or newer.
-            Publish ON to zigbee-gw/bridge/ota to force a check.
+            Compare the hosted image version to this build using dotted
+            numbers (1.2.10 > 1.2.9). Flash only if the remote version is
+            higher. Same or older images are skipped. MQTT …/bridge/ota
+            still forces a check.
 
     config ZBGW_MQTT_TOPIC_PREFIX
         string "MQTT topic prefix"
@@ -101,7 +101,10 @@ menu "Zigbee Gateway Configuration"
     config ZBGW_PERMIT_JOIN_SECONDS
         int "Permit-join window (seconds)"
         range 1 254
-        default 180
+        default 30
+        help
+            Exclusive pairing window. Wi-Fi is down for this time, or until
+            a device announces — whichever is first.
 
     config ZBGW_LED_GPIO
         int "Status LED GPIO"
@@ -142,6 +145,14 @@ menu "Zigbee Gateway Configuration"
         depends on ZBGW_PAIR_BEFORE_WIFI
         range 30 254
         default 180
+
+    config ZBGW_SERIAL_LOG
+        bool "USB serial logging (debug build)"
+        default n
+        help
+            Off for a release image: ESP_LOG is compiled out / muted.
+            Anonymous diagnostics HTTP still runs. Enable for USB
+            monitor (idf.py -DZBGW_DEBUG=1 reconfigure).
 
     config ZBGW_DEV_PAIR_TEST
         bool "Run pair+toggle soak test before WiFi"

@@ -22,3 +22,5 @@ bool wifi_net_is_paused(void);
 /* No modem sleep while MQTT is down; TX follows RSSI. Relax PS after MQTT is up. */
 void wifi_net_on_mqtt_up(void);
 void wifi_net_on_mqtt_down(void);
+/* Drop modem sleep so 802.15.4 can TX; restore MIN_MODEM after hold_ms. */
+void wifi_net_zigbee_tx_hold(uint32_t hold_ms);

@@ -29,6 +29,11 @@ Write-Host "Ready."
 Write-Host "  python = $py"
 Write-Host "  IDF_PYTHON_ENV_PATH = $env:IDF_PYTHON_ENV_PATH"
 Write-Host "  cmake = $((Get-Command cmake -ErrorAction SilentlyContinue).Source)"
+if ($env:ZBGW_DEBUG -eq "1") {
+    Write-Host "  ZBGW_DEBUG=1 (USB serial logging)"
+} else {
+    Write-Host "  Release profile (no serial log; diag only). `$env:ZBGW_DEBUG=1 then idf.py reconfigure for USB logs."
+}
 
 if ($py -notmatch 'idf5\.5_py3\.12_env') {
     Write-Warning "Expected idf5.5_py3.12_env but got another Python. Close this terminal and run: . .\env.ps1"
