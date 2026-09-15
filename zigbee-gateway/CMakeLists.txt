@@ -39,6 +39,6 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/sdkconfig")
 endif()
 
 set(COMPONENTS main)
-set(PROJECT_VER "1.2.24")
+set(PROJECT_VER "1.2.25")
 
 project(zigbee-gateway)

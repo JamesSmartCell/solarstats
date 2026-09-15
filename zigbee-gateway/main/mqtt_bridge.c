@@ -299,8 +299,12 @@ static void rediscover_device_paced(zbgw_device_t *dev, void *ctx)
     }
     ESP_LOGI(TAG, "Discovery ieee=%016llx caps=0x%lx", (unsigned long long)dev->ieee,
              (unsigned long)dev->capabilities);
-    (void)ha_discovery_publish_device(dev);
-    dev->discovery_published = true;
+    if (ha_discovery_publish_device(dev) == ESP_OK) {
+        dev->discovery_published = true;
+    } else {
+        dev->discovery_published = false;
+        ESP_LOGW(TAG, "Discovery publish failed ieee=%016llx", (unsigned long long)dev->ieee);
+    }
     vTaskDelay(pdMS_TO_TICKS(350));
 }
 

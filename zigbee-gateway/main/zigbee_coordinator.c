@@ -111,6 +111,16 @@ static void set_device_reachable(uint64_t ieee, bool online)
         ESP_LOGW(TAG, "Device unavailable ieee=%016llx", (unsigned long long)ieee);
     }
 }
+
+static bool reach_is_offline(uint64_t ieee)
+{
+    for (int i = 0; i < ZBGW_MAX_DEVICES; ++i) {
+        if (s_reach[i].ieee == ieee) {
+            return s_reach[i].online == 0;
+        }
+    }
+    return false;
+}
 static uint16_t s_ias_enroll_short;
 static uint8_t s_pending_commission_mode;
 
@@ -2269,7 +2279,11 @@ static void publish_from_report(uint16_t short_addr, uint8_t src_ep, uint16_t cl
     if (!dev || !value) {
         return;
     }
+    bool was_offline = reach_is_offline(dev->ieee);
     set_device_reachable(dev->ieee, true);
+    if (was_offline) {
+        mark_ha_broadcast(dev);
+    }
 
     char buf[32];
     if (cluster_id == EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT &&

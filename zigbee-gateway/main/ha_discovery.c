@@ -67,7 +67,7 @@ static esp_err_t publish_config(const char *component, const char *object_id, cJ
         return ESP_ERR_NO_MEM;
     }
 
-    esp_err_t err = mqtt_bridge_publish(topic, payload, 0, true);
+    esp_err_t err = mqtt_bridge_publish(topic, payload, 1, true);
     cJSON_free(payload);
     return err;
 }
