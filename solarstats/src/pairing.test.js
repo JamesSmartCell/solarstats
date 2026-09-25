@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openDatabase } from "./db.js";
-import { claimPairing, pollPairing, startPairing } from "./pairing.js";
-import { loadSites } from "./sites.js";
+import { checkSiteName, claimPairing, pollPairing, startPairing } from "./pairing.js";
+import { isSiteAdmin, loadSites } from "./sites.js";
 
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solarstats-pair-"));
@@ -18,7 +18,7 @@ function fixture() {
 test("code claim creates a site and reveals the ingest secret once", () => {
   const { dir, dbPath, authDb, sites } = fixture();
   const pollToken = "poll-token-0123456789abcdef";
-  startPairing(authDb, {
+  startPairing(authDb, sites, {
     code: "AB23Z",
     name: "Rivermill",
     email: "owner@example.com",
@@ -51,6 +51,14 @@ test("code claim creates a site and reveals the ingest secret once", () => {
   const user = authDb.prepare("SELECT status, role FROM users WHERE email = ?").get("owner@example.com");
   assert.equal(user.status, "approved");
   assert.equal(user.role, "user");
+  assert.equal(isSiteAdmin(sites.get("rivermill"), "owner@example.com"), true);
+  assert.equal(isSiteAdmin(sites.get("rivermill"), "other@example.com"), false);
+  assert.equal(isSiteAdmin(sites.get("home"), "owner@example.com"), false);
+  assert.throws(
+    () => checkSiteName(authDb, sites, "Rivermill"),
+    (err) => err.message === "name_taken",
+  );
+  assert.equal(checkSiteName(authDb, sites, "Other House").slug, "other-house");
   for (const site of reloaded.values()) site.db.close();
   for (const site of sites.values()) site.db.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -62,7 +70,7 @@ test("unknown and expired codes are rejected", () => {
     () => claimPairing(authDb, sites, dbPath, { code: "ZZZZZ" }),
     (err) => err.message === "code_not_found",
   );
-  startPairing(authDb, {
+  startPairing(authDb, sites, {
     code: "H3K7M",
     name: "Shed",
     email: "shed@example.com",

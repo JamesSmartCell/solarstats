@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getMeta, openDatabase, setMeta } from "./db.js";
+import { getAdminEmail, getMeta, isAdminEmail, openDatabase, setMeta } from "./db.js";
 
 const RESERVED = new Set([
   "login",
@@ -22,6 +22,14 @@ function envName(slug, suffix) {
 
 export function isReservedSlug(slug) {
   return RESERVED.has(String(slug || "").toLowerCase());
+}
+
+/** Home admin is ADMIN_EMAIL. Every other site uses the email stored for that site. */
+export function isSiteAdmin(site, email) {
+  if (!site || !email) return false;
+  if (site.default) return isAdminEmail(email);
+  const admin = String(site.adminEmail || "").trim().toLowerCase();
+  return Boolean(admin) && admin === String(email).trim().toLowerCase();
 }
 
 export function ensureSiteRegistry(authDb) {
@@ -88,6 +96,7 @@ export function loadSites({ authDb, defaultDbPath, defaultSecret }) {
     slug: "home",
     name: process.env.SITE_HOME_NAME || "Home",
     secret: defaultSecret || "",
+    adminEmail: getAdminEmail() || null,
     db: authDb,
     dbPath: defaultDbPath,
     default: true,
@@ -112,6 +121,7 @@ export function loadSites({ authDb, defaultDbPath, defaultSecret }) {
       slug,
       name: process.env[envName(slug, "NAME")] || slug,
       secret,
+      adminEmail: String(process.env[envName(slug, "ADMIN")] || "").trim().toLowerCase() || null,
       db: openExtraSite(siteDbPath(defaultDbPath, slug)),
       dbPath: siteDbPath(defaultDbPath, slug),
       default: false,

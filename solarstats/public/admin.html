@@ -18,17 +18,17 @@
       <header class="top">
         <div>
           <h1 class="brand">Solar<span>stats</span> admin</h1>
-          <p class="sub">Approve logins and registration options</p>
+          <p class="sub" id="adminSub">Approve logins and registration options</p>
         </div>
         <div class="status">
-          <a class="toolbar-btn" href="/">Dashboard</a>
+          <a class="toolbar-btn" href="/" id="dashLink">Dashboard</a>
           <form method="post" action="/logout" style="display: inline">
             <button type="submit" class="toolbar-btn">Sign out</button>
           </form>
         </div>
       </header>
 
-      <section class="panel admin-panel">
+      <section class="panel admin-panel" data-home-admin>
         <h2>Registration settings</h2>
         <label class="toggle-row">
           <input type="checkbox" id="allowNewAccounts" />
@@ -66,7 +66,7 @@
         <p class="hint" id="fieldsSaved" hidden>Binding saved</p>
       </section>
 
-      <section class="panel admin-panel">
+      <section class="panel admin-panel" data-home-admin>
         <h2>Zigbee gateways</h2>
         <p class="hint">
           Anonymous diagnostics from opted-in C6 gateways.
@@ -114,7 +114,7 @@
         </div>
       </section>
 
-      <section class="panel admin-panel">
+      <section class="panel admin-panel" data-home-admin>
         <h2>Users</h2>
         <div class="table-wrap">
           <table class="admin-table" id="usersTable">

@@ -34,25 +34,33 @@ export function normalizeCode(code) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-function slugify(name) {
+export function slugFromName(name) {
   const base = String(name || "")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 32);
-  if (!base || base === "home" || isReservedSlug(base)) return "site";
+  if (!base || base === "home" || isReservedSlug(base)) return "";
   return base;
 }
 
-function uniqueSlug(sites, name) {
-  const base = slugify(name);
-  if (!sites.has(base)) return base;
-  for (let n = 2; n < 1000; n += 1) {
-    const candidate = `${base}-${n}`.slice(0, 40);
-    if (!sites.has(candidate) && !isReservedSlug(candidate)) return candidate;
-  }
-  throw Object.assign(new Error("slug_exhausted"), { status: 409 });
+/** The typed name must map to a free address. Taken names are refused, not renamed. */
+export function checkSiteName(authDb, sites, name, now = Date.now()) {
+  ensurePairingTables(authDb);
+  const displayName = String(name || "").trim();
+  if (!displayName || displayName.length > 80) fail(400, "invalid_name");
+  const slug = slugFromName(displayName);
+  if (!slug) fail(400, "invalid_name");
+  if (sites.has(slug)) fail(409, "name_taken");
+  const pending = authDb
+    .prepare(
+      `SELECT id FROM pending_links
+       WHERE slug = ? AND status = 'pending' AND expires_at > ?`,
+    )
+    .get(slug, now);
+  if (pending) fail(409, "name_taken");
+  return { ok: true, name: displayName, slug };
 }
 
 function fail(status, message) {
@@ -61,12 +69,11 @@ function fail(status, message) {
   throw err;
 }
 
-export function startPairing(authDb, { code, name, email, pollToken, now = Date.now() }) {
+export function startPairing(authDb, sites, { code, name, email, pollToken, now = Date.now() }) {
   ensurePairingTables(authDb);
   const normalized = normalizeCode(code);
   if (!CODE_RE.test(normalized)) fail(400, "invalid_code");
-  const displayName = String(name || "").trim();
-  if (!displayName || displayName.length > 80) fail(400, "invalid_name");
+  const { name: displayName, slug } = checkSiteName(authDb, sites, name, now);
   const adminEmail = String(email || "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) fail(400, "invalid_email");
   const token = String(pollToken || "").trim();
@@ -84,10 +91,10 @@ export function startPairing(authDb, { code, name, email, pollToken, now = Date.
   authDb
     .prepare(
       `INSERT INTO pending_links
-        (code_hash, poll_token_hash, name, email, status, created_at, expires_at)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+        (code_hash, poll_token_hash, name, email, slug, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
     )
-    .run(codeHash, hashValue(token), displayName, adminEmail, now, now + PAIR_TTL_MS);
+    .run(codeHash, hashValue(token), displayName, adminEmail, slug, now, now + PAIR_TTL_MS);
 
   return { ok: true, expiresAt: now + PAIR_TTL_MS };
 }
@@ -109,7 +116,8 @@ export function claimPairing(authDb, sites, defaultDbPath, { code, now = Date.no
     .get(hashValue(normalized));
   if (!row || row.expires_at <= now) fail(400, "code_not_found");
 
-  const slug = uniqueSlug(sites, row.name);
+  const slug = row.slug || slugFromName(row.name);
+  if (!slug || sites.has(slug)) fail(409, "name_taken");
   const secret = crypto.randomBytes(32).toString("hex");
   const site = attachLinkedSite(sites, authDb, defaultDbPath, {
     slug,

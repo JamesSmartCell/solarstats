@@ -760,10 +760,11 @@ function connectWs() {
 }
 
 async function loadMe() {
-  const res = await fetch("/api/me");
+  const res = await fetch(withSite("/api/me"));
   if (!res.ok) return;
   const me = await res.json();
   if (!els.adminLink) return;
+  els.adminLink.href = SITE === "home" ? "/admin" : `/admin?site=${encodeURIComponent(SITE)}`;
   els.adminLink.hidden = !me.isAdmin;
 }
 

@@ -54,7 +54,7 @@ import {
   verifyAuthentication,
   verifyRegistration,
 } from "./passkeys.js";
-import { listPublicSites, loadSites } from "./sites.js";
+import { isSiteAdmin, listPublicSites, loadSites } from "./sites.js";
 import {
   enqueueZbgwRestart,
   listZbgwEvents,
@@ -63,7 +63,7 @@ import {
   receiveZbgwDiag,
 } from "./zbgw_diag.js";
 import { listHaFields, setFieldBinding } from "./ha_fields.js";
-import { claimPairing, pollPairing, startPairing } from "./pairing.js";
+import { checkSiteName, claimPairing, pollPairing, startPairing } from "./pairing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -290,6 +290,19 @@ function requireAdmin(req, res, next) {
     if (!isAdminEmail(req.user.email)) {
       return res.status(403).json({ error: "admin_only" });
     }
+    req.site = sites.get("home");
+    return next();
+  });
+}
+
+function requireSiteAdmin(req, res, next) {
+  requireApproved(req, res, () => {
+    const site = siteFromRequest(req);
+    if (!site) return res.status(404).json({ error: "unknown_site" });
+    if (!isSiteAdmin(site, req.user.email)) {
+      return res.status(403).json({ error: "admin_only" });
+    }
+    req.site = site;
     return next();
   });
 }
@@ -391,7 +404,12 @@ app.get("/pending", (req, res) => {
   res.sendFile(path.join(publicDir, "pending.html"));
 });
 
-app.get("/admin", requireAdmin, (_req, res) => {
+app.get("/admin", requireApproved, (req, res) => {
+  const site = siteFromRequest(req);
+  if (!site) return res.status(404).type("text").send("Unknown site");
+  if (!isSiteAdmin(site, req.user.email)) {
+    return res.status(403).type("text").send("Admin only for this home");
+  }
   res.sendFile(path.join(publicDir, "admin.html"));
 });
 
@@ -498,7 +516,7 @@ app.get("/api/me", (req, res) => {
     role: user.role,
     status: user.status,
     displayName: user.display_name,
-    isAdmin: isAdminEmail(user.email),
+    isAdmin: isSiteAdmin(siteFromRequest(req) || sites.get("home"), user.email),
     hasPasskeyCookie: hasPasskeyCookie(req) || listPasskeysForUser(db, user.id).length > 0,
     settings: {
       allowPasskeyEnrollment: settings.allowPasskeyEnrollment,
@@ -649,12 +667,16 @@ app.delete("/auth/passkey/:id", requireApproved, (req, res) => {
 
 // --- Admin API ---
 
-app.get("/api/admin/users", requireAdmin, (_req, res) => {
+app.get("/api/admin/users", requireSiteAdmin, (req, res) => {
+  const sdb = req.site.db;
+  const homeAdmin = isAdminEmail(req.user.email);
   res.json({
-    users: listUsers(db),
-    settings: getAuthSettings(db),
-    loadConfig: getLoadConfig(db),
-    pieRows: getPieAdminRows(db),
+    users: homeAdmin ? listUsers(db) : [],
+    settings: homeAdmin ? getAuthSettings(db) : null,
+    isHomeAdmin: homeAdmin,
+    site: { slug: req.site.slug, name: req.site.name },
+    loadConfig: getLoadConfig(sdb),
+    pieRows: getPieAdminRows(sdb),
   });
 });
 
@@ -673,63 +695,71 @@ app.post("/api/admin/users/:id/status", requireAdmin, (req, res) => {
   res.json({ user });
 });
 
-app.post("/api/admin/settings", requireAdmin, (req, res) => {
-  const settings = setAuthSettings(db, {
-    allowNewAccounts: req.body?.allowNewAccounts,
-    allowPasskeyEnrollment: req.body?.allowPasskeyEnrollment,
-  });
-  let loadConfig = getLoadConfig(db);
+app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
+  const sdb = req.site.db;
+  const slug = req.site.slug;
+  let settings = getAuthSettings(db);
+  if (
+    isAdminEmail(req.user.email) &&
+    (req.body?.allowNewAccounts != null || req.body?.allowPasskeyEnrollment != null)
+  ) {
+    settings = setAuthSettings(db, {
+      allowNewAccounts: req.body?.allowNewAccounts,
+      allowPasskeyEnrollment: req.body?.allowPasskeyEnrollment,
+    });
+  }
+  let loadConfig = getLoadConfig(sdb);
   if (req.body?.loadSources) {
-    setLoadSources(db, req.body.loadSources);
-    loadConfig = getLoadConfig(db);
-    broadcast({ type: "loadConfig", loadConfig });
+    setLoadSources(sdb, req.body.loadSources);
+    loadConfig = getLoadConfig(sdb);
+    broadcast({ type: "loadConfig", loadConfig }, slug);
   }
   if (req.body?.pieExtra) {
     const entityId = String(req.body.pieExtra.entityId || req.body.pieExtra.key || "").trim();
     if (entityId) {
-      setPieExtra(db, entityId, !!req.body.pieExtra.onPie);
-      loadConfig = getLoadConfig(db);
-      broadcast({ type: "loadConfig", loadConfig });
+      setPieExtra(sdb, entityId, !!req.body.pieExtra.onPie);
+      loadConfig = getLoadConfig(sdb);
+      broadcast({ type: "loadConfig", loadConfig }, slug);
     }
   }
   if (req.body?.pieColor) {
     try {
-      setPieColor(db, req.body.pieColor.key || req.body.pieColor.entityId, req.body.pieColor.color);
-      loadConfig = getLoadConfig(db);
-      broadcast({ type: "loadConfig", loadConfig });
+      setPieColor(sdb, req.body.pieColor.key || req.body.pieColor.entityId, req.body.pieColor.color);
+      loadConfig = getLoadConfig(sdb);
+      broadcast({ type: "loadConfig", loadConfig }, slug);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message || "colour_failed" });
     }
   }
   try {
     if (req.body?.pieMerge) {
-      addPieMerge(db, req.body.pieMerge.parentKey, req.body.pieMerge.childKey);
-      loadConfig = getLoadConfig(db);
-      broadcast({ type: "loadConfig", loadConfig });
+      addPieMerge(sdb, req.body.pieMerge.parentKey, req.body.pieMerge.childKey);
+      loadConfig = getLoadConfig(sdb);
+      broadcast({ type: "loadConfig", loadConfig }, slug);
     }
     if (req.body?.pieUnmerge) {
-      removePieMerge(db, req.body.pieUnmerge.childKey);
-      loadConfig = getLoadConfig(db);
-      broadcast({ type: "loadConfig", loadConfig });
+      removePieMerge(sdb, req.body.pieUnmerge.childKey);
+      loadConfig = getLoadConfig(sdb);
+      broadcast({ type: "loadConfig", loadConfig }, slug);
     }
   } catch (err) {
     const status = err.status || 400;
     return res.status(status).json({ error: err.message || "merge_failed" });
   }
-  res.json({ settings, loadConfig, pieRows: getPieAdminRows(db) });
+  res.json({ settings, loadConfig, pieRows: getPieAdminRows(sdb) });
 });
 
-app.get("/api/admin/devices", requireAdmin, (_req, res) => {
-  res.json({ devices: listAllDevices(db) });
+app.get("/api/admin/devices", requireSiteAdmin, (req, res) => {
+  res.json({ devices: listAllDevices(req.site.db) });
 });
 
-app.get("/api/admin/fields", requireAdmin, (_req, res) => {
-  res.json(listHaFields(db));
+app.get("/api/admin/fields", requireSiteAdmin, (req, res) => {
+  res.json(listHaFields(req.site.db));
 });
 
-app.post("/api/admin/fields/:key", requireAdmin, (req, res) => {
+app.post("/api/admin/fields/:key", requireSiteAdmin, (req, res) => {
   try {
-    res.json(setFieldBinding(db, req.params.key, req.body?.entityId || req.body?.entity_id));
+    res.json(setFieldBinding(req.site.db, req.params.key, req.body?.entityId || req.body?.entity_id));
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || "bind_failed" });
   }
@@ -811,14 +841,14 @@ app.post("/api/diag/zbgw", authorizeZbgwDiag, rateLimitZbgwDiag, (req, res) => {
   }
 });
 
-app.post("/api/admin/devices/:entityId/acl", requireAdmin, (req, res) => {
+app.post("/api/admin/devices/:entityId/acl", requireSiteAdmin, (req, res) => {
   const entityId = decodeURIComponent(req.params.entityId);
-  const device = setDeviceAcl(db, entityId, {
+  const device = setDeviceAcl(req.site.db, entityId, {
     allowUsers: req.body?.allowUsers,
     allowAdmin: req.body?.allowAdmin,
   });
   if (!device) return res.status(404).json({ error: "not_found" });
-  broadcastDevices();
+  broadcastDevices(req.site);
   res.json({ device });
 });
 
@@ -828,13 +858,25 @@ app.get("/connect", (_req, res) => {
   res.sendFile(path.join(publicDir, "connect.html"));
 });
 
+app.post("/api/pair/name", (req, res) => {
+  const ip = req.ip || "unknown";
+  if (!allowPairHit(`name:${ip}`, 30)) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  try {
+    res.json(checkSiteName(db, sites, req.body?.name));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "pair_failed" });
+  }
+});
+
 app.post("/api/pair/start", (req, res) => {
   const ip = req.ip || "unknown";
   if (!allowPairHit(`start:${ip}`, 12)) {
     return res.status(429).json({ error: "rate_limited" });
   }
   try {
-    res.json(startPairing(db, req.body || {}));
+    res.json(startPairing(db, sites, req.body || {}));
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || "pair_failed" });
   }
@@ -894,7 +936,7 @@ app.get("/api/history", requireApproved, requireSite, (req, res) => {
 
 app.get("/api/devices", requireApproved, requireSite, (req, res) => {
   res.json({
-    devices: listDevicesForViewer(req.site.db, { isAdmin: isAdminEmail(req.user.email) }),
+    devices: listDevicesForViewer(req.site.db, { isAdmin: isSiteAdmin(req.site, req.user.email) }),
   });
 });
 
@@ -909,7 +951,7 @@ app.post("/api/devices/:entityId/toggle", requireApproved, requireSite, (req, re
     return res.status(400).json({ error: "not_toggleable" });
   }
 
-  const admin = isAdminEmail(req.user.email);
+  const admin = isSiteAdmin(req.site, req.user.email);
   const allowed =
     device.allow_users === 1 || (admin && device.allow_admin === 1);
   if (!allowed) return res.status(403).json({ error: "forbidden" });
@@ -1007,7 +1049,7 @@ function broadcastDevices(site) {
       JSON.stringify({
         type: "devices",
         devices: listDevicesForViewer(sdb, {
-          isAdmin: isAdminEmail(user.email),
+          isAdmin: isSiteAdmin(site, user.email),
         }),
       }),
     );
@@ -1059,7 +1101,7 @@ wss.on("connection", (socket) => {
       loadsPowerW: history.loadsPowerW,
       loadConfig: getLoadConfig(sdb),
       devices: user
-        ? listDevicesForViewer(sdb, { isAdmin: isAdminEmail(user.email) })
+        ? listDevicesForViewer(sdb, { isAdmin: isSiteAdmin(site, user.email) })
         : [],
     }),
   );

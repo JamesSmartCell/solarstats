@@ -1,13 +1,21 @@
 import { formatHaState, isSensorDomain, stateTone } from "./ha-display.js";
 
+const SITE = new URLSearchParams(location.search).get("site") || "home";
+
+function adminPath(path) {
+  const u = new URL(path, location.origin);
+  if (SITE && SITE !== "home") u.searchParams.set("site", SITE);
+  return `${u.pathname}${u.search}`;
+}
+
 let selectedGateway = "";
 
 async function load() {
   const [usersRes, devicesRes, zbgwRes, fieldsRes, fwRes] = await Promise.all([
-    fetch("/api/admin/users"),
-    fetch("/api/admin/devices"),
+    fetch(adminPath("/api/admin/users")),
+    fetch(adminPath("/api/admin/devices")),
     fetch(zbgwUrl()),
-    fetch("/api/admin/fields"),
+    fetch(adminPath("/api/admin/fields")),
     fetch("/api/admin/fw"),
   ]);
 
@@ -18,8 +26,15 @@ async function load() {
   if (!usersRes.ok) throw new Error(`users HTTP ${usersRes.status}`);
 
   const data = await usersRes.json();
-  renderSettings(data.settings);
-  renderUsers(data.users);
+  const dash = document.getElementById("dashLink");
+  if (dash) dash.href = data.site?.slug && data.site.slug !== "home" ? `/${data.site.slug}` : "/";
+  const sub = document.getElementById("adminSub");
+  if (sub && data.site?.name) sub.textContent = `${data.site.name} · devices, sensors, and the daily pie`;
+  document.querySelectorAll("[data-home-admin]").forEach((el) => {
+    el.hidden = !data.isHomeAdmin;
+  });
+  if (data.settings) renderSettings(data.settings);
+  if (data.isHomeAdmin) renderUsers(data.users);
   renderPieRows(data.pieRows || data.loadConfig || []);
 
   if (devicesRes.ok) {
@@ -115,7 +130,7 @@ function renderHaFields(data) {
 }
 
 async function bindField(key, entityId) {
-  const res = await fetch(`/api/admin/fields/${encodeURIComponent(key)}`, {
+  const res = await fetch(adminPath(`/api/admin/fields/${encodeURIComponent(key)}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ entityId }),
@@ -140,7 +155,7 @@ function renderSettings(settings) {
   allowPk.checked = !!settings.allowPasskeyEnrollment;
 
   async function save() {
-    const res = await fetch("/api/admin/settings", {
+    const res = await fetch(adminPath("/api/admin/settings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -353,7 +368,7 @@ function renderPieRows(rows) {
 }
 
 async function saveLoadSource(key, source) {
-  const res = await fetch("/api/admin/settings", {
+  const res = await fetch(adminPath("/api/admin/settings"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ loadSources: { [key]: source } }),
@@ -367,7 +382,7 @@ async function saveLoadSource(key, source) {
 }
 
 async function postPieSettings(body) {
-  const res = await fetch("/api/admin/settings", {
+  const res = await fetch(adminPath("/api/admin/settings"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -505,7 +520,7 @@ function renderDeviceTable(devices, tableId, emptyId) {
 async function setDeviceExposure(entityId, exposure) {
   const allowUsers = exposure === "user";
   const allowAdmin = exposure === "user" || exposure === "admin";
-  const res = await fetch(`/api/admin/devices/${encodeURIComponent(entityId)}/acl`, {
+  const res = await fetch(adminPath(`/api/admin/devices/${encodeURIComponent(entityId)}/acl`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ allowUsers, allowAdmin }),
