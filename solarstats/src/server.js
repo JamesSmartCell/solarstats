@@ -63,6 +63,7 @@ import {
   receiveZbgwDiag,
 } from "./zbgw_diag.js";
 import { listHaFields, setFieldBinding } from "./ha_fields.js";
+import { claimPairing, pollPairing, startPairing } from "./pairing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -319,6 +320,36 @@ function authorizeSiteIngest(req, res, next) {
   return authorizeBearer(site.secret, req, res, next);
 }
 
+function takeAfterLogin(req) {
+  const after = req.session?.afterLogin;
+  delete req.session.afterLogin;
+  if (after === "create_passkey") return "/setup-passkey";
+  if (typeof after === "string" && after.startsWith("/")) {
+    const site = getSite(after.slice(1));
+    if (site && !site.default) return `/${site.slug}`;
+  }
+  return "/";
+}
+
+function redirectAfterLogin(req, res) {
+  return res.redirect(takeAfterLogin(req));
+}
+
+const pairHits = new Map();
+
+function allowPairHit(key, limit) {
+  const now = Date.now();
+  const windowMs = 10 * 60 * 1000;
+  const hits = (pairHits.get(key) || []).filter((t) => now - t < windowMs);
+  if (hits.length >= limit) {
+    pairHits.set(key, hits);
+    return false;
+  }
+  hits.push(now);
+  pairHits.set(key, hits);
+  return true;
+}
+
 function requireSite(req, res, next) {
   const site = siteFromRequest(req);
   if (!site) {
@@ -387,12 +418,7 @@ async function finishOidcLogin(provider, req, res) {
 
     ensureHasPasskeyCookie(req, res, user);
 
-    const afterLogin = req.session.afterLogin;
-    delete req.session.afterLogin;
-    if (afterLogin === "create_passkey") {
-      return res.redirect("/setup-passkey");
-    }
-    return res.redirect("/");
+    return redirectAfterLogin(req, res);
   } catch (err) {
     console.error(`${provider} callback failed:`, err);
     clearSession(req);
@@ -608,7 +634,7 @@ app.post("/auth/passkey/login/verify", async (req, res) => {
     setSessionUser(req, user);
     setHasPasskeyCookie(res);
     clearHasMsCookie(res);
-    res.json({ ok: true, email: user.email });
+    res.json({ ok: true, email: user.email, redirect: takeAfterLogin(req) });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -768,7 +794,7 @@ function rateLimitZbgwDiag(req, res, next) {
   const prev = diagHits.get(id) || [];
   const recent = prev.filter((ts) => now - ts < 60_000);
   const kind = String(req.body?.kind || "");
-  const max = kind === "error" ? 12 : 8;
+  const max = kind === "error" ? 12 : kind === "device" ? 24 : 8;
   if (recent.length >= max) {
     return res.status(429).json({ error: "rate_limited" });
   }
@@ -797,6 +823,52 @@ app.post("/api/admin/devices/:entityId/acl", requireAdmin, (req, res) => {
 });
 
 // --- Protected dashboard / data ---
+
+app.get("/connect", (_req, res) => {
+  res.sendFile(path.join(publicDir, "connect.html"));
+});
+
+app.post("/api/pair/start", (req, res) => {
+  const ip = req.ip || "unknown";
+  if (!allowPairHit(`start:${ip}`, 12)) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  try {
+    res.json(startPairing(db, req.body || {}));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "pair_failed" });
+  }
+});
+
+app.get("/api/pair/poll", (req, res) => {
+  const ip = req.ip || "unknown";
+  if (!allowPairHit(`poll:${ip}`, 240)) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  try {
+    res.json(pollPairing(db, { pollToken: req.query.token }));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "pair_failed" });
+  }
+});
+
+app.post("/api/pair/claim", (req, res) => {
+  const ip = req.ip || "unknown";
+  if (!allowPairHit(`claim:${ip}`, 20)) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  try {
+    const claimed = claimPairing(db, sites, DB_PATH, { code: req.body?.code });
+    req.session.afterLogin = claimed.path;
+    const user = currentUser(req);
+    res.json({
+      ...claimed,
+      signedIn: Boolean(user && user.status === "approved"),
+    });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "pair_failed" });
+  }
+});
 
 app.get("/", requireApproved, (_req, res) => {
   sendDashboard(res, sites.get("home"));

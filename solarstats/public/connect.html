@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>New connection — Solarstats</title>
+    <link rel="stylesheet" href="/solarstats.css" />
+    <link rel="stylesheet" href="/auth.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-card">
+      <h1 class="brand">Solar<span>stats</span></h1>
+      <p class="sub">New connection</p>
+      <p class="auth-lead">Type the 5-character code shown in Home Assistant.</p>
+      <p class="auth-error" id="errorBox" hidden></p>
+      <p class="auth-status" id="statusBox" hidden></p>
+      <form id="connectForm">
+        <input
+          id="code"
+          class="auth-btn"
+          name="code"
+          autocomplete="one-time-code"
+          maxlength="5"
+          placeholder="CODE"
+          style="text-align: center; letter-spacing: 0.35em; font-family: var(--font-mono, monospace); text-transform: uppercase"
+          required
+        />
+        <button class="auth-btn" type="submit">Connect</button>
+      </form>
+      <p class="sub"><a href="/login">Sign in</a></p>
+    </main>
+    <script type="module" src="/connect.js"></script>
+  </body>
+</html>

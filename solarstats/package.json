@@ -6,6 +6,7 @@
   "description": "Ingest PowMr snapshots and serve /solarstats dashboard",
   "scripts": {
     "start": "node src/server.js",
+    "test": "node --test src/pairing.test.js",
     "repair": "node src/repair.js"
   },
   "engines": {

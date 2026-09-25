@@ -572,7 +572,7 @@ function renderGateways(gateways, events) {
       <td>${escapeHtml(formatDate(new Date(ev.ts).toISOString()))}</td>
       <td class="entity-id">${escapeHtml(ev.device_id)}</td>
       <td>${escapeHtml(ev.kind)}</td>
-      <td>${escapeHtml(ev.message || ev.code || "—")}</td>
+      <td>${escapeHtml(ev.code && ev.message ? `${ev.code}: ${ev.message}` : ev.message || ev.code || "—")}</td>
     `;
     evBody.appendChild(tr);
   }

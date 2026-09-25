@@ -694,6 +694,32 @@ export function upsertMicrosoftUser(db, { email, displayName }) {
   };
 }
 
+/** Approve an invited email without making them the global admin. */
+export function ensureApprovedUser(db, { email, displayName }) {
+  const e = normalizeEmail(email);
+  if (!e || !e.includes("@")) {
+    const err = new Error("invalid_email");
+    err.status = 400;
+    throw err;
+  }
+  const existing = getUserByEmail(db, e);
+  const now = new Date().toISOString();
+  if (existing) {
+    if (existing.status !== "approved") setUserStatus(db, existing.id, "approved");
+    if (displayName && displayName !== existing.display_name) {
+      db.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(displayName, existing.id);
+    }
+    return getUserById(db, existing.id);
+  }
+  const info = db
+    .prepare(
+      `INSERT INTO users (email, role, status, display_name, created_at, approved_at)
+       VALUES (?, 'user', 'approved', ?, ?, ?)`,
+    )
+    .run(e, displayName || null, now, now);
+  return getUserById(db, info.lastInsertRowid);
+}
+
 export function setUserStatus(db, userId, status) {
   const now = new Date().toISOString();
   const approvedAt = status === "approved" ? now : null;

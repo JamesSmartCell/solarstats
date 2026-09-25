@@ -3,7 +3,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 const DEVICE_ID_RE = /^[a-f0-9]{12,16}$/i;
-const KINDS = new Set(["boot", "ok", "error", "poll"]);
+const KINDS = new Set(["boot", "ok", "error", "poll", "device"]);
 const EVENT_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 const OK_MIN_GAP_MS = 50 * 60 * 1000;
 const RESEND_MS = 5 * 60 * 1000;
@@ -156,10 +156,10 @@ export function receiveZbgwDiag(db, body) {
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(device_id) DO UPDATE SET
        fw = excluded.fw,
-       last_kind = excluded.last_kind,
-       last_ok = excluded.last_ok,
-       last_message = excluded.last_message,
-       last_code = excluded.last_code,
+       last_kind = CASE WHEN excluded.last_kind = 'device' THEN last_kind ELSE excluded.last_kind END,
+       last_ok = CASE WHEN excluded.last_kind = 'device' THEN last_ok ELSE excluded.last_ok END,
+       last_message = CASE WHEN excluded.last_kind = 'device' THEN last_message ELSE excluded.last_message END,
+       last_code = CASE WHEN excluded.last_kind = 'device' THEN last_code ELSE excluded.last_code END,
        last_seen = excluded.last_seen,
        last_ok_at = CASE WHEN excluded.last_kind = 'ok' THEN excluded.last_seen ELSE last_ok_at END,
        last_error_at = CASE WHEN excluded.last_kind = 'error' THEN excluded.last_seen ELSE last_error_at END,
@@ -193,6 +193,7 @@ export function receiveZbgwDiag(db, body) {
   const storeEvent =
     kind === "error" ||
     kind === "boot" ||
+    kind === "device" ||
     (kind === "ok" && (!existing?.last_ok_at || now - existing.last_ok_at >= OK_MIN_GAP_MS));
 
   if (storeEvent) {

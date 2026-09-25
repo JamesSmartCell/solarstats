@@ -73,6 +73,14 @@ Login is still the existing solarstats accounts. Site data is isolated.
 
 On the Rivermill LAN run [`../solarshim`](../solarshim) with `SITE_INGEST_URL=https://homesolar.percolate.one/api/ingest/rivermill`.
 
+### Pair a home from Home Assistant
+
+Copy [`../custom_components/homesolar`](../custom_components/homesolar) into the HA `custom_components` folder and restart. Add the **Home Solar** integration, enter a display name and admin email, then type the 5-character code at `/connect`. The code uses `A–Z` and `2–9` and skips `0`, `O`, `1`, and `I`. It expires in 10 minutes.
+
+That creates `data/sites/<slug>.db`, approves the email, and returns an ingest secret to Home Assistant once. The integration then posts snapshots to `POST /api/ingest/<slug>` the same way `solarshim` does. Sign in as that email and open `/<slug>`.
+
+`POST /api/pair/start` and `GET /api/pair/poll` are public and rate-limited. The secret is not shown in the browser.
+
 ## Caddy (DNS → TLS → Node on 8787)
 
 ```caddy

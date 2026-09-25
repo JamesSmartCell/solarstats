@@ -68,7 +68,8 @@ async function signInWithPasskey({ silent = false } = {}) {
     if (!verifyRes.ok) {
       throw new Error((await verifyRes.json().catch(() => ({}))).error || "verify failed");
     }
-    location.href = "/";
+    const body = await verifyRes.json();
+    location.href = body.redirect || "/";
   } catch (err) {
     if (!silent) {
       errorBox.hidden = false;
