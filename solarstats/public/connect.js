@@ -15,6 +15,10 @@ form.addEventListener("submit", async (event) => {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     errorBox.hidden = false;
+    if (body.error === "sign_in_required") {
+      location.href = "/login";
+      return;
+    }
     errorBox.textContent =
       body.error === "code_not_found"
         ? "That code is not active. Check the Home Assistant screen and try again."
@@ -22,12 +26,6 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   statusBox.hidden = false;
-  statusBox.textContent = body.signedIn
-    ? `${body.name} is connected. Opening the dashboard…`
-    : `${body.name} is connected. Sign in as ${body.email} to open it.`;
-  if (body.signedIn) {
-    location.href = body.path;
-    return;
-  }
-  location.href = "/login";
+  statusBox.textContent = `${body.name} is connected. You are its admin. Opening the dashboard…`;
+  location.href = body.path;
 });

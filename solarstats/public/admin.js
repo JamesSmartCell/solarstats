@@ -34,7 +34,10 @@ async function load() {
     el.hidden = !data.isHomeAdmin;
   });
   if (data.settings) renderSettings(data.settings);
-  if (data.isHomeAdmin) renderUsers(data.users);
+  if (data.isHomeAdmin) {
+    renderUsers(data.users);
+    loadSiteAdmins().catch((err) => console.warn(err));
+  }
   renderPieRows(data.pieRows || data.loadConfig || []);
 
   if (devicesRes.ok) {
@@ -146,6 +149,48 @@ async function bindField(key, entityId) {
 function zbgwUrl() {
   const q = selectedGateway ? `?device=${encodeURIComponent(selectedGateway)}` : "";
   return `/api/admin/zbgw${q}`;
+}
+
+async function loadSiteAdmins() {
+  const root = document.getElementById("siteAdmins");
+  if (!root) return;
+  const res = await fetch("/api/admin/sites");
+  if (!res.ok) return;
+  const data = await res.json();
+  const sites = data.sites || [];
+  root.replaceChildren();
+  if (!sites.length) {
+    root.textContent = "No other homes yet.";
+    return;
+  }
+  for (const site of sites) {
+    const row = document.createElement("form");
+    row.className = "toggle-row";
+    row.innerHTML = `<span>${site.name} <code>/${site.slug}</code></span>`;
+    const input = document.createElement("input");
+    input.type = "email";
+    input.value = site.adminEmail || "";
+    input.required = true;
+    const button = document.createElement("button");
+    button.type = "submit";
+    button.className = "toolbar-btn";
+    button.textContent = "Save admin";
+    row.append(input, button);
+    row.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const save = await fetch(`/api/admin/sites/${encodeURIComponent(site.slug)}/admin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: input.value }),
+      });
+      if (!save.ok) {
+        alert((await save.json().catch(() => ({}))).error || "Could not save");
+        return;
+      }
+      button.textContent = "Saved";
+    });
+    root.append(row);
+  }
 }
 
 function renderSettings(settings) {

@@ -102,7 +102,7 @@ export function startPairing(authDb, sites, { code, name, email, pollToken, now 
 /**
  * User typed the code. Creates the site and holds the ingest secret for the HACS poller.
  */
-export function claimPairing(authDb, sites, defaultDbPath, { code, now = Date.now() }) {
+export function claimPairing(authDb, sites, defaultDbPath, { code, claimerEmail, now = Date.now() }) {
   ensurePairingTables(authDb);
   const normalized = normalizeCode(code);
   if (!CODE_RE.test(normalized)) fail(400, "invalid_code");
@@ -119,13 +119,15 @@ export function claimPairing(authDb, sites, defaultDbPath, { code, now = Date.no
   const slug = row.slug || slugFromName(row.name);
   if (!slug || sites.has(slug)) fail(409, "name_taken");
   const secret = crypto.randomBytes(32).toString("hex");
+  const adminEmail = String(claimerEmail || "").trim().toLowerCase();
+  if (!adminEmail) fail(401, "sign_in_required");
   const site = attachLinkedSite(sites, authDb, defaultDbPath, {
     slug,
     name: row.name,
     secret,
-    adminEmail: row.email,
+    adminEmail,
   });
-  ensureApprovedUser(authDb, { email: row.email, displayName: row.name });
+  ensureApprovedUser(authDb, { email: adminEmail, displayName: row.name });
 
   const updated = authDb
     .prepare(
@@ -141,7 +143,7 @@ export function claimPairing(authDb, sites, defaultDbPath, { code, now = Date.no
     slug: site.slug,
     name: site.name,
     path: `/${site.slug}`,
-    email: row.email,
+    email: adminEmail,
   };
 }
 

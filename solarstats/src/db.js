@@ -1225,7 +1225,7 @@ export function upsertDeviceStates(db, devices) {
         domain,
         name: d.name || d.friendly_name || entityId,
         allow_users: 0,
-        allow_admin: 0,
+        allow_admin: 1,
         state,
         updated_at: now,
         device_class: d.device_class || d.deviceClass || null,

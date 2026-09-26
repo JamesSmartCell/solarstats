@@ -27,7 +27,10 @@ test("code claim creates a site and reveals the ingest secret once", () => {
 
   assert.equal(pollPairing(authDb, { pollToken }).status, "pending");
 
-  const claimed = claimPairing(authDb, sites, dbPath, { code: "ab23z" });
+  const claimed = claimPairing(authDb, sites, dbPath, {
+    code: "ab23z",
+    claimerEmail: "claimer@example.com",
+  });
   assert.equal(claimed.slug, "rivermill");
   assert.equal(claimed.path, "/rivermill");
   assert.equal(sites.get("rivermill").name, "Rivermill");
@@ -48,11 +51,11 @@ test("code claim creates a site and reveals the ingest secret once", () => {
   });
   assert.equal(reloaded.get("rivermill").secret, linked.secret);
 
-  const user = authDb.prepare("SELECT status, role FROM users WHERE email = ?").get("owner@example.com");
+  const user = authDb.prepare("SELECT status, role FROM users WHERE email = ?").get("claimer@example.com");
   assert.equal(user.status, "approved");
   assert.equal(user.role, "user");
-  assert.equal(isSiteAdmin(sites.get("rivermill"), "owner@example.com"), true);
-  assert.equal(isSiteAdmin(sites.get("rivermill"), "other@example.com"), false);
+  assert.equal(isSiteAdmin(sites.get("rivermill"), "claimer@example.com"), true);
+  assert.equal(isSiteAdmin(sites.get("rivermill"), "owner@example.com"), false);
   assert.equal(isSiteAdmin(sites.get("home"), "owner@example.com"), false);
   assert.throws(
     () => checkSiteName(authDb, sites, "Rivermill"),

@@ -148,6 +148,24 @@ export function loadSites({ authDb, defaultDbPath, defaultSecret }) {
   return sites;
 }
 
+export function setLinkedSiteAdmin(authDb, sites, slug, email) {
+  const site = sites.get(slug);
+  if (!site || site.default) {
+    const err = new Error("unknown_site");
+    err.status = 404;
+    throw err;
+  }
+  const adminEmail = String(email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
+    const err = new Error("invalid_email");
+    err.status = 400;
+    throw err;
+  }
+  authDb.prepare("UPDATE linked_sites SET admin_email = ? WHERE slug = ?").run(adminEmail, slug);
+  site.adminEmail = adminEmail;
+  return { slug: site.slug, name: site.name, adminEmail };
+}
+
 export function listPublicSites(sites) {
   return [...sites.values()].map((s) => ({
     slug: s.slug,

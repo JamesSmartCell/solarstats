@@ -37,6 +37,7 @@ import {
   setAuthSettings,
   setUserStatus,
   upsertMicrosoftUser,
+  ensureApprovedUser,
   deletePasskey,
   listDevicesForViewer,
   listAllDevices,
@@ -54,7 +55,7 @@ import {
   verifyAuthentication,
   verifyRegistration,
 } from "./passkeys.js";
-import { isSiteAdmin, listPublicSites, loadSites } from "./sites.js";
+import { isSiteAdmin, listPublicSites, loadSites, setLinkedSiteAdmin } from "./sites.js";
 import {
   enqueueZbgwRestart,
   listZbgwEvents,
@@ -337,6 +338,7 @@ function takeAfterLogin(req) {
   const after = req.session?.afterLogin;
   delete req.session.afterLogin;
   if (after === "create_passkey") return "/setup-passkey";
+  if (after === "/connect") return "/connect";
   if (typeof after === "string" && after.startsWith("/")) {
     const site = getSite(after.slice(1));
     if (site && !site.default) return `/${site.slug}`;
@@ -667,6 +669,24 @@ app.delete("/auth/passkey/:id", requireApproved, (req, res) => {
 
 // --- Admin API ---
 
+app.get("/api/admin/sites", requireAdmin, (_req, res) => {
+  res.json({
+    sites: [...sites.values()]
+      .filter((site) => !site.default)
+      .map((site) => ({ slug: site.slug, name: site.name, adminEmail: site.adminEmail || "" })),
+  });
+});
+
+app.post("/api/admin/sites/:slug/admin", requireAdmin, (req, res) => {
+  try {
+    const site = setLinkedSiteAdmin(db, sites, req.params.slug, req.body?.email);
+    ensureApprovedUser(db, { email: site.adminEmail, displayName: site.name });
+    res.json({ site });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "admin_failed" });
+  }
+});
+
 app.get("/api/admin/users", requireSiteAdmin, (req, res) => {
   const sdb = req.site.db;
   const homeAdmin = isAdminEmail(req.user.email);
@@ -854,7 +874,12 @@ app.post("/api/admin/devices/:entityId/acl", requireSiteAdmin, (req, res) => {
 
 // --- Protected dashboard / data ---
 
-app.get("/connect", (_req, res) => {
+app.get("/connect", (req, res) => {
+  const user = currentUser(req);
+  if (!user || user.status !== "approved") {
+    req.session.afterLogin = "/connect";
+    return res.redirect("/login");
+  }
   res.sendFile(path.join(publicDir, "connect.html"));
 });
 
@@ -900,9 +925,15 @@ app.post("/api/pair/claim", (req, res) => {
     return res.status(429).json({ error: "rate_limited" });
   }
   try {
-    const claimed = claimPairing(db, sites, DB_PATH, { code: req.body?.code });
-    req.session.afterLogin = claimed.path;
     const user = currentUser(req);
+    if (!user || user.status !== "approved") {
+      return res.status(401).json({ error: "sign_in_required" });
+    }
+    const claimed = claimPairing(db, sites, DB_PATH, {
+      code: req.body?.code,
+      claimerEmail: user.email,
+    });
+    req.session.afterLogin = claimed.path;
     res.json({
       ...claimed,
       signedIn: Boolean(user && user.status === "approved"),
