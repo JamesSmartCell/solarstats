@@ -704,7 +704,7 @@ app.post("/api/admin/sites/:slug/admin", requireAdmin, (req, res) => {
 
 app.get("/api/admin/users", requireSiteAdmin, (req, res) => {
   const sdb = req.site.db;
-  const homeAdmin = isAdminEmail(req.user.email);
+  const homeAdmin = req.site.default && isAdminEmail(req.user.email);
   res.json({
     users: homeAdmin ? listUsers(db) : [],
     settings: homeAdmin ? getAuthSettings(db) : null,

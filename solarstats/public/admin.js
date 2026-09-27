@@ -30,11 +30,12 @@ async function load() {
   if (dash) dash.href = data.site?.slug && data.site.slug !== "home" ? `/${data.site.slug}` : "/";
   const sub = document.getElementById("adminSub");
   if (sub && data.site?.name) sub.textContent = `${data.site.name} · devices, sensors, and the daily pie`;
+  const showHomeAdmin = SITE === "home" && data.isHomeAdmin;
   document.querySelectorAll("[data-home-admin]").forEach((el) => {
-    el.hidden = !data.isHomeAdmin;
+    el.hidden = !showHomeAdmin;
   });
-  if (data.settings) renderSettings(data.settings);
-  if (data.isHomeAdmin) {
+  if (showHomeAdmin && data.settings) renderSettings(data.settings);
+  if (showHomeAdmin) {
     renderUsers(data.users);
     loadSiteAdmins().catch((err) => console.warn(err));
   }
