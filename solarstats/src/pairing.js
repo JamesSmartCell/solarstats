@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { ensureApprovedUser } from "./db.js";
-import { attachLinkedSite, isReservedSlug } from "./sites.js";
+import { applyLinkedSiteProfile, attachLinkedSite, isReservedSlug } from "./sites.js";
 
 export const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{5}$`);
@@ -97,6 +97,25 @@ export function startPairing(authDb, sites, { code, name, email, pollToken, now 
     .run(codeHash, hashValue(token), displayName, adminEmail, slug, now, now + PAIR_TTL_MS);
 
   return { ok: true, expiresAt: now + PAIR_TTL_MS };
+}
+
+/** The integration changed the home name and/or the account that administers it. */
+export function updateSiteProfile(authDb, sites, defaultDbPath, { slug, name, adminEmail }) {
+  const site = sites.get(String(slug || "").toLowerCase());
+  if (!site || site.default) fail(404, "unknown_site");
+  const email = String(adminEmail || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "invalid_email");
+  const nextSlug = slugFromName(name);
+  if (!nextSlug) fail(400, "invalid_name");
+  if (nextSlug !== site.slug) checkSiteName(authDb, sites, name);
+  const updated = applyLinkedSiteProfile(authDb, sites, defaultDbPath, {
+    slug: site.slug,
+    name,
+    adminEmail: email,
+    nextSlug,
+  });
+  ensureApprovedUser(authDb, { email, displayName: updated.name });
+  return updated;
 }
 
 /**

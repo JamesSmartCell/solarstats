@@ -64,7 +64,7 @@ import {
   receiveZbgwDiag,
 } from "./zbgw_diag.js";
 import { listHaFields, setFieldBinding } from "./ha_fields.js";
-import { checkSiteName, claimPairing, pollPairing, startPairing } from "./pairing.js";
+import { checkSiteName, claimPairing, pollPairing, startPairing, updateSiteProfile } from "./pairing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -334,6 +334,15 @@ function authorizeSiteIngest(req, res, next) {
   return authorizeBearer(site.secret, req, res, next);
 }
 
+function safeNext(value) {
+  if (value === "/connect") return "/connect";
+  if (typeof value === "string" && /^\/[a-z0-9-]+$/.test(value)) {
+    const site = getSite(value.slice(1));
+    if (site && !site.default) return `/${site.slug}`;
+  }
+  return "";
+}
+
 function takeAfterLogin(req) {
   const after = req.session?.afterLogin;
   delete req.session.afterLogin;
@@ -476,6 +485,8 @@ app.get("/auth/:provider", async (req, res) => {
     if (req.query.intent === "create_passkey") {
       req.session.afterLogin = "create_passkey";
     }
+    const next = safeNext(req.query.next);
+    if (next) req.session.afterLogin = next;
     const url = await buildAuthUrl(provider, req.session);
     res.redirect(url.href);
   } catch (err) {
@@ -497,8 +508,9 @@ app.get("/api/auth/providers", (_req, res) => {
 });
 
 app.post("/logout", (req, res) => {
+  const next = safeNext(req.query.next || req.body?.next);
   clearSession(req);
-  res.redirect("/login");
+  res.redirect(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
 });
 
 app.get("/api/me", (req, res) => {
@@ -519,6 +531,7 @@ app.get("/api/me", (req, res) => {
     status: user.status,
     displayName: user.display_name,
     isAdmin: isSiteAdmin(siteFromRequest(req) || sites.get("home"), user.email),
+    isHomeAdmin: isAdminEmail(user.email),
     hasPasskeyCookie: hasPasskeyCookie(req) || listPasskeysForUser(db, user.id).length > 0,
     settings: {
       allowPasskeyEnrollment: settings.allowPasskeyEnrollment,
@@ -637,6 +650,8 @@ app.post("/auth/passkey/login/options", async (req, res) => {
   try {
     const options = await authenticationOptions(db);
     req.session.passkeyChallenge = options.challenge;
+    const next = safeNext(req.body?.next || req.query.next);
+    if (next) req.session.afterLogin = next;
     res.json(options);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -1019,6 +1034,19 @@ function handleIngest(req, res) {
 }
 
 app.post("/api/ingest", authorizeIngest, handleIngest);
+app.post("/api/ingest/:slug/profile", authorizeSiteIngest, (req, res) => {
+  try {
+    const updated = updateSiteProfile(db, sites, DB_PATH, {
+      slug: req.site.slug,
+      name: req.body?.name,
+      adminEmail: req.body?.adminEmail,
+    });
+    res.json(updated);
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "profile_failed" });
+  }
+});
+
 app.post("/api/ingest/:slug", authorizeSiteIngest, handleIngest);
 
 app.get("/api/agent/commands", authorizeIngest, (req, res) => {

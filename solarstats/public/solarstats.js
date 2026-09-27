@@ -763,9 +763,47 @@ async function loadMe() {
   const res = await fetch(withSite("/api/me"));
   if (!res.ok) return;
   const me = await res.json();
-  if (!els.adminLink) return;
-  els.adminLink.href = SITE === "home" ? "/admin" : `/admin?site=${encodeURIComponent(SITE)}`;
-  els.adminLink.hidden = !me.isAdmin;
+  if (els.adminLink) {
+    els.adminLink.href = SITE === "home" ? "/admin" : `/admin?site=${encodeURIComponent(SITE)}`;
+    els.adminLink.hidden = !me.isAdmin;
+  }
+  const notice = document.getElementById("accountNotice");
+  if (!notice || me.isAdmin || SITE === "home") return;
+  notice.hidden = false;
+  notice.textContent = "";
+  notice.append(`Signed in as ${me.email}. `);
+  if (me.isHomeAdmin) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "toolbar-btn";
+    button.textContent = "Make this account the admin";
+    button.addEventListener("click", async () => {
+      const save = await fetch(`/api/admin/sites/${encodeURIComponent(SITE)}/admin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: me.email }),
+      });
+      if (!save.ok) {
+        button.textContent = "Could not save";
+        return;
+      }
+      location.reload();
+    });
+    notice.append(button);
+    return;
+  }
+  const link = document.createElement("a");
+  link.href = "#";
+  link.textContent = "Sign in with a different account";
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = `/logout?next=${encodeURIComponent(`/${SITE}`)}`;
+    document.body.append(form);
+    form.submit();
+  });
+  notice.append(link);
 }
 
 els.rangeSelect.addEventListener("change", () => {

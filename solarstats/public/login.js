@@ -29,11 +29,19 @@ function showChoices() {
   choices.hidden = false;
 }
 
+function authPath(path) {
+  const next = params.get("next");
+  if (!next) return path;
+  const url = new URL(path, location.origin);
+  url.searchParams.set("next", next);
+  return `${url.pathname}${url.search}`;
+}
+
 function signInWithMicrosoft() {
   statusBox.hidden = false;
   statusBox.textContent = "Signing in with MS Authenticator…";
   choices.hidden = true;
-  location.href = "/auth/microsoft";
+  location.href = authPath("/auth/microsoft");
 }
 
 async function signInWithPasskey({ silent = false } = {}) {
@@ -54,7 +62,11 @@ async function signInWithPasskey({ silent = false } = {}) {
   }
 
   try {
-    const optRes = await fetch("/auth/passkey/login/options", { method: "POST" });
+    const optRes = await fetch("/auth/passkey/login/options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ next: params.get("next") || "" }),
+    });
     if (!optRes.ok) {
       throw new Error((await optRes.json().catch(() => ({}))).error || "options failed");
     }
@@ -81,6 +93,9 @@ async function signInWithPasskey({ silent = false } = {}) {
 }
 
 passkeyBtn?.addEventListener("click", () => signInWithPasskey({ silent: false }));
+document.querySelectorAll('a[href^="/auth/"]').forEach((link) => {
+  link.href = authPath(link.getAttribute("href"));
+});
 
 if (!code && hasMs) {
   // Last Microsoft sign-in on this browser — same as clicking Authenticator.

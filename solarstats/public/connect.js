@@ -1,3 +1,14 @@
+const signedInAs = document.getElementById("signedInAs");
+fetch("/api/me")
+  .then((res) => (res.ok ? res.json() : null))
+  .then((me) => {
+    if (!signedInAs) return;
+    signedInAs.textContent = me?.email
+      ? `Signed in as ${me.email}. This account becomes the home's admin when you enter the code.`
+      : "Sign in before entering the code. That account becomes the home's admin.";
+  })
+  .catch(() => {});
+
 const form = document.getElementById("connectForm");
 const errorBox = document.getElementById("errorBox");
 const statusBox = document.getElementById("statusBox");

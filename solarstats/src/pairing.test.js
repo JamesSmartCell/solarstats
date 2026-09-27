@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openDatabase } from "./db.js";
-import { checkSiteName, claimPairing, pollPairing, startPairing } from "./pairing.js";
+import { checkSiteName, claimPairing, pollPairing, startPairing, updateSiteProfile } from "./pairing.js";
 import { isSiteAdmin, loadSites } from "./sites.js";
 
 function fixture() {
@@ -50,6 +50,7 @@ test("code claim creates a site and reveals the ingest secret once", () => {
     defaultSecret: "home-secret",
   });
   assert.equal(reloaded.get("rivermill").secret, linked.secret);
+  reloaded.get("rivermill").db.close();
 
   const user = authDb.prepare("SELECT status, role FROM users WHERE email = ?").get("claimer@example.com");
   assert.equal(user.status, "approved");
@@ -62,6 +63,15 @@ test("code claim creates a site and reveals the ingest secret once", () => {
     (err) => err.message === "name_taken",
   );
   assert.equal(checkSiteName(authDb, sites, "Other House").slug, "other-house");
+  const renamed = updateSiteProfile(authDb, sites, dbPath, {
+    slug: "rivermill",
+    name: "Mill House",
+    adminEmail: "new-owner@example.com",
+  });
+  assert.equal(renamed.slug, "mill-house");
+  assert.equal(renamed.path, "/mill-house");
+  assert.equal(isSiteAdmin(sites.get("mill-house"), "new-owner@example.com"), true);
+  assert.equal(sites.has("rivermill"), false);
   for (const site of reloaded.values()) site.db.close();
   for (const site of sites.values()) site.db.close();
   fs.rmSync(dir, { recursive: true, force: true });

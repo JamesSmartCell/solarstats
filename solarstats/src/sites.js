@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { getAdminEmail, getMeta, isAdminEmail, openDatabase, setMeta } from "./db.js";
 
@@ -146,6 +147,47 @@ export function loadSites({ authDb, defaultDbPath, defaultSecret }) {
   }
 
   return sites;
+}
+
+function renameSiteFiles(fromPath, toPath) {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    const from = `${fromPath}${suffix}`;
+    const to = `${toPath}${suffix}`;
+    if (fs.existsSync(from)) fs.renameSync(from, to);
+  }
+}
+
+/** Change the dashboard name, address, and admin for a paired home. */
+export function applyLinkedSiteProfile(authDb, sites, defaultDbPath, { slug, name, adminEmail, nextSlug }) {
+  const site = sites.get(slug);
+  if (!site || site.default) {
+    const err = new Error("unknown_site");
+    err.status = 404;
+    throw err;
+  }
+  const displayName = String(name || "").trim();
+  const email = String(adminEmail || "").trim().toLowerCase();
+  const target = nextSlug || slug;
+  if (target !== slug) {
+    const nextPath = siteDbPath(defaultDbPath, target);
+    site.db.close();
+    renameSiteFiles(site.dbPath, nextPath);
+    site.db = openExtraSite(nextPath);
+    authDb
+      .prepare("UPDATE linked_sites SET slug = ?, name = ?, admin_email = ? WHERE slug = ?")
+      .run(target, displayName, email, slug);
+    sites.delete(slug);
+    site.slug = target;
+    site.dbPath = nextPath;
+    sites.set(target, site);
+  } else {
+    authDb
+      .prepare("UPDATE linked_sites SET name = ?, admin_email = ? WHERE slug = ?")
+      .run(displayName, email, slug);
+  }
+  site.name = displayName;
+  site.adminEmail = email;
+  return { slug: site.slug, name: site.name, adminEmail: email, path: `/${site.slug}` };
 }
 
 export function setLinkedSiteAdmin(authDb, sites, slug, email) {
