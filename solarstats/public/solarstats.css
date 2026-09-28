@@ -116,6 +116,10 @@ body {
   margin-bottom: 1.25rem;
 }
 
+.tiles[hidden] {
+  display: none;
+}
+
 #customTiles {
   grid-template-columns: repeat(auto-fill, minmax(140px, 200px));
 }
