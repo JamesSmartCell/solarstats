@@ -65,7 +65,11 @@ const state = {
   rangeStartMs: 0,
   loadsDailyKwh: null,
   loadsPowerW: null,
-  loadSlices: LOAD_SLICES.map((s) => ({ ...s })),
+  loadSlices: SITE === "home" ? LOAD_SLICES.map((s) => ({ ...s })) : [],
+  loadConfigApplied: SITE !== "home",
+  tilesMode: SITE === "home" ? "legacy" : "custom",
+  showPie: SITE === "home",
+  customTiles: [],
   devices: [],
   pendingToggles: new Map(),
   pieRows: [],
@@ -123,7 +127,8 @@ function confirmPendingFrom(devices) {
 }
 
 function applyLoadConfig(config) {
-  if (!Array.isArray(config) || !config.length) return;
+  if (!Array.isArray(config)) return;
+  state.loadConfigApplied = true;
   state.loadSlices = config
     .filter((s) => s.onPie !== false)
     .map((s) => ({
@@ -133,6 +138,60 @@ function applyLoadConfig(config) {
       source: s.source === "inverter" ? "inverter" : "grid",
       members: Array.isArray(s.members) ? s.members.filter(Boolean) : [],
     }));
+}
+
+function applyBoard(payload) {
+  if (!payload) return;
+  if (payload.tilesMode) state.tilesMode = payload.tilesMode;
+  if (payload.showPie != null) state.showPie = !!payload.showPie;
+  if (Array.isArray(payload.tiles)) state.customTiles = payload.tiles;
+  paintTiles();
+  paintPie();
+}
+
+function paintPie() {
+  const panel = document.getElementById("piePanel");
+  if (!panel) return;
+  const show = !!state.showPie;
+  const reveal = panel.hidden && show;
+  panel.hidden = !show;
+  if (reveal) {
+    loadsPieChart.resize();
+    loadsPieChart.update("none");
+  }
+}
+
+function paintTiles() {
+  const legacy = document.getElementById("legacyTiles");
+  const custom = document.getElementById("customTiles");
+  const row = document.getElementById("tileRow");
+  const customMode = state.tilesMode === "custom";
+  if (legacy) legacy.hidden = customMode;
+  if (customMode) renderCustomTiles();
+  if (custom) custom.hidden = !customMode || state.customTiles.length === 0;
+  if (row) row.hidden = customMode && state.customTiles.length === 0;
+}
+
+function renderCustomTiles() {
+  const root = document.getElementById("customTiles");
+  if (!root) return;
+  root.replaceChildren();
+  for (const tile of state.customTiles) {
+    const article = document.createElement("article");
+    article.className = "tile";
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = tile.label || tile.entityId;
+    const value = document.createElement("div");
+    value.className = "value";
+    const raw = String(tile.state ?? "").toLowerCase();
+    value.textContent =
+      tile.state == null || tile.state === "" || raw === "unavailable" || raw === "unknown"
+        ? "—"
+        : formatHaState(tile);
+    article.append(label, value);
+    root.appendChild(article);
+  }
 }
 
 function sliceKeys(slice) {
@@ -149,6 +208,7 @@ function sumMapValues(map, keys) {
 }
 
 function currentLoadSlices() {
+  if (state.loadConfigApplied || state.tilesMode === "custom") return state.loadSlices;
   return state.loadSlices.length ? state.loadSlices : LOAD_SLICES;
 }
 
@@ -562,6 +622,7 @@ function applyHistory(payload) {
       : null,
   );
   applyLoadConfig(payload.loadConfig);
+  applyBoard(payload);
   updateLoadsPie(payload.loadsDailyKwh || payload.latest?.loadsDailyKwh || null);
   updateCurrentLoads(payload.loadsPowerW || payload.latest?.loadsPowerW || null);
   updateChrome();
@@ -737,9 +798,13 @@ function connectWs() {
           updateTiles({ ...msg.latest, energyKwhTotal: state.energyKwhTotal });
         }
         applyLoadConfig(msg.loadConfig);
+        applyBoard(msg);
         if (msg.loadsDailyKwh) updateLoadsPie(msg.loadsDailyKwh);
         if (msg.loadsPowerW) updateCurrentLoads(msg.loadsPowerW);
         if (msg.devices) renderDevices(msg.devices);
+      } else if (msg.type === "board") {
+        applyBoard(msg);
+        updateLoadsPie();
       } else if (msg.type === "loadConfig") {
         applyLoadConfig(msg.loadConfig);
         updateLoadsPie();
@@ -752,6 +817,7 @@ function connectWs() {
         applyHistory(msg);
       } else if (msg.type === "devices") {
         renderDevices(msg.devices);
+        if (msg.tiles || msg.tilesMode || msg.showPie != null) applyBoard(msg);
       }
     } catch (err) {
       console.error("ws message error", err);
@@ -813,6 +879,8 @@ els.rangeSelect.addEventListener("change", () => {
 
 els.resetZoom.addEventListener("click", resetAllZoom);
 
+paintTiles();
+paintPie();
 updateChrome();
 loadMe().catch(() => {});
 loadDevices().catch(() => {});

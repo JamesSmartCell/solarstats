@@ -143,10 +143,13 @@
 
       <section class="panel admin-panel">
         <h2>Daily load pie</h2>
+        <label class="toggle-row">
+          <input type="checkbox" id="showPie" />
+          <span>Show the daily pie on the dashboard</span>
+        </label>
         <p class="hint">
-          All synthetic daily energy sensors appear here after solarstatsapi syncs HA.
+          Tick the box above to show the pie. <strong>On pie</strong> chooses each slice.
           <strong>Inverter / Grid</strong> classifies the load ·
-          <strong>On pie</strong> shows it on the dashboard doughnut ·
           <strong>Colour</strong> is the doughnut slice ·
           <strong>+</strong> merges another feed into this one (energy and watts).
         </p>
@@ -174,6 +177,7 @@
       <section class="panel admin-panel">
         <h2>Sensors</h2>
         <p class="hint">
+          <strong>Top</strong> = one of the boxes at the top of the dashboard (up to 8) ·
           <strong>User</strong> = on the board for everyone ·
           <strong>Admin</strong> = on the board for admin only ·
           neither = hidden from the board
@@ -185,6 +189,7 @@
                 <th>Name</th>
                 <th>Entity</th>
                 <th>State</th>
+                <th>Top</th>
                 <th>Admin</th>
                 <th>User</th>
               </tr>

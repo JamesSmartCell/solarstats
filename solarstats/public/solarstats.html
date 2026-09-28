@@ -42,7 +42,8 @@
         </div>
       </header>
 
-      <section class="tiles" aria-label="Current readings">
+      <section id="tileRow" aria-label="Current readings">
+        <div class="tiles" id="legacyTiles">
         <article class="tile">
           <div class="label">Battery SoC</div>
           <div class="value"><span id="batterySoc">—</span><span class="unit">%</span></div>
@@ -79,6 +80,8 @@
           <div class="label">Energy supplied</div>
           <div class="value"><span id="energyTotal">—</span><span class="unit">kWh</span></div>
         </article>
+        </div>
+        <div class="tiles" id="customTiles" hidden></div>
       </section>
 
       <section class="chart-toolbar" aria-label="Chart controls">
@@ -97,7 +100,7 @@
       </section>
 
       <section class="charts">
-        <article class="panel energy-panel">
+        <article class="panel energy-panel" id="piePanel">
           <h2>All devices today</h2>
           <p class="hint">Daily kWh by device (inverter + grid) · current watts on the right</p>
           <div class="energy-split">

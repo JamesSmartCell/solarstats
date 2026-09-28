@@ -20,6 +20,11 @@ import {
   getAuthSettings,
   getHistory,
   getLoadConfig,
+  getShowPie,
+  setShowPie,
+  setDisplayTile,
+  tileViews,
+  tilesMode,
   getPieAdminRows,
   setLoadSources,
   setPieExtra,
@@ -712,6 +717,7 @@ app.get("/api/admin/users", requireSiteAdmin, (req, res) => {
     site: { slug: req.site.slug, name: req.site.name },
     loadConfig: getLoadConfig(sdb),
     pieRows: getPieAdminRows(sdb),
+    ...boardOptions(sdb),
   });
 });
 
@@ -744,6 +750,18 @@ app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
     });
   }
   let loadConfig = getLoadConfig(sdb);
+  if (req.body?.showPie != null) {
+    setShowPie(sdb, !!req.body.showPie);
+    broadcast({ type: "board", ...boardOptions(sdb) }, slug);
+  }
+  if (req.body?.displayTile?.entityId) {
+    try {
+      setDisplayTile(sdb, req.body.displayTile.entityId, !!req.body.displayTile.on);
+      broadcast({ type: "board", ...boardOptions(sdb) }, slug);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message || "tile_failed" });
+    }
+  }
   if (req.body?.loadSources) {
     setLoadSources(sdb, req.body.loadSources);
     loadConfig = getLoadConfig(sdb);
@@ -781,12 +799,20 @@ app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
     const status = err.status || 400;
     return res.status(status).json({ error: err.message || "merge_failed" });
   }
-  res.json({ settings, loadConfig, pieRows: getPieAdminRows(sdb) });
+  res.json({ settings, loadConfig, pieRows: getPieAdminRows(sdb), showPie: getShowPie(sdb) });
 });
 
 app.get("/api/admin/devices", requireSiteAdmin, (req, res) => {
   res.json({ devices: listAllDevices(req.site.db) });
 });
+
+function boardOptions(db) {
+  return {
+    showPie: getShowPie(db),
+    tiles: tileViews(db),
+    tilesMode: tilesMode(db),
+  };
+}
 
 function fieldsForAdmin(site) {
   const listed = listHaFields(site.db);
@@ -986,6 +1012,7 @@ app.get("/api/history", requireApproved, requireSite, (req, res) => {
   res.json({
     ...getHistory(sdb, range),
     loadConfig: getLoadConfig(sdb),
+    ...boardOptions(sdb),
     site: { slug: req.site.slug, name: req.site.name },
   });
 });
@@ -1120,6 +1147,7 @@ function broadcastDevices(site) {
         devices: listDevicesForViewer(sdb, {
           isAdmin: isSiteAdmin(site, user.email),
         }),
+        ...boardOptions(sdb),
       }),
     );
   }
@@ -1169,6 +1197,7 @@ wss.on("connection", (socket) => {
       loadsDailyKwh: history.loadsDailyKwh,
       loadsPowerW: history.loadsPowerW,
       loadConfig: getLoadConfig(sdb),
+      ...boardOptions(sdb),
       devices: user
         ? listDevicesForViewer(sdb, { isAdmin: isSiteAdmin(site, user.email) })
         : [],

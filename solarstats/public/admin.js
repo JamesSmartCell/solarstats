@@ -40,6 +40,13 @@ async function load() {
     loadSiteAdmins().catch((err) => console.warn(err));
   }
   renderPieRows(data.pieRows || data.loadConfig || []);
+  const showPie = document.getElementById("showPie");
+  if (showPie) {
+    showPie.checked = !!data.showPie;
+    showPie.onchange = () => {
+      postPieSettings({ showPie: showPie.checked }).catch((err) => console.error(err));
+    };
+  }
 
   if (devicesRes.ok) {
     const devicesData = await devicesRes.json();
@@ -567,9 +574,42 @@ function renderDeviceTable(devices, tableId, emptyId) {
     });
     userTd.appendChild(userCb);
 
-    tr.append(nameTd, entityTd, stateTd, adminTd, userTd);
+    if (tableId === "sensorsTable") {
+      const topTd = document.createElement("td");
+      topTd.className = "acl-cell";
+      const topCb = document.createElement("input");
+      topCb.type = "checkbox";
+      topCb.title = "Show this reading in the top row (up to 8)";
+      topCb.checked = !!d.onTop;
+      topCb.addEventListener("change", () => {
+        setDisplayTile(d.entityId, topCb.checked, topCb);
+      });
+      topTd.appendChild(topCb);
+      tr.append(nameTd, entityTd, stateTd, topTd, adminTd, userTd);
+    } else {
+      tr.append(nameTd, entityTd, stateTd, adminTd, userTd);
+    }
     tbody.appendChild(tr);
   }
+}
+
+async function setDisplayTile(entityId, on, checkbox) {
+  const res = await fetch(adminPath("/api/admin/settings"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayTile: { entityId, on } }),
+  });
+  if (!res.ok) {
+    if (checkbox) checkbox.checked = !on;
+    alert((await res.json().catch(() => ({}))).error || "Top box update failed");
+    return;
+  }
+  const note = document.getElementById("sensorsSaved");
+  if (!note) return;
+  note.hidden = false;
+  setTimeout(() => {
+    note.hidden = true;
+  }, 1200);
 }
 
 async function setDeviceExposure(entityId, exposure) {

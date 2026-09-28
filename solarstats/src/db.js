@@ -571,7 +571,7 @@ export function getPieAdminRows(db) {
         entityId: d.entityId,
         powerEntityId: EXTRA_POWER_BY_ENERGY_ID[d.entityId] || null,
         builtin: false,
-        onPie: isPieVisible(visibility, d.entityId, !showBuiltins),
+        onPie: isPieVisible(visibility, d.entityId, false),
         kwh: latest[d.entityId] ?? toNumber(d.state),
         watts: power[d.entityId] ?? null,
       };
@@ -594,6 +594,70 @@ export function getPieAdminRows(db) {
         key,
         label: rowByKey.get(key)?.label || labelByKey[key] || key,
       })),
+    };
+  });
+}
+
+export function getShowPie(db) {
+  const raw = getMeta(db, "show_pie");
+  if (raw == null) return getMeta(db, "use_builtin_loads") !== "0";
+  return raw !== "0";
+}
+
+export function setShowPie(db, on) {
+  setMeta(db, "show_pie", on ? "1" : "0");
+  return getShowPie(db);
+}
+
+export function getDisplayTileIds(db) {
+  const raw = getMeta(db, "display_tiles");
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((id) => String(id)) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function tilesMode(db) {
+  if (getMeta(db, "display_tiles") != null) return "custom";
+  return getMeta(db, "use_builtin_loads") !== "0" ? "legacy" : "custom";
+}
+
+export function setDisplayTile(db, entityId, on) {
+  const id = String(entityId || "").trim();
+  if (!id) return getDisplayTileIds(db);
+  const had = getMeta(db, "display_tiles") != null;
+  const ids = getDisplayTileIds(db).filter((existing) => existing !== id);
+  if (on) {
+    if (ids.length >= 8) {
+      const err = new Error("Only 8 readings can sit in the top row");
+      err.status = 400;
+      throw err;
+    }
+    ids.push(id);
+  } else if (!had) {
+    return [];
+  }
+  setMeta(db, "display_tiles", JSON.stringify(ids));
+  return ids;
+}
+
+export function tileViews(db) {
+  return getDisplayTileIds(db).map((entityId) => {
+    const row = db
+      .prepare(
+        "SELECT name, state, unit, domain, device_class FROM ha_devices WHERE entity_id = ?",
+      )
+      .get(entityId);
+    return {
+      entityId,
+      label: row?.name || entityId,
+      state: row?.state ?? null,
+      unit: row?.unit || "",
+      domain: row?.domain || "",
+      deviceClass: row?.device_class || null,
     };
   });
 }
@@ -1270,6 +1334,7 @@ export function listDevicesForViewer(db, { isAdmin }) {
 }
 
 export function listAllDevices(db) {
+  const tiles = new Set(getDisplayTileIds(db));
   return db
     .prepare(
       `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit
@@ -1278,6 +1343,7 @@ export function listAllDevices(db) {
     .all()
     .map((r) => ({
       ...mapDeviceRow(r),
+      onTop: tiles.has(r.entity_id),
       exposure:
         r.allow_users === 1 ? "user" : r.allow_admin === 1 ? "admin" : "off",
     }));

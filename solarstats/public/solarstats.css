@@ -116,6 +116,17 @@ body {
   margin-bottom: 1.25rem;
 }
 
+#customTiles {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 200px));
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.75rem;
+}
+
 .tile {
   background: linear-gradient(180deg, var(--bg2), var(--tile));
   border: 1px solid var(--line);
