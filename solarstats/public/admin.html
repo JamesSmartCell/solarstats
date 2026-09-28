@@ -148,29 +148,22 @@
           <span>Show the daily pie on the dashboard</span>
         </label>
         <p class="hint">
-          Tick the box above to show the pie. <strong>On pie</strong> chooses each slice.
-          <strong>Inverter / Grid</strong> classifies the load ·
-          <strong>Colour</strong> is the doughnut slice ·
-          <strong>+</strong> merges another feed into this one (energy and watts).
+          Tick the box above to show the pie. Each row is one slice: switch it on, choose a power sensor in watts, then set the colour and whether that load is fed from the inverter or the grid.
         </p>
         <div class="table-wrap">
           <table class="admin-table" id="loadsTable">
             <thead>
               <tr>
-                <th>Name</th>
+                <th>On</th>
+                <th>Power sensor</th>
                 <th>Colour</th>
-                <th>Entity</th>
-                <th>Today</th>
-                <th>Inverter</th>
-                <th>Grid</th>
-                <th>On pie</th>
-                <th>Merge into this</th>
+                <th>Upstream</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
-        <p class="hint" id="loadsEmpty" hidden>No energy sensors synced yet. Wait for the next solarstatsapi poll.</p>
+        <p class="hint" id="loadsEmpty" hidden>No power sensors in watts have synced yet.</p>
         <p class="hint" id="loadsSaved" hidden>Saved</p>
       </section>
 

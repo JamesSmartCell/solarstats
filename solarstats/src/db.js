@@ -521,6 +521,10 @@ export function getLatestLoadsPower(db) {
     out[device.entityId] = powerId ? toNumber(devicesById.get(powerId)?.state) : null;
   }
 
+  for (const slot of getPieSlots(db)) {
+    if (slot.entityId) out[slot.key] = slot.watts;
+  }
+
   return out;
 }
 
@@ -732,12 +736,14 @@ export function setChartSeries(db, key, { show, entityId } = {}) {
 }
 
 export function recordChartSensors(db, devices, ts) {
+  if (!Array.isArray(devices) || !devices.length) return {};
   const cfg = getChartConfig(db);
   const wanted = new Map();
   for (const key of CHART_KEYS) {
     if (cfg[key].entityId) wanted.set(cfg[key].entityId, key);
   }
-  if (!wanted.size || !Array.isArray(devices)) return {};
+  const pieIds = new Set(readPieSlots(db).map((slot) => slot.entityId).filter(Boolean));
+  if (!wanted.size && !pieIds.size) return {};
   const insert = db.prepare(
     `INSERT OR REPLACE INTO sensor_history (entity_id, ts, value) VALUES (?, ?, ?)`,
   );
@@ -746,11 +752,11 @@ export function recordChartSensors(db, devices, ts) {
     for (const device of rows) {
       const entityId = String(device?.entity_id || device?.entityId || "").trim();
       const key = wanted.get(entityId);
-      if (!key) continue;
+      if (!key && !pieIds.has(entityId)) continue;
       const value = toNumber(device.state);
       if (value == null) continue;
       insert.run(entityId, ts, value);
-      points[key] = { ts, value };
+      if (key) points[key] = { ts, value };
     }
   });
   tx(devices);
@@ -800,20 +806,163 @@ export function getChartHistory(db, range = "24h") {
   return charts;
 }
 
+const PIE_SLOT_COUNT = 10;
+const PIE_SLOT_COLORS = [
+  "#42a5f5",
+  "#5c6bc0",
+  "#7e57c2",
+  "#26a69a",
+  "#66bb6a",
+  "#8bc34a",
+  "#cddc39",
+  "#ffa726",
+  "#ef5350",
+  "#26c6da",
+];
+
+function readPieSlots(db) {
+  let stored = [];
+  try {
+    const raw = getMeta(db, "pie_slots");
+    const parsed = raw ? JSON.parse(raw) : [];
+    stored = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    stored = [];
+  }
+  return Array.from({ length: PIE_SLOT_COUNT }, (_, index) => {
+    const row = stored[index] || {};
+    const color = /^#[0-9a-fA-F]{6}$/.test(row.color || "") ? row.color : PIE_SLOT_COLORS[index];
+    return {
+      on: !!row.on,
+      entityId: String(row.entityId || "").trim(),
+      color,
+      source: row.source === "inverter" ? "inverter" : "grid",
+    };
+  });
+}
+
+function writePieSlots(db, slots) {
+  setMeta(
+    db,
+    "pie_slots",
+    JSON.stringify(
+      slots.map((slot) => ({
+        on: !!slot.on,
+        entityId: slot.entityId,
+        color: slot.color,
+        source: slot.source,
+      })),
+    ),
+  );
+}
+
+export function isWattSensor(device) {
+  const entityId = String(device?.entityId || device?.entity_id || "");
+  const domain = String(device?.domain || entityId.split(".")[0] || "");
+  if (domain !== "sensor") return false;
+  const deviceClass = String(device?.deviceClass || device?.device_class || "").toLowerCase();
+  const unit = String(device?.unit || "").toLowerCase().replace(/\s+/g, "");
+  if (deviceClass === "energy" || unit === "kwh" || unit === "wh" || unit === "mwh" || unit === "kw" || unit === "mw") {
+    return false;
+  }
+  if (unit === "w") return true;
+  if (deviceClass === "power") return true;
+  return unit === "" && /(^|[._])power(_\d+)?$/i.test(entityId);
+}
+
+function powerWatts(device) {
+  const n = toNumber(device?.state);
+  if (n == null) return null;
+  return n;
+}
+
+function startOfLocalDay(now = Date.now()) {
+  const day = new Date(now);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
+}
+
+function kwhToday(db, entityId) {
+  const rows = db
+    .prepare(
+      `SELECT ts, value FROM sensor_history WHERE entity_id = ? AND ts >= ? ORDER BY ts ASC`,
+    )
+    .all(entityId, startOfLocalDay());
+  if (rows.length < 2) return 0;
+  let kwh = 0;
+  for (let i = 1; i < rows.length; i += 1) {
+    const dt = rows[i].ts - rows[i - 1].ts;
+    if (dt <= 0 || dt > MAX_GAP_MS) continue;
+    const avg = (rows[i - 1].value + rows[i].value) / 2;
+    if (avg > 0) kwh += (avg * (dt / 3600000)) / 1000;
+  }
+  return kwh;
+}
+
+export function getPieSlots(db) {
+  const devices = new Map(listAllDevices(db).map((device) => [device.entityId, device]));
+  return readPieSlots(db).map((slot, index) => {
+    const device = slot.entityId ? devices.get(slot.entityId) : null;
+    return {
+      index,
+      key: `slot${index}`,
+      ...slot,
+      label: device?.name || "",
+      watts: device && isWattSensor(device) ? powerWatts(device) : null,
+      kwh: slot.entityId ? kwhToday(db, slot.entityId) : null,
+    };
+  });
+}
+
+export function setPieSlot(db, index, patch = {}) {
+  const slotIndex = Number(index);
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= PIE_SLOT_COUNT) {
+    const err = new Error("unknown_pie_slot");
+    err.status = 400;
+    throw err;
+  }
+  const slots = readPieSlots(db);
+  const prev = slots[slotIndex];
+  const entityId = patch.entityId == null ? prev.entityId : String(patch.entityId || "").trim();
+  if (entityId) {
+    const device = listAllDevices(db).find((row) => row.entityId === entityId);
+    if (!device || !isWattSensor(device)) {
+      const err = new Error("Choose a sensor that reports power in W");
+      err.status = 400;
+      throw err;
+    }
+    const watts = powerWatts(device);
+    if (watts != null) {
+      db.prepare(
+        `INSERT OR REPLACE INTO sensor_history (entity_id, ts, value) VALUES (?, ?, ?)`,
+      ).run(entityId, Date.now(), watts);
+    }
+  }
+  const color = /^#[0-9a-fA-F]{6}$/.test(patch.color || "") ? patch.color : prev.color;
+  slots[slotIndex] = {
+    on: patch.on == null ? prev.on : !!patch.on,
+    entityId,
+    color,
+    source: patch.source === "inverter" || (patch.source == null && prev.source === "inverter") ? "inverter" : "grid",
+  };
+  writePieSlots(db, slots);
+  return getPieSlots(db);
+}
+
 export function getLoadConfig(db) {
-  return getPieAdminRows(db)
-    .filter((row) => row.onPie && !row.mergedInto)
-    .map((row) => ({
-      key: row.key,
-      label: row.label,
-      color: row.color,
-      source: row.source,
-      entityId: row.entityId,
-      builtin: row.builtin,
+  return getPieSlots(db)
+    .filter((slot) => slot.on && slot.entityId)
+    .map((slot) => ({
+      key: slot.key,
+      label: slot.label || slot.entityId,
+      color: slot.color,
+      source: slot.source,
+      entityId: slot.entityId,
+      builtin: false,
       onPie: true,
-      kwh: row.kwh,
-      watts: row.watts,
-      members: row.mergeChildren.map((child) => child.key),
+      kwh: slot.kwh,
+      watts: slot.watts,
+      members: [],
     }));
 }
 
@@ -1161,7 +1310,7 @@ export function insertSample(db, payload) {
         reason: "unavailable",
         ...sampleToApi(lastGood),
         energyKwhTotal: getEnergyTotal(db),
-        loadsDailyKwh: loads || loadsFromRow(lastGood),
+        loadsDailyKwh: getLatestLoadsDaily(db),
         loadsPowerW: getLatestLoadsPower(db),
         chartPoints,
       };
@@ -1170,7 +1319,7 @@ export function insertSample(db, payload) {
       skipped: true,
       reason: "unavailable",
       energyKwhTotal: getEnergyTotal(db),
-      loadsDailyKwh: loads,
+      loadsDailyKwh: getLatestLoadsDaily(db),
       loadsPowerW: getLatestLoadsPower(db),
       chartPoints,
     };
@@ -1239,6 +1388,7 @@ export function insertSample(db, payload) {
     skipped: false,
     ...sampleToApi(sample),
     energyKwhTotal: total,
+    loadsDailyKwh: getLatestLoadsDaily(db),
     loadsPowerW: getLatestLoadsPower(db),
     chartPoints,
   };
@@ -1349,21 +1499,29 @@ function downsampleRows(rows, maxPoints = 1500) {
 
 export function getLatestLoadsDaily(db) {
   const raw = getMeta(db, "loads_daily_kwh_latest");
+  let base = null;
   if (raw) {
     try {
-      return JSON.parse(raw);
+      base = JSON.parse(raw);
     } catch {
-      /* fall through */
+      base = null;
     }
   }
-  const latest = db
-    .prepare(
-      `SELECT loads_daily_kwh FROM samples
-       WHERE loads_daily_kwh IS NOT NULL
-       ORDER BY ts DESC LIMIT 1`,
-    )
-    .get();
-  return loadsFromRow(latest);
+  if (!base) {
+    const latest = db
+      .prepare(
+        `SELECT loads_daily_kwh FROM samples
+         WHERE loads_daily_kwh IS NOT NULL
+         ORDER BY ts DESC LIMIT 1`,
+      )
+      .get();
+    base = loadsFromRow(latest);
+  }
+  const out = { ...(base || {}) };
+  for (const slot of getPieSlots(db)) {
+    if (slot.entityId) out[slot.key] = slot.kwh ?? 0;
+  }
+  return out;
 }
 
 export function getHistory(db, range = "24h") {

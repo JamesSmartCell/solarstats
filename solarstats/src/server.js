@@ -29,6 +29,9 @@ import {
   setChartSeries,
   getChartHistory,
   getPieAdminRows,
+  getPieSlots,
+  setPieSlot,
+  getLatestLoadsPower,
   setLoadSources,
   setPieExtra,
   setPieColor,
@@ -720,6 +723,7 @@ app.get("/api/admin/users", requireSiteAdmin, (req, res) => {
     site: { slug: req.site.slug, name: req.site.name },
     loadConfig: getLoadConfig(sdb),
     pieRows: getPieAdminRows(sdb),
+    pieSlots: getPieSlots(sdb),
     ...boardOptions(sdb),
   });
 });
@@ -773,6 +777,16 @@ app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
       return res.status(err.status || 400).json({ error: err.message || "tile_failed" });
     }
   }
+  if (req.body?.pieSlot && req.body.pieSlot.index != null) {
+    try {
+      setPieSlot(sdb, req.body.pieSlot.index, req.body.pieSlot);
+      loadConfig = getLoadConfig(sdb);
+      broadcast({ type: "loadConfig", loadConfig }, slug);
+      broadcast({ type: "loadsPower", loadsPowerW: getLatestLoadsPower(sdb) }, slug);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message || "pie_slot_failed" });
+    }
+  }
   if (req.body?.loadSources) {
     setLoadSources(sdb, req.body.loadSources);
     loadConfig = getLoadConfig(sdb);
@@ -816,6 +830,7 @@ app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
     pieRows: getPieAdminRows(sdb),
     showPie: getShowPie(sdb),
     charts: getChartConfig(sdb),
+    pieSlots: getPieSlots(sdb),
   });
 });
 

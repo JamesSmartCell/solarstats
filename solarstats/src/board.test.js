@@ -13,7 +13,7 @@ import {
   setChartSeries,
   setDisplayTile,
   setMeta,
-  setPieExtra,
+  setPieSlot,
   tilesMode,
   tileViews,
   upsertDeviceStates,
@@ -48,13 +48,7 @@ test("a linked site hides the home pie and uses chosen top boxes", () => {
   assert.equal(getShowPie(db), false);
   assert.equal(tilesMode(db), "custom");
   assert.equal(getLoadConfig(db).some((row) => row.key === "fridge"), false);
-  assert.equal(getLoadConfig(db).some((row) => row.key === "sensor.cabin_daily"), false);
-
-  setPieExtra(db, "sensor.cabin_daily", true);
-  assert.deepEqual(
-    getLoadConfig(db).map((row) => row.key),
-    ["sensor.cabin_daily"],
-  );
+  assert.deepEqual(getLoadConfig(db), []);
 
   setDisplayTile(db, "sensor.cabin_pv_power", true);
   assert.equal(tilesMode(db), "custom");
@@ -124,4 +118,39 @@ test("chart switches plot the chosen sensor and stay off until selected", () => 
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
   fs.rmSync(homeDir, { recursive: true, force: true });
+});
+
+test("pie slots accept watt sensors and reject other units", () => {
+  const { dir, db } = openTemp();
+  upsertDeviceStates(db, [
+    { entityId: "sensor.fridge_power", name: "Fridge", state: "100", device_class: "power", unit: "W" },
+    { entityId: "sensor.cabin_daily", name: "Cabin daily", state: "3.2", device_class: "energy", unit: "kWh" },
+  ]);
+  assert.throws(
+    () => setPieSlot(db, 0, { on: true, entityId: "sensor.cabin_daily" }),
+    (err) => err.status === 400,
+  );
+
+  const now = Date.now();
+  db.prepare(`INSERT INTO sensor_history (entity_id, ts, value) VALUES (?, ?, ?)`).run(
+    "sensor.fridge_power",
+    now - 60 * 1000,
+    100,
+  );
+  setPieSlot(db, 0, { on: true, entityId: "sensor.fridge_power", source: "inverter", color: "#112233" });
+  const slots = setPieSlot(db, 1, { on: false, entityId: "", color: "#abcdef" });
+  assert.equal(slots.length, 10);
+  assert.equal(slots[0].on, true);
+  assert.equal(slots[0].source, "inverter");
+  assert.equal(slots[1].on, false);
+
+  const config = getLoadConfig(db);
+  assert.equal(config.length, 1);
+  assert.equal(config[0].key, "slot0");
+  assert.equal(config[0].label, "Fridge");
+  assert.equal(config[0].watts, 100);
+  assert.ok(config[0].kwh > 0);
+
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -9,6 +9,18 @@ function adminPath(path) {
 }
 
 let selectedGateway = "";
+let wattSensorChoices = [];
+
+function isWattChoice(device) {
+  if (device?.domain !== "sensor") return false;
+  const unit = String(device.unit || "").toLowerCase().replace(/\s+/g, "");
+  const deviceClass = String(device.deviceClass || "").toLowerCase();
+  if (unit === "kwh" || unit === "wh" || unit === "mwh" || unit === "kw" || unit === "mw" || deviceClass === "energy") {
+    return false;
+  }
+  if (unit === "w" || deviceClass === "power") return true;
+  return unit === "" && /(^|[._])power(_\d+)?$/i.test(device.entityId || "");
+}
 
 async function load() {
   const [usersRes, devicesRes, zbgwRes, fieldsRes, fwRes] = await Promise.all([
@@ -39,7 +51,6 @@ async function load() {
     renderUsers(data.users);
     loadSiteAdmins().catch((err) => console.warn(err));
   }
-  renderPieRows(data.pieRows || data.loadConfig || []);
   const showPie = document.getElementById("showPie");
   if (showPie) {
     showPie.checked = !!data.showPie;
@@ -52,11 +63,14 @@ async function load() {
   if (devicesRes.ok) {
     const devicesData = await devicesRes.json();
     sensors = (devicesData.devices || []).filter((d) => isSensorDomain(d.domain));
+    wattSensorChoices = sensors.filter(isWattChoice);
     renderDeviceGroups(devicesData.devices || []);
   } else {
     console.warn("devices HTTP", devicesRes.status);
+    wattSensorChoices = [];
     renderDeviceGroups([]);
   }
+  renderPieSlots(data.pieSlots || []);
   renderChartControls(data.charts || {}, sensors);
 
   if (zbgwRes.ok) {
@@ -459,8 +473,104 @@ async function postPieSettings(body, noteId = "loadsSaved") {
     return null;
   }
   flashSaved(noteId);
-  if (data.pieRows) renderPieRows(data.pieRows);
+  if (data.pieSlots) renderPieSlots(data.pieSlots);
+  else if (data.pieRows) renderPieRows(data.pieRows);
   return data;
+}
+
+function renderPieSlots(slots) {
+  const tbody = document.querySelector("#loadsTable tbody");
+  const empty = document.getElementById("loadsEmpty");
+  if (!tbody) return;
+  const list = Array.isArray(slots) && slots.length ? slots : Array.from({ length: 10 }, (_, index) => ({
+    index,
+    on: false,
+    entityId: "",
+    color: "#90a4ae",
+    source: "grid",
+  }));
+  if (empty) empty.hidden = wattSensorChoices.length > 0;
+  const taken = new Set(list.map((slot) => slot.entityId).filter(Boolean));
+  tbody.replaceChildren();
+
+  for (const slot of list) {
+    const tr = document.createElement("tr");
+    const onTd = document.createElement("td");
+    onTd.className = "acl-cell";
+    const on = document.createElement("input");
+    on.type = "checkbox";
+    on.checked = !!slot.on;
+    on.title = "Show this slice on the pie";
+
+    const sensorTd = document.createElement("td");
+    const select = document.createElement("select");
+    select.className = "merge-select chart-sensor";
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "Choose a power sensor";
+    select.appendChild(blank);
+    const choices = wattSensorChoices
+      .filter((sensor) => sensor.entityId === slot.entityId || !taken.has(sensor.entityId))
+      .sort((a, b) => String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)));
+    for (const sensor of choices) {
+      const option = document.createElement("option");
+      option.value = sensor.entityId;
+      option.textContent = sensor.name || sensor.entityId;
+      select.appendChild(option);
+    }
+    if (slot.entityId && ![...select.options].some((option) => option.value === slot.entityId)) {
+      const option = document.createElement("option");
+      option.value = slot.entityId;
+      option.textContent = slot.label || slot.entityId;
+      select.appendChild(option);
+    }
+    select.value = slot.entityId || "";
+
+    const colorTd = document.createElement("td");
+    colorTd.className = "pie-color-cell";
+    const color = document.createElement("input");
+    color.type = "color";
+    color.className = "pie-color";
+    color.value = /^#[0-9a-fA-F]{6}$/.test(slot.color || "") ? slot.color : "#90a4ae";
+    color.title = "Doughnut slice colour";
+
+    const upstreamTd = document.createElement("td");
+    const upstream = document.createElement("select");
+    upstream.className = "merge-select";
+    for (const [value, label] of [["grid", "Grid"], ["inverter", "Inverter"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      upstream.appendChild(option);
+    }
+    upstream.value = slot.source === "inverter" ? "inverter" : "grid";
+    upstream.title = "Upstream supply for this load";
+
+    const save = () => {
+      savePieSlot({
+        index: slot.index,
+        on: on.checked,
+        entityId: select.value,
+        color: color.value,
+        source: upstream.value,
+      });
+    };
+    on.addEventListener("change", save);
+    select.addEventListener("change", save);
+    color.addEventListener("change", save);
+    upstream.addEventListener("change", save);
+
+    onTd.appendChild(on);
+    sensorTd.appendChild(select);
+    colorTd.appendChild(color);
+    upstreamTd.appendChild(upstream);
+    tr.append(onTd, sensorTd, colorTd, upstreamTd);
+    tbody.appendChild(tr);
+  }
+}
+
+async function savePieSlot(slot) {
+  return postPieSettings({ pieSlot: slot });
 }
 
 function fillSensorSelect(select, sensors, selectedId) {
