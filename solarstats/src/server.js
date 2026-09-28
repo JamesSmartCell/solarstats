@@ -788,13 +788,23 @@ app.get("/api/admin/devices", requireSiteAdmin, (req, res) => {
   res.json({ devices: listAllDevices(req.site.db) });
 });
 
+function fieldsForAdmin(site) {
+  const listed = listHaFields(site.db);
+  if (site.default) return listed;
+  listed.fields = listed.fields.filter((field) => field.entityId);
+  listed.missing = listed.fields.filter((field) => field.status === "missing").map((field) => field.key);
+  listed.found = listed.fields.filter((field) => field.status !== "missing").length;
+  return listed;
+}
+
 app.get("/api/admin/fields", requireSiteAdmin, (req, res) => {
-  res.json(listHaFields(req.site.db));
+  res.json(fieldsForAdmin(req.site));
 });
 
 app.post("/api/admin/fields/:key", requireSiteAdmin, (req, res) => {
   try {
-    res.json(setFieldBinding(req.site.db, req.params.key, req.body?.entityId || req.body?.entity_id));
+    setFieldBinding(req.site.db, req.params.key, req.body?.entityId || req.body?.entity_id);
+    res.json(fieldsForAdmin(req.site));
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || "bind_failed" });
   }

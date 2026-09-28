@@ -89,8 +89,17 @@ function renderHaFields(data) {
   const tbody = document.querySelector("#fieldsTable tbody");
   const empty = document.getElementById("fieldsEmpty");
   const fields = data.fields || [];
+  const hint = document.getElementById("fieldsHint");
+  if (hint && SITE !== "home") {
+    hint.textContent = "Readings this home has matched. The original home's unused inverter rows are not listed.";
+  }
   tbody.replaceChildren();
-  empty.hidden = fields.length > 0;
+  if (empty) {
+    empty.hidden = fields.length > 0;
+    if (SITE !== "home" && !fields.length) {
+      empty.textContent = "No inverter reading is matched yet.";
+    }
+  }
 
   for (const field of fields) {
     const tr = document.createElement("tr");
