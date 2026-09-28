@@ -175,6 +175,29 @@
       </section>
 
       <section class="panel admin-panel">
+        <h2>Charts</h2>
+        <p class="hint">
+          Turn a chart on and choose the sensor that draws the line.
+          Readings are kept from the moment you pick the sensor.
+        </p>
+        <div class="chart-setting">
+          <label class="toggle-row">
+            <input type="checkbox" id="showBatteryChart" />
+            <span>Battery level</span>
+          </label>
+          <select id="batteryChartSensor" class="merge-select chart-sensor"></select>
+        </div>
+        <div class="chart-setting">
+          <label class="toggle-row">
+            <input type="checkbox" id="showInverterChart" />
+            <span>Inverter supply</span>
+          </label>
+          <select id="inverterChartSensor" class="merge-select chart-sensor"></select>
+        </div>
+        <p class="hint" id="chartsSaved" hidden>Saved</p>
+      </section>
+
+      <section class="panel admin-panel">
         <h2>Sensors</h2>
         <p class="hint">
           <strong>Top</strong> = one of the boxes at the top of the dashboard (up to 8) ·

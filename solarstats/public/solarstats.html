@@ -114,8 +114,8 @@
           </div>
         </article>
 
-        <article class="panel">
-          <h2>Battery charge</h2>
+        <article class="panel" id="batteryPanel" hidden>
+          <h2>Battery level</h2>
           <p class="hint" id="socHint">State of charge</p>
           <div class="chart-wrap"><canvas id="socChart"></canvas></div>
         </article>
@@ -126,9 +126,9 @@
           <div class="chart-wrap"><canvas id="pvChart"></canvas></div>
         </article>
 
-        <article class="panel">
+        <article class="panel" id="inverterPanel" hidden>
           <h2>Inverter supply</h2>
-          <p class="hint">Output power (W) with cumulative energy under the curve (kWh)</p>
+          <p class="hint" id="inverterHint">Output power (W) with cumulative energy under the curve (kWh)</p>
           <div class="chart-wrap"><canvas id="outChart"></canvas></div>
         </article>
       </section>

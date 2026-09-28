@@ -231,6 +231,23 @@ body {
   padding: 0.9rem 1rem 0.5rem;
 }
 
+.panel[hidden] {
+  display: none;
+}
+
+.chart-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.35rem;
+}
+
+.chart-sensor {
+  max-width: 28rem;
+  min-width: 16rem;
+}
+
 .panel h2 {
   margin: 0 0 0.35rem;
   font-size: 0.95rem;

@@ -161,6 +161,13 @@ export function openDatabase(dbPath) {
       child_key TEXT PRIMARY KEY,
       parent_key TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS sensor_history (
+      entity_id TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      value REAL NOT NULL,
+      PRIMARY KEY (entity_id, ts)
+    );
   `);
 
   ensureColumn(db, "samples", "loads_daily_kwh", "TEXT");
@@ -662,6 +669,137 @@ export function tileViews(db) {
   });
 }
 
+const CHART_KEYS = ["battery", "inverter"];
+
+function readStoredCharts(db) {
+  const raw = getMeta(db, "chart_series");
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function chartSlot(db, key) {
+  const stored = readStoredCharts(db)[key] || {};
+  const entityId = String(stored.entityId || "").trim();
+  const builtin = usesBuiltinLoads(db);
+  const row = entityId
+    ? db.prepare("SELECT name, unit, state FROM ha_devices WHERE entity_id = ?").get(entityId)
+    : null;
+  return {
+    show: stored.show == null ? builtin : !!stored.show,
+    entityId,
+    legacy: !entityId && builtin,
+    label: row?.name || "",
+    unit: row?.unit || "",
+  };
+}
+
+export function getChartConfig(db) {
+  return {
+    battery: chartSlot(db, "battery"),
+    inverter: chartSlot(db, "inverter"),
+  };
+}
+
+export function setChartSeries(db, key, { show, entityId } = {}) {
+  if (!CHART_KEYS.includes(key)) {
+    const err = new Error("unknown_chart");
+    err.status = 400;
+    throw err;
+  }
+  const current = readStoredCharts(db);
+  const prev = current[key] || {};
+  const nextId = entityId == null ? String(prev.entityId || "").trim() : String(entityId || "").trim();
+  current[key] = {
+    show: show == null ? prev.show !== false : !!show,
+    entityId: nextId,
+  };
+  setMeta(db, "chart_series", JSON.stringify(current));
+  if (nextId) {
+    const row = db.prepare("SELECT state FROM ha_devices WHERE entity_id = ?").get(nextId);
+    const value = toNumber(row?.state);
+    if (value != null) {
+      db.prepare(
+        `INSERT OR REPLACE INTO sensor_history (entity_id, ts, value) VALUES (?, ?, ?)`,
+      ).run(nextId, Date.now(), value);
+    }
+  }
+  return getChartConfig(db);
+}
+
+export function recordChartSensors(db, devices, ts) {
+  const cfg = getChartConfig(db);
+  const wanted = new Map();
+  for (const key of CHART_KEYS) {
+    if (cfg[key].entityId) wanted.set(cfg[key].entityId, key);
+  }
+  if (!wanted.size || !Array.isArray(devices)) return {};
+  const insert = db.prepare(
+    `INSERT OR REPLACE INTO sensor_history (entity_id, ts, value) VALUES (?, ?, ?)`,
+  );
+  const points = {};
+  const tx = db.transaction((rows) => {
+    for (const device of rows) {
+      const entityId = String(device?.entity_id || device?.entityId || "").trim();
+      const key = wanted.get(entityId);
+      if (!key) continue;
+      const value = toNumber(device.state);
+      if (value == null) continue;
+      insert.run(entityId, ts, value);
+      points[key] = { ts, value };
+    }
+  });
+  tx(devices);
+  return points;
+}
+
+function downsamplePairs(rows, maxPoints = 1500) {
+  if (rows.length <= maxPoints) return rows;
+  const bucketSize = Math.ceil(rows.length / maxPoints);
+  const out = [];
+  for (let i = 0; i < rows.length; i += bucketSize) {
+    const chunk = rows.slice(i, i + bucketSize);
+    let sum = 0;
+    let count = 0;
+    for (const row of chunk) {
+      if (row.value != null && Number.isFinite(row.value)) {
+        sum += row.value;
+        count += 1;
+      }
+    }
+    out.push({
+      ts: chunk[chunk.length - 1].ts,
+      value: count ? sum / count : null,
+    });
+  }
+  return out;
+}
+
+export function getChartHistory(db, range = "24h") {
+  const since = Date.now() - rangeToMs(range);
+  const cfg = getChartConfig(db);
+  const select = db.prepare(
+    `SELECT ts, value FROM sensor_history WHERE entity_id = ? AND ts >= ? ORDER BY ts ASC`,
+  );
+  const charts = {};
+  for (const key of CHART_KEYS) {
+    const slot = cfg[key];
+    const rows = slot.entityId ? select.all(slot.entityId, since) : [];
+    charts[key] = {
+      ...slot,
+      points: downsamplePairs(rows).map((row) => ({
+        x: new Date(row.ts).toISOString(),
+        y: row.value,
+      })),
+    };
+  }
+  return charts;
+}
+
 export function getLoadConfig(db) {
   return getPieAdminRows(db)
     .filter((row) => row.onPie && !row.mergedInto)
@@ -962,13 +1100,16 @@ export function insertSample(db, payload) {
     .prepare(`SELECT * FROM samples ORDER BY ts DESC LIMIT 1`)
     .get();
 
-  if (Array.isArray(payload.devices)) {
-    upsertDeviceStates(db, payload.devices);
-    upsertHaCatalog(db, payload.devices, ts);
-  } else if (Array.isArray(payload.states)) {
-    upsertDeviceStates(db, payload.states);
-    upsertHaCatalog(db, payload.states, ts);
+  const devices = Array.isArray(payload.devices)
+    ? payload.devices
+    : Array.isArray(payload.states)
+      ? payload.states
+      : [];
+  if (devices.length) {
+    upsertDeviceStates(db, devices);
+    upsertHaCatalog(db, devices, ts);
   }
+  const chartPoints = recordChartSensors(db, devices, ts);
 
   const resolved = resolveInverterFields(db, payload, ts);
   const incoming = {
@@ -1022,6 +1163,7 @@ export function insertSample(db, payload) {
         energyKwhTotal: getEnergyTotal(db),
         loadsDailyKwh: loads || loadsFromRow(lastGood),
         loadsPowerW: getLatestLoadsPower(db),
+        chartPoints,
       };
     }
     return {
@@ -1030,6 +1172,7 @@ export function insertSample(db, payload) {
       energyKwhTotal: getEnergyTotal(db),
       loadsDailyKwh: loads,
       loadsPowerW: getLatestLoadsPower(db),
+      chartPoints,
     };
   }
 
@@ -1097,6 +1240,7 @@ export function insertSample(db, payload) {
     ...sampleToApi(sample),
     energyKwhTotal: total,
     loadsPowerW: getLatestLoadsPower(db),
+    chartPoints,
   };
 }
 
@@ -1259,6 +1403,7 @@ export function getHistory(db, range = "24h") {
 export function pruneOldSamples(db, retentionDays) {
   const cutoff = Date.now() - retentionDays * 86400000;
   db.prepare("DELETE FROM samples WHERE ts < ?").run(cutoff);
+  db.prepare("DELETE FROM sensor_history WHERE ts < ?").run(cutoff);
 }
 
 export function listTrackedEntityIds(db) {

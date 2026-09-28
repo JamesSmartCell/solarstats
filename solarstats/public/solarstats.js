@@ -50,6 +50,7 @@ const els = {
   resetZoom: document.getElementById("resetZoom"),
   footNote: document.getElementById("footNote"),
   socHint: document.getElementById("socHint"),
+  inverterHint: document.getElementById("inverterHint"),
   adminLink: document.getElementById("adminLink"),
   deviceGrid: document.getElementById("deviceGrid"),
   sensorSection: document.getElementById("sensorSection"),
@@ -70,6 +71,10 @@ const state = {
   tilesMode: SITE === "home" ? "legacy" : "custom",
   showPie: SITE === "home",
   customTiles: [],
+  charts: {
+    battery: { show: SITE === "home", legacy: SITE === "home", points: [] },
+    inverter: { show: SITE === "home", legacy: SITE === "home", points: [] },
+  },
   devices: [],
   pendingToggles: new Map(),
   pieRows: [],
@@ -140,13 +145,74 @@ function applyLoadConfig(config) {
     }));
 }
 
+function applyCharts(charts) {
+  if (!charts) return;
+  for (const key of ["battery", "inverter"]) {
+    const next = charts[key];
+    if (!next) continue;
+    const prev = state.charts[key] || {};
+    state.charts[key] = {
+      ...prev,
+      ...next,
+      points: Array.isArray(next.points) ? next.points : prev.points || [],
+    };
+  }
+}
+
+function chartCaption(slot, legacyText) {
+  const label = RANGE_LABELS[state.range] || state.range;
+  if (slot?.legacy) return `${legacyText} · ${label}`;
+  if (!slot?.entityId) return `Choose a sensor in admin · ${label}`;
+  const name = slot.label || slot.entityId;
+  const unit = slot.unit ? ` · ${slot.unit}` : "";
+  return `${name}${unit} · ${label}`;
+}
+
+function paintChartPanels() {
+  const battery = state.charts.battery || {};
+  const inverter = state.charts.inverter || {};
+  const batteryPanel = document.getElementById("batteryPanel");
+  const inverterPanel = document.getElementById("inverterPanel");
+  const reveal = (panel, show, chart) => {
+    if (!panel || !chart) return;
+    const wasHidden = panel.hidden;
+    panel.hidden = !show;
+    if (wasHidden && show) {
+      chart.resize();
+      chart.update("none");
+    }
+  };
+  reveal(batteryPanel, !!battery.show, typeof socChart !== "undefined" ? socChart : null);
+  reveal(inverterPanel, !!inverter.show, typeof outChart !== "undefined" ? outChart : null);
+  if (els.socHint) els.socHint.textContent = chartCaption(battery, "State of charge");
+  if (els.inverterHint) {
+    els.inverterHint.textContent = chartCaption(
+      inverter,
+      "Output power (W) with cumulative energy under the curve (kWh)",
+    );
+  }
+}
+
+function appendChartPoint(key, point) {
+  if (!point || point.value == null) return;
+  const slot = state.charts[key];
+  if (!slot?.entityId) return;
+  const x = new Date(point.ts).toISOString();
+  const points = slot.points || (slot.points = []);
+  const last = points[points.length - 1];
+  if (last && last.x === x) last.y = point.value;
+  else points.push({ x, y: point.value });
+}
+
 function applyBoard(payload) {
   if (!payload) return;
   if (payload.tilesMode) state.tilesMode = payload.tilesMode;
   if (payload.showPie != null) state.showPie = !!payload.showPie;
   if (Array.isArray(payload.tiles)) state.customTiles = payload.tiles;
+  applyCharts(payload.charts);
   paintTiles();
   paintPie();
+  paintChartPanels();
 }
 
 function paintPie() {
@@ -576,23 +642,54 @@ function updateTiles(sample) {
 
 function updateChrome() {
   const label = RANGE_LABELS[state.range] || state.range;
-  els.socHint.textContent = `State of charge · ${label}`;
   els.footNote.textContent = `Window: ${label}`;
+  paintChartPanels();
 }
 
 function syncCharts() {
+  const battery = state.charts?.battery || {};
+  const inverter = state.charts?.inverter || {};
   const soc = [];
   const pv = [];
   const out = [];
   const energy = [];
+  const batteryLegacy = !!battery.legacy;
+  const inverterLegacy = !!inverter.legacy;
 
-  for (const s of state.samples) {
-    const x = s.ts;
-    soc.push({ x, y: s.batterySoc });
-    pv.push({ x, y: s.pvPower });
-    out.push({ x, y: s.outputPower });
-    energy.push({ x, y: s.energyKwhCumulative });
+  if (batteryLegacy) {
+    for (const s of state.samples) soc.push({ x: s.ts, y: s.batterySoc });
+  } else {
+    soc.push(...(battery.points || []));
   }
+  if (inverterLegacy) {
+    for (const s of state.samples) {
+      out.push({ x: s.ts, y: s.outputPower });
+      energy.push({ x: s.ts, y: s.energyKwhCumulative });
+    }
+  } else {
+    out.push(...(inverter.points || []));
+  }
+  for (const s of state.samples) {
+    pv.push({ x: s.ts, y: s.pvPower });
+  }
+
+  const batteryPercent = batteryLegacy || battery.unit === "%";
+  socChart.options.scales.y.suggestedMin = 0;
+  socChart.options.scales.y.suggestedMax = batteryPercent ? 100 : undefined;
+  socChart.data.datasets[0].label = batteryLegacy
+    ? "Battery SoC %"
+    : battery.label || battery.entityId;
+
+  outChart.data.datasets[1].hidden = !inverterLegacy;
+  if (outChart.options.scales.y1) outChart.options.scales.y1.display = inverterLegacy;
+  outChart.options.scales.y.title = {
+    display: true,
+    text: inverterLegacy ? "W" : inverter.unit || "",
+    color: "#8b9aab",
+  };
+  outChart.data.datasets[0].label = inverterLegacy
+    ? "Output Power W"
+    : inverter.label || inverter.entityId;
 
   socChart.data.datasets[0].data = smoothSeries(soc, 0.28);
   pvChart.data.datasets[0].data = smoothSeries(pv, 0.2);
@@ -614,6 +711,7 @@ function applyHistory(payload) {
   state.samples = payload.samples || [];
   state.energyKwhTotal = payload.energyKwhTotal || 0;
   state.rangeStartMs = Date.now() - rangeToMs(state.range);
+  applyBoard(payload);
   syncCharts();
   resetAllZoom();
   updateTiles(
@@ -622,7 +720,6 @@ function applyHistory(payload) {
       : null,
   );
   applyLoadConfig(payload.loadConfig);
-  applyBoard(payload);
   updateLoadsPie(payload.loadsDailyKwh || payload.latest?.loadsDailyKwh || null);
   updateCurrentLoads(payload.loadsPowerW || payload.latest?.loadsPowerW || null);
   updateChrome();
@@ -802,8 +899,13 @@ function connectWs() {
         if (msg.loadsDailyKwh) updateLoadsPie(msg.loadsDailyKwh);
         if (msg.loadsPowerW) updateCurrentLoads(msg.loadsPowerW);
         if (msg.devices) renderDevices(msg.devices);
+      } else if (msg.type === "chartPoint") {
+        appendChartPoint("battery", msg.battery);
+        appendChartPoint("inverter", msg.inverter);
+        syncCharts();
       } else if (msg.type === "board") {
         applyBoard(msg);
+        syncCharts();
         updateLoadsPie();
       } else if (msg.type === "loadConfig") {
         applyLoadConfig(msg.loadConfig);

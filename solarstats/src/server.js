@@ -25,6 +25,9 @@ import {
   setDisplayTile,
   tileViews,
   tilesMode,
+  getChartConfig,
+  setChartSeries,
+  getChartHistory,
   getPieAdminRows,
   setLoadSources,
   setPieExtra,
@@ -754,6 +757,14 @@ app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
     setShowPie(sdb, !!req.body.showPie);
     broadcast({ type: "board", ...boardOptions(sdb) }, slug);
   }
+  if (req.body?.chart?.key) {
+    try {
+      setChartSeries(sdb, req.body.chart.key, req.body.chart);
+      broadcast({ type: "board", ...boardOptions(sdb) }, slug);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message || "chart_failed" });
+    }
+  }
   if (req.body?.displayTile?.entityId) {
     try {
       setDisplayTile(sdb, req.body.displayTile.entityId, !!req.body.displayTile.on);
@@ -799,7 +810,13 @@ app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
     const status = err.status || 400;
     return res.status(status).json({ error: err.message || "merge_failed" });
   }
-  res.json({ settings, loadConfig, pieRows: getPieAdminRows(sdb), showPie: getShowPie(sdb) });
+  res.json({
+    settings,
+    loadConfig,
+    pieRows: getPieAdminRows(sdb),
+    showPie: getShowPie(sdb),
+    charts: getChartConfig(sdb),
+  });
 });
 
 app.get("/api/admin/devices", requireSiteAdmin, (req, res) => {
@@ -811,6 +828,7 @@ function boardOptions(db) {
     showPie: getShowPie(db),
     tiles: tileViews(db),
     tilesMode: tilesMode(db),
+    charts: getChartConfig(db),
   };
 }
 
@@ -1013,6 +1031,7 @@ app.get("/api/history", requireApproved, requireSite, (req, res) => {
     ...getHistory(sdb, range),
     loadConfig: getLoadConfig(sdb),
     ...boardOptions(sdb),
+    charts: getChartHistory(sdb, range),
     site: { slug: req.site.slug, name: req.site.name },
   });
 });
@@ -1057,6 +1076,9 @@ function handleIngest(req, res) {
     const sample = insertSample(site.db, req.body || {});
     if (!sample.skipped) {
       broadcast({ type: "sample", sample }, site.slug);
+    }
+    if (sample.chartPoints && (sample.chartPoints.battery || sample.chartPoints.inverter)) {
+      broadcast({ type: "chartPoint", ...sample.chartPoints }, site.slug);
     }
     if (sample.loadsPowerW) {
       broadcast({ type: "loadsPower", loadsPowerW: sample.loadsPowerW }, site.slug);

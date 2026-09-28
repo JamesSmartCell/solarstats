@@ -48,13 +48,16 @@ async function load() {
     };
   }
 
+  let sensors = [];
   if (devicesRes.ok) {
     const devicesData = await devicesRes.json();
+    sensors = (devicesData.devices || []).filter((d) => isSensorDomain(d.domain));
     renderDeviceGroups(devicesData.devices || []);
   } else {
     console.warn("devices HTTP", devicesRes.status);
     renderDeviceGroups([]);
   }
+  renderChartControls(data.charts || {}, sensors);
 
   if (zbgwRes.ok) {
     const zbgwData = await zbgwRes.json();
@@ -443,7 +446,7 @@ async function saveLoadSource(key, source) {
   flashSaved("loadsSaved");
 }
 
-async function postPieSettings(body) {
+async function postPieSettings(body, noteId = "loadsSaved") {
   const res = await fetch(adminPath("/api/admin/settings"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -451,13 +454,53 @@ async function postPieSettings(body) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    alert(data.error || "Pie update failed");
+    alert(data.error || "Update failed");
     load().catch(console.error);
     return null;
   }
-  flashSaved("loadsSaved");
+  flashSaved(noteId);
   if (data.pieRows) renderPieRows(data.pieRows);
   return data;
+}
+
+function fillSensorSelect(select, sensors, selectedId) {
+  select.replaceChildren();
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = "Choose a sensor";
+  select.appendChild(blank);
+  const sorted = [...sensors].sort((a, b) =>
+    String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)),
+  );
+  for (const sensor of sorted) {
+    const option = document.createElement("option");
+    option.value = sensor.entityId;
+    option.textContent = sensor.name || sensor.entityId;
+    select.appendChild(option);
+  }
+  select.value = selectedId && [...select.options].some((opt) => opt.value === selectedId) ? selectedId : "";
+}
+
+function renderChartControls(charts, sensors) {
+  const rows = [
+    ["battery", "showBatteryChart", "batteryChartSensor"],
+    ["inverter", "showInverterChart", "inverterChartSensor"],
+  ];
+  for (const [key, checkId, selectId] of rows) {
+    const check = document.getElementById(checkId);
+    const select = document.getElementById(selectId);
+    if (!check || !select) continue;
+    const slot = charts[key] || {};
+    check.checked = !!slot.show;
+    fillSensorSelect(select, sensors, slot.entityId);
+    const save = () => saveChart(key, check.checked, select.value);
+    check.onchange = save;
+    select.onchange = save;
+  }
+}
+
+async function saveChart(key, show, entityId) {
+  return postPieSettings({ chart: { key, show, entityId } }, "chartsSaved");
 }
 
 async function savePieExtra(entityId, onPie) {
