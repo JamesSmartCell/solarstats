@@ -48,7 +48,6 @@ const els = {
   loadPercent: document.getElementById("loadPercent"),
   energyTotal: document.getElementById("energyTotal"),
   rangeSelect: document.getElementById("rangeSelect"),
-  resetZoom: document.getElementById("resetZoom"),
   footNote: document.getElementById("footNote"),
   socHint: document.getElementById("socHint"),
   inverterHint: document.getElementById("inverterHint"),
@@ -334,23 +333,6 @@ function smoothSeries(points, alpha = 0.22) {
   });
 }
 
-const zoomOptions = {
-  pan: {
-    enabled: true,
-    mode: "x",
-    modifierKey: null,
-  },
-  zoom: {
-    wheel: { enabled: true, speed: 0.1 },
-    pinch: { enabled: true },
-    mode: "x",
-  },
-  limits: {
-    x: { min: "original", max: "original" },
-    y: undefined,
-  },
-};
-
 const chartDefaults = {
   responsive: true,
   maintainAspectRatio: false,
@@ -384,7 +366,6 @@ const chartDefaults = {
       titleColor: "#e8eef3",
       bodyColor: "#e8eef3",
     },
-    zoom: zoomOptions,
   },
 };
 
@@ -763,19 +744,12 @@ function syncCharts() {
   }
 }
 
-function resetAllZoom() {
-  for (const chart of charts) {
-    chart.resetZoom();
-  }
-}
-
 function applyHistory(payload) {
   state.samples = payload.samples || [];
   state.energyKwhTotal = payload.energyKwhTotal || 0;
   state.rangeStartMs = Date.now() - rangeToMs(state.range);
   applyBoard(payload);
   syncCharts();
-  resetAllZoom();
   updateTiles(
     payload.latest
       ? { ...payload.latest, energyKwhTotal: state.energyKwhTotal }
@@ -1040,8 +1014,6 @@ els.rangeSelect.addEventListener("change", () => {
   state.range = els.rangeSelect.value;
   loadHistory().catch((err) => console.error(err));
 });
-
-els.resetZoom.addEventListener("click", resetAllZoom);
 
 paintTiles();
 paintPie();
