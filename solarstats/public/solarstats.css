@@ -552,6 +552,19 @@ body {
 }
 
 @media (max-width: 800px) {
+  .tiles,
+  #customTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tile {
+    min-width: 0;
+  }
+
+  .tile .value {
+    overflow: hidden;
+  }
+
   .device-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
