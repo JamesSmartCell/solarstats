@@ -551,6 +551,25 @@ body {
   color: var(--muted);
 }
 
+@media (max-width: 800px) {
+  .device-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .device-grid > .hint {
+    grid-column: 1 / -1;
+  }
+
+  .device-btn {
+    min-width: 0;
+    width: 100%;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+  }
+}
+
 @media (max-width: 640px) {
   .status {
     align-items: flex-start;
