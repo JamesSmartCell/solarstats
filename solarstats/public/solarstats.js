@@ -22,7 +22,11 @@ const RANGE_LABELS = {
 };
 
 const PIE_GAP_COLOR = "#12181e";
-const PIE_GAP_FRACTION = 0.018;
+const PIE_GAP_FRACTION = 0.045;
+
+function isSolarSource(source) {
+  return source === "inverter" || source === "solar";
+}
 
 const LOAD_SLICES = [
   { key: "officePc", label: "Office PC", color: "#42a5f5", source: "grid" },
@@ -140,7 +144,7 @@ function applyLoadConfig(config) {
       key: s.key,
       label: s.label || s.key,
       color: s.color || "#90a4ae",
-      source: s.source === "inverter" ? "inverter" : "grid",
+      source: isSolarSource(s.source) ? "inverter" : "grid",
       members: Array.isArray(s.members) ? s.members.filter(Boolean) : [],
     }));
 }
@@ -282,7 +286,7 @@ function pieChartModel(slices, kwhMap) {
   const inverter = [];
   const grid = [];
   for (const slice of slices) {
-    (slice.source === "inverter" ? inverter : grid).push(slice);
+    (isSolarSource(slice.source) ? inverter : grid).push(slice);
   }
   const invVals = inverter.map((s) => sumMapValues(kwhMap, sliceKeys(s)));
   const gridVals = grid.map((s) => sumMapValues(kwhMap, sliceKeys(s)));
@@ -474,8 +478,50 @@ const outChart = new Chart(document.getElementById("outChart"), {
   },
 });
 
+function drawPieGroupLabels(chart) {
+  const rows = state.pieRows || [];
+  const meta = chart.getDatasetMeta(0);
+  if (!meta?.data?.length) return;
+  const groups = [];
+  rows.forEach((row, index) => {
+    if (!row?.value || row.slice?.gap) return;
+    const arc = meta.data[index];
+    if (!arc) return;
+    const name = isSolarSource(row.slice.source) ? "Solar" : "Grid";
+    const last = groups[groups.length - 1];
+    if (!last || last.name !== name) {
+      groups.push({ name, start: arc.startAngle, end: arc.endAngle, arc });
+    } else {
+      last.end = arc.endAngle;
+    }
+  });
+  if (groups.length < 2) return;
+  const ctx = chart.ctx;
+  ctx.save();
+  ctx.font = "600 11px IBM Plex Sans, sans-serif";
+  ctx.fillStyle = "#c5d0da";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const group of groups) {
+    const span = group.end - group.start;
+    if (span < 0.45) continue;
+    const mid = (group.start + group.end) / 2;
+    const radius = group.arc.innerRadius * 0.62;
+    ctx.fillText(group.name, group.arc.x + Math.cos(mid) * radius, group.arc.y + Math.sin(mid) * radius);
+  }
+  ctx.restore();
+}
+
 const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
   type: "doughnut",
+  plugins: [
+    {
+      id: "pieGroupLabels",
+      afterDatasetsDraw(chart) {
+        drawPieGroupLabels(chart);
+      },
+    },
+  ],
   data: {
     labels: LOAD_SLICES.map((s) => s.label),
     datasets: [
@@ -514,7 +560,8 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
             const extra = row?.slice?.members?.length
               ? ` · ${row.slice.members.length} merged`
               : "";
-            return `${ctx.label}: ${Number.isFinite(v) ? v.toFixed(3) : "—"} kWh${extra}`;
+            const supply = isSolarSource(row?.slice?.source) ? "solar" : "grid";
+            return `${ctx.label}: ${Number.isFinite(v) ? v.toFixed(3) : "—"} kWh · ${supply}${extra}`;
           },
         },
       },
@@ -560,48 +607,66 @@ function updateCurrentLoads(power) {
   if (!els.currentLoadsList) return;
 
   const src = state.loadsPowerW || {};
-  const rows = currentLoadSlices()
-    .map((s) => ({
-      label: s.label,
-      color: s.color,
-      watts: sumMapValues(src, sliceKeys(s)),
+  const groups = [
+    { title: "Solar supply", solar: true },
+    { title: "Grid supply", solar: false },
+  ]
+    .map((group) => ({
+      title: group.title,
+      rows: currentLoadSlices()
+        .filter((slice) => isSolarSource(slice.source) === group.solar)
+        .map((slice) => ({
+          label: slice.label,
+          color: slice.color,
+          watts: sumMapValues(src, sliceKeys(slice)),
+        }))
+        .filter((row) => row.watts > 0)
+        .sort((a, b) => b.watts - a.watts),
     }))
-    .filter((row) => row.watts > 0)
-    .sort((a, b) => b.watts - a.watts);
+    .filter((group) => group.rows.length);
 
   els.currentLoadsList.replaceChildren();
-  if (!rows.length) {
+  if (!groups.length) {
     const empty = document.createElement("li");
     empty.className = "current-loads-empty";
     empty.textContent = "Nothing drawing power";
     els.currentLoadsList.appendChild(empty);
   } else {
-    for (const row of rows) {
-      const li = document.createElement("li");
-      li.className = "current-load-row";
+    for (const group of groups) {
+      const heading = document.createElement("li");
+      heading.className = "current-load-group";
+      heading.textContent = group.title;
+      els.currentLoadsList.appendChild(heading);
+      for (const row of group.rows) {
+        const li = document.createElement("li");
+        li.className = "current-load-row";
 
-      const name = document.createElement("span");
-      name.className = "current-load-name";
-      const swatch = document.createElement("span");
-      swatch.className = "current-load-swatch";
-      swatch.style.background = row.color;
-      const label = document.createElement("span");
-      label.className = "current-load-label";
-      label.textContent = row.label;
-      name.append(swatch, label);
+        const name = document.createElement("span");
+        name.className = "current-load-name";
+        const swatch = document.createElement("span");
+        swatch.className = "current-load-swatch";
+        swatch.style.background = row.color;
+        const label = document.createElement("span");
+        label.className = "current-load-label";
+        label.textContent = row.label;
+        name.append(swatch, label);
 
-      const watts = document.createElement("span");
-      watts.className = "current-load-watts";
-      watts.textContent = formatWatts(row.watts);
+        const watts = document.createElement("span");
+        watts.className = "current-load-watts";
+        watts.textContent = formatWatts(row.watts);
 
-      li.append(name, watts);
-      els.currentLoadsList.appendChild(li);
+        li.append(name, watts);
+        els.currentLoadsList.appendChild(li);
+      }
     }
   }
 
   if (els.currentLoadsTotal) {
-    const total = rows.reduce((sum, row) => sum + row.watts, 0);
-    els.currentLoadsTotal.textContent = rows.length ? formatWatts(total) : "—";
+    const total = groups.reduce(
+      (sum, group) => sum + group.rows.reduce((inner, row) => inner + row.watts, 0),
+      0,
+    );
+    els.currentLoadsTotal.textContent = groups.length ? formatWatts(total) : "—";
   }
 }
 

@@ -331,6 +331,19 @@ body {
   flex: 1;
 }
 
+.current-load-group {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.current-load-group:first-child {
+  margin-top: 0;
+}
+
 .current-load-row {
   display: flex;
   align-items: baseline;

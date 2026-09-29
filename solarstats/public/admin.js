@@ -577,14 +577,14 @@ function renderPieSlots(slots) {
     const upstreamTd = document.createElement("td");
     const upstream = document.createElement("select");
     upstream.className = "merge-select";
-    for (const [value, label] of [["grid", "Grid"], ["inverter", "Inverter"]]) {
+    for (const [value, label] of [["inverter", "Solar"], ["grid", "Grid"]]) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
       upstream.appendChild(option);
     }
     upstream.value = slot.source === "inverter" ? "inverter" : "grid";
-    upstream.title = "Upstream supply for this load";
+    upstream.title = "Solar slices are drawn together, then grid slices";
 
     const save = () => {
       savePieSlot({
