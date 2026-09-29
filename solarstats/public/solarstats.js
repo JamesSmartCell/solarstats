@@ -989,18 +989,18 @@ async function loadMe() {
     notice.append(button);
     return;
   }
-  const link = document.createElement("a");
-  link.href = "#";
-  link.textContent = "Sign in with a different account";
-  link.addEventListener("click", (event) => {
-    event.preventDefault();
-    const form = document.createElement("form");
-    form.method = "post";
-    form.action = `/logout?next=${encodeURIComponent(`/${SITE}`)}`;
-    document.body.append(form);
-    form.submit();
-  });
-  notice.append(link);
+  // const link = document.createElement("a");
+  // link.href = "#";
+  // link.textContent = "Sign in with a different account";
+  // link.addEventListener("click", (event) => {
+  //   event.preventDefault();
+  //   const form = document.createElement("form");
+  //   form.method = "post";
+  //   form.action = `/logout?next=${encodeURIComponent(`/${SITE}`)}`;
+  //   document.body.append(form);
+  //   form.submit();
+  // });
+  // notice.append(link);
 }
 
 els.rangeSelect.addEventListener("change", () => {
