@@ -447,14 +447,12 @@ const outChart = new Chart(document.getElementById("outChart"), {
       y: {
         ...chartDefaults.scales.y,
         position: "left",
-        title: { display: true, text: "W", color: "#8b9aab" },
         suggestedMin: 0,
       },
       y1: {
         position: "right",
         ticks: { color: "#8b9aab" },
         grid: { drawOnChartArea: false },
-        title: { display: true, text: "kWh", color: "#8b9aab" },
         suggestedMin: 0,
       },
     },
@@ -725,11 +723,6 @@ function syncCharts() {
 
   outChart.data.datasets[1].hidden = !inverterLegacy;
   if (outChart.options.scales.y1) outChart.options.scales.y1.display = inverterLegacy;
-  outChart.options.scales.y.title = {
-    display: true,
-    text: inverterLegacy ? "W" : inverter.unit || "",
-    color: "#8b9aab",
-  };
   outChart.data.datasets[0].label = inverterLegacy
     ? "Output Power W"
     : inverter.label || inverter.entityId;

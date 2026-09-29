@@ -29,7 +29,7 @@ body.theme-lcars {
   --lcars-violet: #c9f;
   --lcars-bluey: #89f;
   --lcars-orange: #f80;
-  --lcars-orange-dim: #af3800; /* #f80 rgb(255, 136, 0) minus 80 on each channel */
+  --lcars-orange-dim: #930;
   --lcars-gold: #f96;
   --lcars-amber: #fa0;
   --lcars-red: #c44;
