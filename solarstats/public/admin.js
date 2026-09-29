@@ -978,26 +978,44 @@ document.getElementById("viewerForm")?.addEventListener("submit", async (event) 
   flashSaved("viewerSaved");
 });
 
-document.querySelectorAll(".bulk-row button").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    btn.disabled = true;
+document.querySelectorAll(".col-toggle input").forEach((box) => {
+  box.addEventListener("change", async () => {
+    const filling = box.checked;
+    box.disabled = true;
     try {
       const res = await fetch(adminPath("/api/admin/devices/exposure"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          group: btn.dataset.group,
-          column: btn.dataset.column,
-          mode: btn.dataset.mode,
+          group: box.dataset.group,
+          column: box.dataset.column,
+          mode: filling ? "all" : "none",
         }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert((await res.json().catch(() => ({}))).error || "Could not update the list");
+        box.checked = !filling;
+        alert(data.error || "Could not update the list");
         return;
       }
-      renderDeviceGroups((await res.json()).devices || []);
+      if (filling && box.dataset.column === "admin") {
+        const other = document.querySelector(
+          `.col-toggle input[data-group="${box.dataset.group}"][data-column="user"]`,
+        );
+        if (other) other.checked = false;
+      }
+      if (filling && box.dataset.column === "user") {
+        const other = document.querySelector(
+          `.col-toggle input[data-group="${box.dataset.group}"][data-column="admin"]`,
+        );
+        if (other) other.checked = false;
+      }
+      renderDeviceGroups(data.devices || []);
+      if (data.capped) {
+        alert("Only 8 readings can sit in the top row. The first 8 are ticked.");
+      }
     } finally {
-      btn.disabled = false;
+      box.disabled = false;
     }
   });
 });

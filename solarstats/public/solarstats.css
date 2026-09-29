@@ -235,20 +235,14 @@ body {
   display: none;
 }
 
-.bulk-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem 0.55rem;
-  margin: 0 0 0.75rem;
+.col-toggle {
+  text-align: center;
+  white-space: nowrap;
 }
 
-.bulk-row span {
-  color: var(--muted);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  margin-left: 0.4rem;
+.col-toggle input {
+  display: block;
+  margin: 0 auto 0.3rem;
 }
 
 .viewer-list {

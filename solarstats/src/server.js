@@ -23,6 +23,7 @@ import {
   getShowPie,
   setShowPie,
   setDisplayTile,
+  setSensorTops,
   tileViews,
   tilesMode,
   getChartConfig,
@@ -984,7 +985,16 @@ app.delete("/api/admin/viewers", requireSiteAdmin, (req, res) => {
 
 app.post("/api/admin/devices/exposure", requireSiteAdmin, (req, res) => {
   try {
-    const devices = setGroupExposure(req.site.db, {
+    const sdb = req.site.db;
+    if (req.body?.column === "top") {
+      if (req.body?.group !== "sensors") {
+        return res.status(400).json({ error: "unknown_group" });
+      }
+      const { capped } = setSensorTops(sdb, req.body?.mode === "all");
+      broadcast({ type: "board", ...boardOptions(sdb) }, req.site.slug);
+      return res.json({ devices: listAllDevices(sdb), capped });
+    }
+    const devices = setGroupExposure(sdb, {
       group: req.body?.group,
       column: req.body?.column,
       mode: req.body?.mode,

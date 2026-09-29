@@ -15,6 +15,7 @@ import {
   setMeta,
   setGroupExposure,
   setPieSlot,
+  setSensorTops,
   tilesMode,
   tileViews,
   upsertDeviceStates,
@@ -176,6 +177,12 @@ test("select all and select none apply to one column of one group", () => {
   const switchesAdmin = setGroupExposure(db, { group: "switches", column: "admin", mode: "none" });
   assert.equal(switchesAdmin.find((row) => row.entityId === "switch.cabin_pump").exposure, "off");
   assert.equal(switchesAdmin.find((row) => row.entityId === "sensor.cabin_soc").exposure, "off");
+
+  const topped = setSensorTops(db, true);
+  assert.equal(topped.capped, false);
+  assert.equal(tileViews(db).length, 2);
+  setSensorTops(db, false);
+  assert.deepEqual(tileViews(db), []);
 
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });

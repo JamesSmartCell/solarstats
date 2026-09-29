@@ -214,14 +214,6 @@
           <strong>Admin</strong> = on the board for admin only ·
           neither = hidden from the board
         </p>
-        <p class="bulk-row">
-          <span>Admin</span>
-          <button type="button" class="toolbar-btn" data-group="sensors" data-column="admin" data-mode="all">Select all</button>
-          <button type="button" class="toolbar-btn" data-group="sensors" data-column="admin" data-mode="none">Select none</button>
-          <span>User</span>
-          <button type="button" class="toolbar-btn" data-group="sensors" data-column="user" data-mode="all">Select all</button>
-          <button type="button" class="toolbar-btn" data-group="sensors" data-column="user" data-mode="none">Select none</button>
-        </p>
         <div class="table-wrap">
           <table class="admin-table" id="sensorsTable">
             <thead>
@@ -229,9 +221,18 @@
                 <th>Name</th>
                 <th>Entity</th>
                 <th>State</th>
-                <th>Top</th>
-                <th>Admin</th>
-                <th>User</th>
+                <th class="col-toggle">
+                  <input type="checkbox" data-group="sensors" data-column="top" aria-label="Top, all or none" />
+                  Top
+                </th>
+                <th class="col-toggle">
+                  <input type="checkbox" data-group="sensors" data-column="admin" aria-label="Admin, all or none" />
+                  Admin
+                </th>
+                <th class="col-toggle">
+                  <input type="checkbox" data-group="sensors" data-column="user" aria-label="User, all or none" />
+                  User
+                </th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -248,14 +249,6 @@
           <strong>Admin</strong> = on the board for admin only ·
           neither = hidden from the board
         </p>
-        <p class="bulk-row">
-          <span>Admin</span>
-          <button type="button" class="toolbar-btn" data-group="switches" data-column="admin" data-mode="all">Select all</button>
-          <button type="button" class="toolbar-btn" data-group="switches" data-column="admin" data-mode="none">Select none</button>
-          <span>User</span>
-          <button type="button" class="toolbar-btn" data-group="switches" data-column="user" data-mode="all">Select all</button>
-          <button type="button" class="toolbar-btn" data-group="switches" data-column="user" data-mode="none">Select none</button>
-        </p>
         <div class="table-wrap">
           <table class="admin-table" id="devicesTable">
             <thead>
@@ -263,8 +256,14 @@
                 <th>Name</th>
                 <th>Entity</th>
                 <th>State</th>
-                <th>Admin</th>
-                <th>User</th>
+                <th class="col-toggle">
+                  <input type="checkbox" data-group="switches" data-column="admin" aria-label="Admin, all or none" />
+                  Admin
+                </th>
+                <th class="col-toggle">
+                  <input type="checkbox" data-group="switches" data-column="user" aria-label="User, all or none" />
+                  User
+                </th>
               </tr>
             </thead>
             <tbody></tbody>

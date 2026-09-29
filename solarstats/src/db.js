@@ -655,6 +655,25 @@ export function setDisplayTile(db, entityId, on) {
   return ids;
 }
 
+/** Tick or clear the top row for every sensor. At most 8 stay on. */
+export function setSensorTops(db, on) {
+  const had = getMeta(db, "display_tiles") != null;
+  if (!on) {
+    if (had) setMeta(db, "display_tiles", "[]");
+    return { capped: false };
+  }
+  const rows = db
+    .prepare(
+      `SELECT entity_id FROM ha_devices
+       WHERE domain IN ('sensor', 'binary_sensor')
+       ORDER BY domain ASC, name ASC`,
+    )
+    .all();
+  const ids = rows.slice(0, 8).map((row) => row.entity_id);
+  setMeta(db, "display_tiles", JSON.stringify(ids));
+  return { capped: rows.length > ids.length };
+}
+
 export function tileViews(db) {
   return getDisplayTileIds(db).map((entityId) => {
     const row = db
