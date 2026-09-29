@@ -173,6 +173,7 @@ export function openDatabase(dbPath) {
   ensureColumn(db, "samples", "loads_daily_kwh", "TEXT");
   ensureColumn(db, "ha_devices", "device_class", "TEXT");
   ensureColumn(db, "ha_devices", "unit", "TEXT");
+  ensureColumn(db, "ha_devices", "display_name", "TEXT");
   ensureHaFieldTables(db);
 
   if (getMeta(db, "allow_new_accounts") == null) {
@@ -678,12 +679,12 @@ export function tileViews(db) {
   return getDisplayTileIds(db).map((entityId) => {
     const row = db
       .prepare(
-        "SELECT name, state, unit, domain, device_class FROM ha_devices WHERE entity_id = ?",
+        "SELECT name, display_name, state, unit, domain, device_class FROM ha_devices WHERE entity_id = ?",
       )
       .get(entityId);
     return {
       entityId,
-      label: row?.name || entityId,
+      label: friendlyName(row) || entityId,
       state: row?.state ?? null,
       unit: row?.unit || "",
       domain: row?.domain || "",
@@ -710,13 +711,13 @@ function chartSlot(db, key) {
   const entityId = String(stored.entityId || "").trim();
   const builtin = usesBuiltinLoads(db);
   const row = entityId
-    ? db.prepare("SELECT name, unit, state FROM ha_devices WHERE entity_id = ?").get(entityId)
+    ? db.prepare("SELECT name, display_name, unit, state FROM ha_devices WHERE entity_id = ?").get(entityId)
     : null;
   return {
     show: stored.show == null ? builtin : !!stored.show,
     entityId,
     legacy: !entityId && builtin,
-    label: row?.name || "",
+    label: friendlyName(row),
     unit: row?.unit || "",
   };
 }
@@ -856,6 +857,7 @@ function readPieSlots(db) {
       entityId: String(row.entityId || "").trim(),
       color,
       source: row.source === "inverter" ? "inverter" : "grid",
+      label: String(row.label || "").trim().slice(0, 80),
     };
   });
 }
@@ -870,6 +872,7 @@ function writePieSlots(db, slots) {
         entityId: slot.entityId,
         color: slot.color,
         source: slot.source,
+        label: slot.label || "",
       })),
     ),
   );
@@ -922,11 +925,13 @@ export function getPieSlots(db) {
   const devices = new Map(listAllDevices(db).map((device) => [device.entityId, device]));
   return readPieSlots(db).map((slot, index) => {
     const device = slot.entityId ? devices.get(slot.entityId) : null;
+    const custom = String(slot.label || "").trim();
     return {
       index,
       key: `slot${index}`,
       ...slot,
-      label: device?.name || "",
+      label: custom || device?.name || "",
+      customLabel: custom,
       watts: device && isWattSensor(device) ? powerWatts(device) : null,
       kwh: slot.entityId ? kwhToday(db, slot.entityId) : null,
     };
@@ -958,11 +963,13 @@ export function setPieSlot(db, index, patch = {}) {
     }
   }
   const color = /^#[0-9a-fA-F]{6}$/.test(patch.color || "") ? patch.color : prev.color;
+  const label = patch.label == null ? prev.label : String(patch.label || "").trim().slice(0, 80);
   slots[slotIndex] = {
     on: patch.on == null ? prev.on : !!patch.on,
     entityId,
     color,
     source: patch.source === "inverter" || (patch.source == null && prev.source === "inverter") ? "inverter" : "grid",
+    label,
   };
   writePieSlots(db, slots);
   return getPieSlots(db);
@@ -1626,12 +1633,19 @@ export function countDevices(db) {
   return db.prepare(`SELECT COUNT(*) AS n FROM ha_devices`).get().n;
 }
 
+function friendlyName(row) {
+  const custom = String(row?.display_name || "").trim();
+  return custom || row?.name || "";
+}
+
 function mapDeviceRow(r) {
   const state = r.state == null ? null : String(r.state);
   return {
     entityId: r.entity_id,
     domain: r.domain,
-    name: r.name,
+    haName: r.name,
+    displayName: String(r.display_name || "").trim(),
+    name: friendlyName(r),
     state,
     on: String(state || "").toLowerCase() === "on",
     deviceClass: r.device_class || null,
@@ -1645,7 +1659,7 @@ function mapDeviceRow(r) {
 export function listDevicesForViewer(db, { isAdmin }) {
   const rows = db
     .prepare(
-      `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit
+      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, device_class, unit
        FROM ha_devices
        ORDER BY domain ASC, name ASC`,
     )
@@ -1659,7 +1673,7 @@ export function listAllDevices(db) {
   const tiles = new Set(getDisplayTileIds(db));
   return db
     .prepare(
-      `SELECT entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit
+      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, device_class, unit
        FROM ha_devices ORDER BY domain ASC, name ASC`,
     )
     .all()
@@ -1723,6 +1737,19 @@ export function setGroupExposure(db, { group, column, mode }) {
   });
   tx(rows);
   return listAllDevices(db);
+}
+
+export function setDeviceDisplayName(db, entityId, name) {
+  const row = db.prepare(`SELECT entity_id, domain FROM ha_devices WHERE entity_id = ?`).get(entityId);
+  if (!row) return null;
+  if (!SENSOR_DOMAINS.has(row.domain)) {
+    const err = new Error("only_sensors");
+    err.status = 400;
+    throw err;
+  }
+  const text = String(name || "").trim().slice(0, 80);
+  db.prepare(`UPDATE ha_devices SET display_name = ? WHERE entity_id = ?`).run(text || null, entityId);
+  return listAllDevices(db).find((device) => device.entityId === entityId) || null;
 }
 
 export function setDeviceAcl(db, entityId, { allowUsers, allowAdmin }) {

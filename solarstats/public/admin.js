@@ -566,6 +566,15 @@ function renderPieSlots(slots) {
     }
     select.value = slot.entityId || "";
 
+    const nameTd = document.createElement("td");
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "name-input";
+    nameInput.maxLength = 80;
+    nameInput.value = slot.customLabel || "";
+    nameInput.placeholder = slot.label && !slot.customLabel ? slot.label : "Name on the pie";
+    nameInput.title = "Name on the pie. Leave blank to use the sensor name.";
+
     const colorTd = document.createElement("td");
     colorTd.className = "pie-color-cell";
     const color = document.createElement("input");
@@ -591,20 +600,23 @@ function renderPieSlots(slots) {
         index: slot.index,
         on: on.checked,
         entityId: select.value,
+        label: nameInput.value,
         color: color.value,
         source: upstream.value,
       });
     };
     on.addEventListener("change", save);
     select.addEventListener("change", save);
+    nameInput.addEventListener("change", save);
     color.addEventListener("change", save);
     upstream.addEventListener("change", save);
 
     onTd.appendChild(on);
     sensorTd.appendChild(select);
+    nameTd.appendChild(nameInput);
     colorTd.appendChild(color);
     upstreamTd.appendChild(upstream);
-    tr.append(onTd, sensorTd, colorTd, upstreamTd);
+    tr.append(onTd, sensorTd, nameTd, colorTd, upstreamTd);
     tbody.appendChild(tr);
   }
 }
@@ -725,7 +737,21 @@ function renderDeviceTable(devices, tableId, emptyId) {
     tr.dataset.entityId = d.entityId;
 
     const nameTd = document.createElement("td");
-    nameTd.textContent = d.name || d.entityId;
+    if (tableId === "sensorsTable") {
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.className = "name-input";
+      nameInput.maxLength = 80;
+      nameInput.value = d.displayName || "";
+      nameInput.placeholder = d.haName || d.entityId;
+      nameInput.title = "Name on the dashboard. Leave blank to use the Home Assistant name.";
+      nameInput.addEventListener("change", () => {
+        setSensorName(d.entityId, nameInput.value, nameInput);
+      });
+      nameTd.appendChild(nameInput);
+    } else {
+      nameTd.textContent = d.name || d.entityId;
+    }
 
     const entityTd = document.createElement("td");
     entityTd.className = "entity-id";
@@ -784,6 +810,22 @@ function renderDeviceTable(devices, tableId, emptyId) {
     }
     tbody.appendChild(tr);
   }
+}
+
+async function setSensorName(entityId, name, input) {
+  const res = await fetch(adminPath(`/api/admin/devices/${encodeURIComponent(entityId)}/name`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Name update failed");
+    load().catch(console.error);
+    return;
+  }
+  const data = await res.json();
+  if (input && data.device) input.value = data.device.displayName || "";
+  flashSaved("sensorsSaved");
 }
 
 async function setDisplayTile(entityId, on, checkbox) {

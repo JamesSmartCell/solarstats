@@ -11,6 +11,7 @@ import {
   insertSample,
   openDatabase,
   setChartSeries,
+  setDeviceDisplayName,
   setDisplayTile,
   setMeta,
   setGroupExposure,
@@ -150,6 +151,11 @@ test("pie slots accept watt sensors and reject other units", () => {
   assert.equal(config.length, 1);
   assert.equal(config[0].key, "slot0");
   assert.equal(config[0].label, "Fridge");
+  setPieSlot(db, 0, { label: "Cold box" });
+  assert.equal(getLoadConfig(db)[0].label, "Cold box");
+  setDeviceDisplayName(db, "sensor.fridge_power", "Kitchen fridge");
+  setPieSlot(db, 0, { label: "" });
+  assert.equal(getLoadConfig(db)[0].label, "Kitchen fridge");
   assert.equal(config[0].watts, 100);
   assert.ok(config[0].kwh > 0);
 

@@ -252,10 +252,19 @@ function renderCustomTiles() {
     const value = document.createElement("div");
     value.className = "value";
     const raw = String(tile.state ?? "").toLowerCase();
-    value.textContent =
-      tile.state == null || tile.state === "" || raw === "unavailable" || raw === "unknown"
-        ? "—"
-        : formatHaState(tile);
+    const blank = tile.state == null || tile.state === "" || raw === "unavailable" || raw === "unknown";
+    const shown = blank ? "—" : formatHaState(tile);
+    const suffix = !blank && tile.unit ? ` ${tile.unit}` : "";
+    if (suffix && shown.endsWith(suffix)) {
+      const digits = document.createElement("span");
+      digits.textContent = shown.slice(0, -suffix.length);
+      const unit = document.createElement("span");
+      unit.className = "unit";
+      unit.textContent = tile.unit;
+      value.append(digits, unit);
+    } else {
+      value.textContent = shown;
+    }
     article.append(label, value);
     root.appendChild(article);
   }

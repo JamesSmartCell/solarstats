@@ -54,6 +54,7 @@ import {
   listDevicesForViewer,
   listAllDevices,
   setDeviceAcl,
+  setDeviceDisplayName,
   setGroupExposure,
   getDevice,
   enqueueDeviceCommand,
@@ -76,6 +77,7 @@ import {
   listSiteViewers,
   loadSites,
   removeSiteViewer,
+  resolveRootSite,
   setLinkedSiteAdmin,
 } from "./sites.js";
 import {
@@ -153,6 +155,7 @@ const sites = loadSites({
   defaultDbPath: DB_PATH,
   defaultSecret: INGEST_SECRET,
 });
+const rootSite = resolveRootSite(sites, process.env.DEFAULT_SITE);
 for (const site of sites.values()) {
   const repaired = repairDeadSamples(site.db);
   if (repaired.deleted) {
@@ -1006,6 +1009,19 @@ app.post("/api/admin/devices/exposure", requireSiteAdmin, (req, res) => {
   }
 });
 
+app.post("/api/admin/devices/:entityId/name", requireSiteAdmin, (req, res) => {
+  try {
+    const entityId = decodeURIComponent(req.params.entityId);
+    const device = setDeviceDisplayName(req.site.db, entityId, req.body?.name);
+    if (!device) return res.status(404).json({ error: "not_found" });
+    broadcastDevices(req.site);
+    broadcast({ type: "loadConfig", loadConfig: getLoadConfig(req.site.db) }, req.site.slug);
+    res.json({ device });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "name_failed" });
+  }
+});
+
 app.post("/api/admin/devices/:entityId/acl", requireSiteAdmin, (req, res) => {
   const entityId = decodeURIComponent(req.params.entityId);
   const device = setDeviceAcl(req.site.db, entityId, {
@@ -1088,8 +1104,11 @@ app.post("/api/pair/claim", (req, res) => {
   }
 });
 
-app.get("/", requireApproved, (_req, res) => {
-  sendDashboard(res, sites.get("home"));
+app.get("/", requireApproved, (req, res) => {
+  if (!canViewSite(db, rootSite, req.user.email)) {
+    return res.status(403).type("text").send("This dashboard has not been shared with you.");
+  }
+  return sendDashboard(res, rootSite);
 });
 
 app.get("/solarstats", (_req, res) => {
@@ -1331,7 +1350,7 @@ app.get("/:slug", (req, res, next) => {
 
 server.listen(PORT, () => {
   console.log(`solarstats listening on http://0.0.0.0:${PORT}`);
-  console.log(`dashboard: http://127.0.0.1:${PORT}/`);
+  console.log(`dashboard: http://127.0.0.1:${PORT}/ → ${rootSite.slug}`);
   for (const site of sites.values()) {
     if (site.default) continue;
     console.log(`site ${site.slug}: http://127.0.0.1:${PORT}/${site.slug}`);

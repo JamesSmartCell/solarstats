@@ -267,6 +267,19 @@ export function setLinkedSiteAdmin(authDb, sites, slug, email) {
   return { slug: site.slug, name: site.name, adminEmail };
 }
 
+/** Which installation `/` shows. Unset or `home` keeps the original dashboard. */
+export function resolveRootSite(sites, raw) {
+  const slug = String(raw || "home").trim().toLowerCase();
+  const home = sites.get("home");
+  if (!slug || slug === "home") return home;
+  const site = sites.get(slug);
+  if (!site) {
+    console.warn(`DEFAULT_SITE=${slug} is not a known installation; / stays on home`);
+    return home;
+  }
+  return site;
+}
+
 export function listPublicSites(sites) {
   return [...sites.values()].map((s) => ({
     slug: s.slug,

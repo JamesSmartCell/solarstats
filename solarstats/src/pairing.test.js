@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { openDatabase } from "./db.js";
 import { checkSiteName, claimPairing, pollPairing, startPairing, updateSiteProfile } from "./pairing.js";
-import { addSiteViewer, canViewSite, isSiteAdmin, loadSites, removeSiteViewer } from "./sites.js";
+import { addSiteViewer, canViewSite, isSiteAdmin, loadSites, removeSiteViewer, resolveRootSite } from "./sites.js";
 
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solarstats-pair-"));
@@ -60,6 +60,9 @@ test("code claim creates a site and reveals the ingest secret once", () => {
   assert.equal(canViewSite(authDb, sites.get("rivermill"), "guest@example.com"), true);
   assert.equal(canViewSite(authDb, sites.get("rivermill"), "claimer@example.com"), true);
   assert.equal(canViewSite(authDb, sites.get("home"), "guest@example.com"), true);
+  assert.equal(resolveRootSite(sites, "").slug, "home");
+  assert.equal(resolveRootSite(sites, "rivermill").slug, "rivermill");
+  assert.equal(resolveRootSite(sites, "missing").slug, "home");
   removeSiteViewer(authDb, "rivermill", "guest@example.com");
   assert.equal(canViewSite(authDb, sites.get("rivermill"), "guest@example.com"), false);
   assert.equal(isSiteAdmin(sites.get("rivermill"), "claimer@example.com"), true);

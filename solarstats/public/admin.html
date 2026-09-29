@@ -164,7 +164,7 @@
           <span>Show the daily pie on the dashboard</span>
         </label>
         <p class="hint">
-          Tick the box above to show the pie. Each row is one slice: switch it on, choose a power sensor in watts, then set the colour and whether that load is solar supply or grid supply. Solar slices sit together on the pie, then the grid slices.
+          Tick the box above to show the pie. Each row is one slice: switch it on, choose a power sensor in watts, type the name to show, then set the colour and whether that load is solar supply or grid supply. A blank name uses the sensor name. Solar slices sit together, then the grid slices.
         </p>
         <div class="table-wrap">
           <table class="admin-table" id="loadsTable">
@@ -172,6 +172,7 @@
               <tr>
                 <th>On</th>
                 <th>Power sensor</th>
+                <th>Name</th>
                 <th>Colour</th>
                 <th>Supply</th>
               </tr>
@@ -209,6 +210,7 @@
       <section class="panel admin-panel">
         <h2>Sensors</h2>
         <p class="hint">
+          Type a name to show on the dashboard. Leave it blank to keep the Home Assistant name. ·
           <strong>Top</strong> = one of the boxes at the top of the dashboard (up to 8) ·
           <strong>User</strong> = on the board for everyone ·
           <strong>Admin</strong> = on the board for admin only ·

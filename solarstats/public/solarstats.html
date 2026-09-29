@@ -24,7 +24,7 @@
       <header class="top">
         <div>
           <h1 class="brand">Solar<span>stats</span></h1>
-          <p class="sub" id="siteSub">{{SITE_NAME}} · live feed every 15s</p>
+          <p class="sub" id="siteSub">{{SITE_NAME}}</p>
           <p class="sub" id="accountNotice" hidden></p>
         </div>
         <div class="status">
@@ -96,18 +96,17 @@
           <option value="30d">30 days</option>
         </select>
         <button type="button" id="resetZoom" class="toolbar-btn">Reset zoom</button>
-        <span class="toolbar-hint">Pinch or scroll-wheel to zoom · drag to pan</span>
       </section>
 
       <section class="charts">
         <article class="panel energy-panel" id="piePanel">
           <h2>All devices today</h2>
-          <p class="hint">Daily kWh · the green ring marks solar supply · grid supply has no ring · current watts on the right</p>
+          <p class="hint">Daily kWh</p>
           <div class="energy-split">
             <div class="chart-wrap pie-wrap"><canvas id="loadsPieChart"></canvas></div>
             <aside class="current-loads" aria-label="Current load">
               <h3>Current load</h3>
-              <p class="hint">Items drawing power now</p>
+              <p class="hint">Items drawing or supplying power now</p>
               <ul class="current-loads-list" id="currentLoadsList"></ul>
               <p class="current-loads-total">Total <span id="currentLoadsTotal">—</span></p>
             </aside>

@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "DSEG7 Classic";
+  src: url("/fonts/DSEG7Classic-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg0: #0b0f12;
   --bg1: #12181e;
@@ -147,9 +155,10 @@ body {
 
 .tile .value {
   margin-top: 0.45rem;
-  font-family: var(--font-mono);
-  font-size: 1.45rem;
-  font-variant-numeric: tabular-nums;
+  font-family: "DSEG7 Classic", var(--font-mono);
+  font-size: 1.25rem;
+  line-height: 1.15;
+  letter-spacing: 0.03em;
   transition: color 180ms ease;
 }
 
@@ -158,9 +167,11 @@ body {
 }
 
 .tile .unit {
+  font-family: var(--font-mono);
   color: var(--muted);
   font-size: 0.85rem;
-  margin-left: 0.2rem;
+  letter-spacing: 0;
+  margin-left: 0.35rem;
 }
 
 .kwh {
