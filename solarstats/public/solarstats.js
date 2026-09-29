@@ -496,40 +496,6 @@ function drawSolarRing(chart) {
   ctx.restore();
 }
 
-function drawPieGroupLabels(chart) {
-  const rows = state.pieRows || [];
-  const meta = chart.getDatasetMeta(0);
-  if (!meta?.data?.length) return;
-  const groups = [];
-  rows.forEach((row, index) => {
-    if (!row?.value || row.slice?.gap) return;
-    const arc = meta.data[index];
-    if (!arc) return;
-    const name = isSolarSource(row.slice.source) ? "Solar" : "Grid";
-    const last = groups[groups.length - 1];
-    if (!last || last.name !== name) {
-      groups.push({ name, start: arc.startAngle, end: arc.endAngle, arc });
-    } else {
-      last.end = arc.endAngle;
-    }
-  });
-  if (groups.length < 2) return;
-  const ctx = chart.ctx;
-  ctx.save();
-  ctx.font = "600 11px IBM Plex Sans, sans-serif";
-  ctx.fillStyle = "#c5d0da";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (const group of groups) {
-    const span = group.end - group.start;
-    if (span < 0.45) continue;
-    const mid = (group.start + group.end) / 2;
-    const radius = group.arc.innerRadius * 0.62;
-    ctx.fillText(group.name, group.arc.x + Math.cos(mid) * radius, group.arc.y + Math.sin(mid) * radius);
-  }
-  ctx.restore();
-}
-
 const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
   type: "doughnut",
   plugins: [
@@ -537,7 +503,6 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
       id: "pieGroupLabels",
       afterDatasetsDraw(chart) {
         drawSolarRing(chart);
-        drawPieGroupLabels(chart);
       },
     },
   ],
