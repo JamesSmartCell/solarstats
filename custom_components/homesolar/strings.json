@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Home Solar",
+        "description": "The admin is whichever account is signed in at {base}/connect when the code is entered, not this contact email.",
+        "data": {
+          "email": "Contact email",
+          "base_url": "Home Solar URL"
+        }
+      },
+      "code": {
+        "title": "Pair this installation",
+        "description": "Pairing code: {code}\n\nType the installation name, then submit. Open {base_url}/connect and enter the code. The name becomes the dashboard address.",
+        "data": {
+          "name": "Installation name"
+        }
+      },
+      "link": {
+        "title": "Enter this code on Home Solar",
+        "description": "{code}\n\nOpen {base_url}/connect and type the code. This finishes when it is accepted."
+      },
+      "entities": {
+        "title": "Choose what to send",
+        "description": "Tick each switch, light, and sensor to send. The list scrolls.",
+        "data": {
+          "entities": "Export"
+        }
+      }
+    },
+    "progress": {
+      "pair": "Waiting for {code} to be entered at {base_url}/connect"
+    },
+    "error": {
+      "cannot_connect": "Could not reach Home Solar",
+      "invalid_email": "Enter a valid email",
+      "invalid_name": "Enter a display name using letters or numbers",
+      "name_taken": "That name is already used. Choose another.",
+      "expired": "That code expired. Start again.",
+      "unknown": "Pairing failed"
+    },
+    "abort": {
+      "already_configured": "This home is already connected",
+      "expired": "That code expired. Start again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Home Solar",
+        "description": "The name is the dashboard address. The admin email is the Home Solar login that can edit that dashboard. Tick each switch, light, and sensor to send.",
+        "data": {
+          "name": "Name",
+          "email": "Admin email",
+          "entities": "Export"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach Home Solar",
+      "name_taken": "That name is already used. Choose another.",
+      "invalid_email": "Enter a valid email"
+    }
+  }
+}
