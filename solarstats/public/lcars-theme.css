@@ -63,14 +63,14 @@ body.theme-lcars .lcars-bar-row {
   grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
   column-gap: 10px;
   align-items: end;
-  height: var(--lcars-rail);
+  height: var(--lcars-bar);
 }
 
 body.theme-lcars .lcars-shoulder {
   width: var(--lcars-rail);
-  height: var(--lcars-rail);
+  height: var(--lcars-bar);
   background: var(--lcars-bluey);
-  border-top-left-radius: 100%;
+  border-top-left-radius: var(--lcars-bar);
 }
 
 body.theme-lcars .lcars-banner {
