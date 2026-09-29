@@ -22,6 +22,7 @@ import {
   tilesMode,
   tileViews,
   upsertDeviceStates,
+  getLatestLoadsPower,
   completeDeviceCommand,
   enqueueDeviceCommand,
   getDevice,
@@ -213,6 +214,45 @@ test("a completed switch keeps its reported state through the next snapshot", ()
 
   upsertDeviceStates(db, [{ entityId: "switch.pump", name: "Pump", state: "on" }]);
   assert.equal(getDevice(db, "switch.pump").state, "off");
+
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("solar-marked loads are removed from inverter supply", () => {
+  const { dir, db } = openTemp();
+  upsertDeviceStates(db, [
+    {
+      entityId: "sensor.powmr_inverter_output_power",
+      name: "Inverter supply",
+      state: "142",
+      unit: "W",
+      device_class: "power",
+    },
+    {
+      entityId: "sensor.office_pc_power",
+      name: "Office PC",
+      state: "112",
+      unit: "W",
+      device_class: "power",
+    },
+    {
+      entityId: "sensor.fridge_power",
+      name: "Fridge",
+      state: "80",
+      unit: "W",
+      device_class: "power",
+    },
+  ]);
+  setChartSeries(db, "inverter", { show: true, entityId: "sensor.powmr_inverter_output_power" });
+  setPieSlot(db, 0, { on: true, entityId: "sensor.powmr_inverter_output_power", source: "inverter" });
+  setPieSlot(db, 1, { on: true, entityId: "sensor.office_pc_power", source: "inverter" });
+  setPieSlot(db, 2, { on: true, entityId: "sensor.fridge_power", source: "grid" });
+
+  const power = getLatestLoadsPower(db);
+  assert.equal(power.slot0, 30);
+  assert.equal(power.slot1, 112);
+  assert.equal(power.slot2, 80);
 
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });

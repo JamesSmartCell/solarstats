@@ -528,7 +528,7 @@ export function getLatestLoadsPower(db) {
     if (slot.entityId) out[slot.key] = slot.watts;
   }
 
-  return out;
+  return applyUnmeteredInverter(db, out);
 }
 
 export function setPieExtra(db, entityId, onPie) {
@@ -1559,7 +1559,41 @@ export function getLatestLoadsDaily(db) {
   for (const slot of getPieSlots(db)) {
     if (slot.entityId) out[slot.key] = slot.kwh ?? 0;
   }
-  return out;
+  return applyUnmeteredInverter(db, out);
+}
+
+function isInverterSupplyEntity(entityId) {
+  const id = String(entityId || "").toLowerCase();
+  if (/inverter_(unmetered|supply)/.test(id)) return true;
+  return /(inverter|powmr)/.test(id) && /output_power/.test(id);
+}
+
+function isWasherLoad(slot) {
+  const id = String(slot?.entityId || "").toLowerCase();
+  return slot?.key === "washingMachine" || /washer|inverter_loads/.test(id);
+}
+
+/** Inverter supply on the pie is the unmetered remainder: gross supply minus other solar-marked loads. */
+function applyUnmeteredInverter(db, values) {
+  const slots = getPieSlots(db).filter((slot) => slot.on && slot.entityId);
+  const supplyId = String(getChartConfig(db).inverter?.entityId || "").trim();
+  const supply =
+    slots.find((slot) => supplyId && slot.entityId === supplyId) ||
+    slots.find((slot) => isInverterSupplyEntity(slot.entityId));
+  if (!supply) return values;
+  const gross = Number(values[supply.key]);
+  if (!Number.isFinite(gross)) return values;
+  const supplyIsNet = /inverter_unmetered/.test(String(supply.entityId).toLowerCase());
+  let metered = 0;
+  for (const slot of slots) {
+    if (slot.key === supply.key) continue;
+    if (slot.source !== "inverter" && slot.source !== "solar") continue;
+    if (supplyIsNet && isWasherLoad(slot)) continue;
+    const n = Number(values[slot.key]);
+    if (Number.isFinite(n) && n > 0) metered += n;
+  }
+  values[supply.key] = Math.max(0, gross - metered);
+  return values;
 }
 
 export function getHistory(db, range = "24h") {
