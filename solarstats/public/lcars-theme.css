@@ -39,13 +39,13 @@ body.theme-lcars {
 }
 
 body.theme-lcars .lcars-shell {
-  --lcars-rail: 16px;
-  --lcars-shoulder: 78px;
+  --lcars-rail: 48px;
+  --lcars-bar: 16px;
   display: grid;
   grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 10px;
+  column-gap: 10px;
+  row-gap: 8px;
   min-height: calc(100vh - 26px);
 }
 
@@ -61,29 +61,16 @@ body.theme-lcars .lcars-top-main {
 body.theme-lcars .lcars-bar-row {
   display: grid;
   grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
-  column-gap: 12px;
-  align-items: start;
+  column-gap: 10px;
+  align-items: end;
   height: var(--lcars-rail);
 }
 
 body.theme-lcars .lcars-shoulder {
-  width: var(--lcars-shoulder);
-  height: var(--lcars-shoulder);
+  width: var(--lcars-rail);
+  height: var(--lcars-rail);
   background: var(--lcars-bluey);
-  position: relative;
-  z-index: 1;
-  pointer-events: none;
-}
-
-body.theme-lcars .lcars-shoulder::after {
-  content: "";
-  position: absolute;
-  top: var(--lcars-rail);
-  left: var(--lcars-rail);
-  right: 0;
-  bottom: 0;
-  background: #000;
-  border-top-left-radius: calc(var(--lcars-shoulder) - var(--lcars-rail));
+  border-top-left-radius: 100%;
 }
 
 body.theme-lcars .lcars-banner {
@@ -100,7 +87,7 @@ body.theme-lcars .lcars-banner {
 
 body.theme-lcars .lcars-bars {
   display: flex;
-  height: var(--lcars-rail);
+  height: var(--lcars-bar);
   gap: 4px;
 }
 
@@ -120,8 +107,7 @@ body.theme-lcars .lcars-side {
   grid-row: 2;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding-top: calc(var(--lcars-shoulder) - var(--lcars-rail) - 10px);
+  gap: 6px;
   min-height: 0;
   background: transparent;
 }
@@ -158,7 +144,6 @@ body.theme-lcars .top {
   border-bottom: 0;
   margin-bottom: 0.8rem;
   padding-bottom: 0;
-  padding-left: 2.6rem;
 }
 
 body.theme-lcars .sub,
@@ -278,8 +263,7 @@ body.theme-lcars .device-btn.is-unknown {
 
 @media (max-width: 800px) {
   body.theme-lcars .lcars-shell {
-    --lcars-rail: 12px;
-    --lcars-shoulder: 58px;
+    --lcars-rail: 36px;
     grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
   }
 
