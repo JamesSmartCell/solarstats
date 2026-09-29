@@ -22,6 +22,8 @@ import {
   getLoadConfig,
   getShowPie,
   setShowPie,
+  getTheme,
+  setTheme,
   setDisplayTile,
   setSensorTops,
   tileViews,
@@ -415,7 +417,8 @@ function sendDashboard(res, site) {
   const template = fs.readFileSync(path.join(publicDir, "solarstats.html"), "utf8");
   const html = template
     .replaceAll("{{SITE_SLUG}}", site.slug)
-    .replaceAll("{{SITE_NAME}}", site.name);
+    .replaceAll("{{SITE_NAME}}", site.name)
+    .replaceAll("{{THEME_CLASS}}", getTheme(site.db) === "lcars" ? "theme-lcars" : "");
   res.type("html").send(html);
 }
 
@@ -778,6 +781,10 @@ app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
     setShowPie(sdb, !!req.body.showPie);
     broadcast({ type: "board", ...boardOptions(sdb) }, slug);
   }
+  if (req.body?.theme != null) {
+    setTheme(sdb, req.body.theme);
+    broadcast({ type: "board", ...boardOptions(sdb) }, slug);
+  }
   if (req.body?.chart?.key) {
     try {
       setChartSeries(sdb, req.body.chart.key, req.body.chart);
@@ -846,6 +853,7 @@ app.post("/api/admin/settings", requireSiteAdmin, (req, res) => {
     loadConfig,
     pieRows: getPieAdminRows(sdb),
     showPie: getShowPie(sdb),
+    theme: getTheme(sdb),
     charts: getChartConfig(sdb),
     pieSlots: getPieSlots(sdb),
   });
@@ -858,6 +866,7 @@ app.get("/api/admin/devices", requireSiteAdmin, (req, res) => {
 function boardOptions(db) {
   return {
     showPie: getShowPie(db),
+    theme: getTheme(db),
     tiles: tileViews(db),
     tilesMode: tilesMode(db),
     charts: getChartConfig(db),

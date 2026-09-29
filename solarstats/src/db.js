@@ -621,6 +621,16 @@ export function setShowPie(db, on) {
   return getShowPie(db);
 }
 
+export function getTheme(db) {
+  return getMeta(db, "theme") === "lcars" ? "lcars" : "standard";
+}
+
+export function setTheme(db, theme) {
+  const next = String(theme || "").trim().toLowerCase() === "lcars" ? "lcars" : "standard";
+  setMeta(db, "theme", next);
+  return next;
+}
+
 export function getDisplayTileIds(db) {
   const raw = getMeta(db, "display_tiles");
   if (!raw) return [];

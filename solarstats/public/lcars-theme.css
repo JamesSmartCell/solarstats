@@ -1,0 +1,310 @@
+/* Classic TNG LCARS frame. Colours and Antonio match LCARS/assets/classic.css. */
+
+@font-face {
+  font-family: Antonio;
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/Antonio-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: Antonio;
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/Antonio-Bold.woff2") format("woff2");
+}
+
+body:not(.theme-lcars) .lcars-shell {
+  display: contents;
+}
+
+body:not(.theme-lcars) .lcars-elbow,
+body:not(.theme-lcars) .lcars-top-main,
+body:not(.theme-lcars) .lcars-side {
+  display: none;
+}
+
+body.theme-lcars {
+  --lcars-violet: #c9f;
+  --lcars-bluey: #89f;
+  --lcars-orange: #f80;
+  --lcars-gold: #f96;
+  --lcars-amber: #fa0;
+  --lcars-red: #c44;
+  padding: 10px 8px 16px 6px;
+  background: #000;
+  color: var(--lcars-violet);
+  font-family: Antonio, "Arial Narrow", "Avenir Next Condensed", sans-serif;
+}
+
+body.theme-lcars .lcars-shell {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 10px;
+  min-height: calc(100vh - 26px);
+}
+
+body.theme-lcars .lcars-elbow {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 148px;
+  background: var(--lcars-bluey);
+  border-radius: 0 0 0 130px;
+  color: #000;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+body.theme-lcars .lcars-block {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  min-height: 2.6rem;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 4px solid #000;
+  text-align: right;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+body.theme-lcars .lcars-elbow .violet {
+  min-height: 86px;
+  background: var(--lcars-violet);
+  font-size: 1.35rem;
+}
+
+body.theme-lcars .lcars-code {
+  padding: 0.45rem 0.7rem 0.55rem;
+  text-align: right;
+  font-weight: 700;
+}
+
+body.theme-lcars .lcars-top-main {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+body.theme-lcars .lcars-banner {
+  margin: 0 0 0.45rem;
+  padding-right: 0.15rem;
+  color: var(--lcars-orange);
+  font-size: clamp(2.2rem, 4.6vw, 4.4rem);
+  font-weight: 400;
+  line-height: 0.85;
+  letter-spacing: 0.03em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+body.theme-lcars .lcars-bars {
+  display: flex;
+  height: 26px;
+  gap: 6px;
+}
+
+body.theme-lcars .lcars-bars i {
+  display: block;
+  height: 100%;
+}
+
+body.theme-lcars .lcars-bars .w1 { width: 38%; background: var(--lcars-bluey); }
+body.theme-lcars .lcars-bars .w2 { width: 4%; background: var(--lcars-orange); }
+body.theme-lcars .lcars-bars .w3 { width: 16%; background: var(--lcars-violet); }
+body.theme-lcars .lcars-bars .w4 { flex: 1; background: var(--lcars-violet); }
+body.theme-lcars .lcars-bars .w5 { width: 4%; background: var(--lcars-red); }
+
+body.theme-lcars .lcars-side {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-top: 64px;
+  background: var(--lcars-red);
+  border-radius: 130px 0 0 0;
+  color: #000;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+body.theme-lcars .lcars-side .violet { background: var(--lcars-violet); }
+body.theme-lcars .lcars-side .red { background: var(--lcars-red); }
+body.theme-lcars .lcars-side .orange { background: var(--lcars-orange); }
+body.theme-lcars .lcars-side .gold { background: var(--lcars-gold); }
+body.theme-lcars .lcars-side .bluey { background: var(--lcars-bluey); }
+body.theme-lcars .lcars-side .frame {
+  background: transparent;
+  border-bottom: 0;
+  min-height: 4.5rem;
+}
+
+body.theme-lcars .shell {
+  grid-column: 2;
+  grid-row: 2;
+  max-width: none;
+  margin: 0;
+  min-width: 0;
+}
+
+body.theme-lcars .brand {
+  display: none;
+}
+
+body.theme-lcars .top {
+  border-bottom: 0;
+  margin-bottom: 0.8rem;
+  padding-bottom: 0;
+}
+
+body.theme-lcars .sub,
+body.theme-lcars .status,
+body.theme-lcars .foot {
+  color: var(--lcars-gold);
+  font-family: Antonio, "Arial Narrow", sans-serif;
+}
+
+body.theme-lcars .pill {
+  background: #000;
+  border-color: var(--lcars-bluey);
+  border-radius: 0;
+  color: var(--lcars-violet);
+}
+
+body.theme-lcars .toolbar-btn,
+body.theme-lcars .range-select {
+  background: var(--lcars-violet);
+  color: #000;
+  border: 0;
+  border-radius: 999px;
+  font-family: Antonio, "Arial Narrow", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.theme-lcars .panel {
+  background: #000;
+  border: 0;
+  border-top: 10px solid var(--lcars-orange);
+  border-radius: 0;
+}
+
+body.theme-lcars .panel h2,
+body.theme-lcars .panel h3,
+body.theme-lcars .devices-title,
+body.theme-lcars .current-load-group {
+  color: var(--lcars-violet);
+  font-family: Antonio, "Arial Narrow", sans-serif;
+  letter-spacing: 0.08em;
+}
+
+body.theme-lcars .panel .hint,
+body.theme-lcars .current-loads .hint {
+  color: var(--lcars-gold);
+}
+
+body.theme-lcars .current-loads {
+  border-left-color: var(--lcars-violet);
+}
+
+body.theme-lcars .tile {
+  border: 0;
+  border-radius: 0;
+  color: #000;
+  background: var(--lcars-gold);
+}
+
+body.theme-lcars .tile:nth-child(5n + 1) { background: var(--lcars-bluey); }
+body.theme-lcars .tile:nth-child(5n + 2) { background: var(--lcars-violet); }
+body.theme-lcars .tile:nth-child(5n + 3) { background: var(--lcars-orange); }
+body.theme-lcars .tile:nth-child(5n + 4) { background: var(--lcars-gold); }
+body.theme-lcars .tile:nth-child(5n + 5) { background: var(--lcars-amber); }
+
+body.theme-lcars .tile .label,
+body.theme-lcars .tile .value,
+body.theme-lcars .tile .unit,
+body.theme-lcars .kwh .value {
+  color: #000;
+}
+
+body.theme-lcars .tile .label {
+  font-family: Antonio, "Arial Narrow", sans-serif;
+  font-weight: 700;
+}
+
+body.theme-lcars .sensor-row {
+  background: #000;
+  border: 0;
+  border-left: 12px solid var(--lcars-bluey);
+  border-radius: 0;
+}
+
+body.theme-lcars .sensor-name,
+body.theme-lcars .sensor-state {
+  color: var(--lcars-violet);
+  font-family: Antonio, "Arial Narrow", sans-serif;
+}
+
+body.theme-lcars .device-btn {
+  border: 0;
+  border-radius: 0 999px 999px 0;
+  background: var(--lcars-gold);
+  color: #000;
+  font-family: Antonio, "Arial Narrow", sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+body.theme-lcars .device-btn.is-on {
+  background: var(--lcars-bluey);
+  border-color: var(--lcars-bluey);
+  color: #000;
+}
+
+body.theme-lcars .device-btn.is-off {
+  background: var(--lcars-violet);
+  color: #000;
+}
+
+body.theme-lcars .device-btn.is-unknown {
+  background: #668;
+  color: #000;
+}
+
+@media (max-width: 800px) {
+  body.theme-lcars .lcars-shell {
+    grid-template-columns: 108px minmax(0, 1fr);
+  }
+
+  body.theme-lcars .lcars-elbow,
+  body.theme-lcars .lcars-side {
+    border-radius: 0 0 0 64px;
+  }
+
+  body.theme-lcars .lcars-side {
+    border-radius: 64px 0 0 0;
+    padding-top: 28px;
+  }
+
+  body.theme-lcars .lcars-block,
+  body.theme-lcars .lcars-code {
+    font-size: 0.72rem;
+    padding-right: 0.4rem;
+  }
+
+  body.theme-lcars .lcars-elbow .violet {
+    min-height: 58px;
+    font-size: 0.85rem;
+  }
+}

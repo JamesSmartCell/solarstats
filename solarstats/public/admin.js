@@ -51,6 +51,16 @@ async function load() {
     renderUsers(data.users);
     loadSiteAdmins().catch((err) => console.warn(err));
   }
+  const themeLcars = document.getElementById("themeLcars");
+  if (themeLcars) {
+    themeLcars.checked = data.theme === "lcars";
+    themeLcars.onchange = () => {
+      postPieSettings({ theme: themeLcars.checked ? "lcars" : "standard" }, "themeSaved").catch((err) =>
+        console.error(err),
+      );
+    };
+  }
+
   const showPie = document.getElementById("showPie");
   if (showPie) {
     showPie.checked = !!data.showPie;

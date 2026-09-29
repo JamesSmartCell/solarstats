@@ -209,6 +209,17 @@ function applyBoard(payload) {
   if (!payload) return;
   if (payload.tilesMode) state.tilesMode = payload.tilesMode;
   if (payload.showPie != null) state.showPie = !!payload.showPie;
+  if (payload.theme) {
+    const on = payload.theme === "lcars";
+    const changed = document.body.classList.contains("theme-lcars") !== on;
+    document.body.classList.toggle("theme-lcars", on);
+    if (changed) {
+      requestAnimationFrame(() => {
+        loadsPieChart.resize();
+        for (const chart of charts) chart.resize();
+      });
+    }
+  }
   if (Array.isArray(payload.tiles)) state.customTiles = payload.tiles;
   applyCharts(payload.charts);
   paintTiles();

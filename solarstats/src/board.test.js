@@ -8,6 +8,7 @@ import {
   getChartHistory,
   getLoadConfig,
   getShowPie,
+  getTheme,
   insertSample,
   openDatabase,
   setChartSeries,
@@ -17,6 +18,7 @@ import {
   setGroupExposure,
   setPieSlot,
   setSensorTops,
+  setTheme,
   tilesMode,
   tileViews,
   upsertDeviceStates,
@@ -49,6 +51,10 @@ test("a linked site hides the home pie and uses chosen top boxes", () => {
   ]);
 
   assert.equal(getShowPie(db), false);
+  assert.equal(getTheme(db), "standard");
+  assert.equal(setTheme(db, "lcars"), "lcars");
+  assert.equal(getTheme(db), "lcars");
+  assert.equal(setTheme(db, "standard"), "standard");
   assert.equal(tilesMode(db), "custom");
   assert.equal(getLoadConfig(db).some((row) => row.key === "fridge"), false);
   assert.deepEqual(getLoadConfig(db), []);

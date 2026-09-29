@@ -14,13 +14,41 @@
     />
     <link rel="stylesheet" href="/solarstats.css" />
     <link rel="stylesheet" href="/auth.css" />
+    <link rel="stylesheet" href="/lcars-theme.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
   </head>
-  <body>
-    <div class="shell">
+  <body class="{{THEME_CLASS}}">
+    <div class="lcars-shell">
+      <div class="lcars-elbow" aria-hidden="true">
+        <div class="lcars-block violet">LCARS</div>
+        <div class="lcars-code">02-262000</div>
+      </div>
+      <div class="lcars-top-main" aria-hidden="true">
+        <div class="lcars-banner">SOLARSTATS</div>
+        <div class="lcars-bars">
+          <i class="w1"></i>
+          <i class="w2"></i>
+          <i class="w3"></i>
+          <i class="w4"></i>
+          <i class="w5"></i>
+        </div>
+      </div>
+      <aside class="lcars-side" aria-hidden="true">
+        <div>
+          <div class="lcars-block violet">03-111968</div>
+          <div class="lcars-block red">04-041969</div>
+          <div class="lcars-block orange">05-1701D</div>
+          <div class="lcars-block gold">06-071984</div>
+          <div class="lcars-block bluey">07-081940</div>
+          <div class="lcars-block gold">08-47148</div>
+          <div class="lcars-block frame">09-081966</div>
+        </div>
+        <div class="lcars-block orange">10-31</div>
+      </aside>
+      <div class="shell">
       <header class="top">
         <div>
           <h1 class="brand">Solar<span>stats</span></h1>
@@ -143,6 +171,7 @@
       </section>
 
       <p class="foot" id="footNote">Window: 24h · ingest interval 15s · smoothed series · trapezoid kWh</p>
+      </div>
     </div>
 
     <script type="module" src="/solarstats.js"></script>
