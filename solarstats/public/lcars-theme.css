@@ -39,8 +39,8 @@ body.theme-lcars {
 }
 
 body.theme-lcars .lcars-shell {
-  --lcars-rail: 48px;
-  --lcars-bar: 16px;
+  --lcars-rail: 29px;
+  --lcars-bar: 29px;
   display: grid;
   grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
@@ -263,7 +263,8 @@ body.theme-lcars .device-btn.is-unknown {
 
 @media (max-width: 800px) {
   body.theme-lcars .lcars-shell {
-    --lcars-rail: 36px;
+    --lcars-rail: 22px;
+    --lcars-bar: 22px;
     grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
   }
 
