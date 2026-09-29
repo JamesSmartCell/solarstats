@@ -42,7 +42,66 @@ export function ensureSiteRegistry(authDb) {
       admin_email TEXT,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS site_viewers (
+      slug TEXT NOT NULL,
+      email TEXT NOT NULL COLLATE NOCASE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (slug, email)
+    );
   `);
+}
+
+function viewerEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+export function listSiteViewers(authDb, slug) {
+  ensureSiteRegistry(authDb);
+  return authDb
+    .prepare(
+      `SELECT email, created_at FROM site_viewers WHERE slug = ? ORDER BY email COLLATE NOCASE`,
+    )
+    .all(String(slug || "").toLowerCase());
+}
+
+export function addSiteViewer(authDb, slug, email) {
+  ensureSiteRegistry(authDb);
+  const address = viewerEmail(email);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+    const err = new Error("invalid_email");
+    err.status = 400;
+    throw err;
+  }
+  const key = String(slug || "").toLowerCase();
+  authDb
+    .prepare(
+      `INSERT INTO site_viewers (slug, email, created_at) VALUES (?, ?, ?)
+       ON CONFLICT(slug, email) DO NOTHING`,
+    )
+    .run(key, address, new Date().toISOString());
+  return listSiteViewers(authDb, key);
+}
+
+export function removeSiteViewer(authDb, slug, email) {
+  ensureSiteRegistry(authDb);
+  const key = String(slug || "").toLowerCase();
+  authDb
+    .prepare(`DELETE FROM site_viewers WHERE slug = ? AND email = ? COLLATE NOCASE`)
+    .run(key, viewerEmail(email));
+  return listSiteViewers(authDb, key);
+}
+
+/** Home stays open to every approved login. A paired page is the owner plus people they add. */
+export function canViewSite(authDb, site, email) {
+  if (!site || !email) return false;
+  if (site.default) return true;
+  if (isSiteAdmin(site, email)) return true;
+  ensureSiteRegistry(authDb);
+  const row = authDb
+    .prepare(`SELECT 1 AS ok FROM site_viewers WHERE slug = ? AND email = ? COLLATE NOCASE`)
+    .get(site.slug, viewerEmail(email));
+  return Boolean(row);
 }
 
 function openExtraSite(dbPath) {

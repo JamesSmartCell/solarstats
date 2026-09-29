@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { openDatabase } from "./db.js";
 import { checkSiteName, claimPairing, pollPairing, startPairing, updateSiteProfile } from "./pairing.js";
-import { isSiteAdmin, loadSites } from "./sites.js";
+import { addSiteViewer, canViewSite, isSiteAdmin, loadSites, removeSiteViewer } from "./sites.js";
 
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solarstats-pair-"));
@@ -55,6 +55,13 @@ test("code claim creates a site and reveals the ingest secret once", () => {
   const user = authDb.prepare("SELECT status, role FROM users WHERE email = ?").get("claimer@example.com");
   assert.equal(user.status, "approved");
   assert.equal(user.role, "user");
+  assert.equal(canViewSite(authDb, sites.get("rivermill"), "guest@example.com"), false);
+  addSiteViewer(authDb, "rivermill", "Guest@Example.com");
+  assert.equal(canViewSite(authDb, sites.get("rivermill"), "guest@example.com"), true);
+  assert.equal(canViewSite(authDb, sites.get("rivermill"), "claimer@example.com"), true);
+  assert.equal(canViewSite(authDb, sites.get("home"), "guest@example.com"), true);
+  removeSiteViewer(authDb, "rivermill", "guest@example.com");
+  assert.equal(canViewSite(authDb, sites.get("rivermill"), "guest@example.com"), false);
   assert.equal(isSiteAdmin(sites.get("rivermill"), "claimer@example.com"), true);
   assert.equal(isSiteAdmin(sites.get("rivermill"), "owner@example.com"), false);
   assert.equal(isSiteAdmin(sites.get("home"), "owner@example.com"), false);

@@ -13,6 +13,7 @@ import {
   setChartSeries,
   setDisplayTile,
   setMeta,
+  setGroupExposure,
   setPieSlot,
   tilesMode,
   tileViews,
@@ -150,6 +151,31 @@ test("pie slots accept watt sensors and reject other units", () => {
   assert.equal(config[0].label, "Fridge");
   assert.equal(config[0].watts, 100);
   assert.ok(config[0].kwh > 0);
+
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("select all and select none apply to one column of one group", () => {
+  const { dir, db } = openTemp();
+  upsertDeviceStates(db, [
+    { entityId: "sensor.cabin_soc", name: "Cabin SoC", state: "76", unit: "%" },
+    { entityId: "sensor.cabin_out", name: "Cabin output", state: "410", unit: "W" },
+    { entityId: "switch.cabin_pump", name: "Pump", state: "off" },
+  ]);
+
+  const asUser = setGroupExposure(db, { group: "sensors", column: "user", mode: "all" });
+  assert.equal(asUser.find((row) => row.entityId === "sensor.cabin_soc").exposure, "user");
+  assert.equal(asUser.find((row) => row.entityId === "sensor.cabin_out").exposure, "user");
+  assert.equal(asUser.find((row) => row.entityId === "switch.cabin_pump").exposure, "admin");
+
+  const sensorsOff = setGroupExposure(db, { group: "sensors", column: "user", mode: "none" });
+  assert.equal(sensorsOff.find((row) => row.entityId === "sensor.cabin_soc").exposure, "off");
+  assert.equal(sensorsOff.find((row) => row.entityId === "switch.cabin_pump").exposure, "admin");
+
+  const switchesAdmin = setGroupExposure(db, { group: "switches", column: "admin", mode: "none" });
+  assert.equal(switchesAdmin.find((row) => row.entityId === "switch.cabin_pump").exposure, "off");
+  assert.equal(switchesAdmin.find((row) => row.entityId === "sensor.cabin_soc").exposure, "off");
 
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });

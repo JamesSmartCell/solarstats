@@ -235,6 +235,36 @@ body {
   display: none;
 }
 
+.bulk-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.55rem;
+  margin: 0 0 0.75rem;
+}
+
+.bulk-row span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-left: 0.4rem;
+}
+
+.viewer-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+}
+
+.viewer-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
 .chart-setting {
   display: flex;
   flex-wrap: wrap;

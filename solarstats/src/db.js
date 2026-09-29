@@ -1652,6 +1652,60 @@ export function listAllDevices(db) {
     }));
 }
 
+const SENSOR_DOMAINS = new Set(["sensor", "binary_sensor"]);
+
+function exposureOf(allowUsers, allowAdmin) {
+  if (allowUsers) return "user";
+  if (allowAdmin) return "admin";
+  return "off";
+}
+
+export function setGroupExposure(db, { group, column, mode }) {
+  const wantSensors = group === "sensors";
+  if (!wantSensors && group !== "switches") {
+    const err = new Error("unknown_group");
+    err.status = 400;
+    throw err;
+  }
+  if (column !== "admin" && column !== "user") {
+    const err = new Error("unknown_column");
+    err.status = 400;
+    throw err;
+  }
+  if (mode !== "all" && mode !== "none") {
+    const err = new Error("unknown_mode");
+    err.status = 400;
+    throw err;
+  }
+  const rows = db
+    .prepare(`SELECT entity_id, domain, allow_users, allow_admin FROM ha_devices`)
+    .all()
+    .filter((row) => SENSOR_DOMAINS.has(row.domain) === wantSensors);
+  const update = db.prepare(
+    `UPDATE ha_devices SET allow_users = ?, allow_admin = ? WHERE entity_id = ?`,
+  );
+  const tx = db.transaction((list) => {
+    for (const row of list) {
+      const current = exposureOf(row.allow_users === 1, row.allow_admin === 1);
+      let next = current;
+      if (column === "admin") {
+        if (mode === "all") next = "admin";
+        else if (current === "admin") next = "off";
+      } else if (mode === "all") {
+        next = "user";
+      } else if (current === "user") {
+        next = "off";
+      }
+      if (next === current) continue;
+      const users = next === "user" ? 1 : 0;
+      const admin = next === "off" ? 0 : 1;
+      update.run(users, admin, row.entity_id);
+    }
+  });
+  tx(rows);
+  return listAllDevices(db);
+}
+
 export function setDeviceAcl(db, entityId, { allowUsers, allowAdmin }) {
   const row = db.prepare(`SELECT entity_id FROM ha_devices WHERE entity_id = ?`).get(entityId);
   if (!row) return null;

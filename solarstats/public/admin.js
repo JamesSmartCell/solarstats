@@ -72,6 +72,7 @@ async function load() {
   }
   renderPieSlots(data.pieSlots || []);
   renderChartControls(data.charts || {}, sensors);
+  loadViewers().catch((err) => console.warn(err));
 
   if (zbgwRes.ok) {
     const zbgwData = await zbgwRes.json();
@@ -183,6 +184,45 @@ async function bindField(key, entityId) {
 function zbgwUrl() {
   const q = selectedGateway ? `?device=${encodeURIComponent(selectedGateway)}` : "";
   return `/api/admin/zbgw${q}`;
+}
+
+function renderViewers(viewers) {
+  const list = document.getElementById("viewerList");
+  if (!list) return;
+  list.replaceChildren();
+  for (const viewer of viewers || []) {
+    const li = document.createElement("li");
+    const email = document.createElement("span");
+    email.textContent = viewer.email;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "toolbar-btn";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removeViewer(viewer.email));
+    li.append(email, remove);
+    list.appendChild(li);
+  }
+}
+
+async function loadViewers() {
+  const res = await fetch(adminPath("/api/admin/viewers"));
+  if (!res.ok) return;
+  const data = await res.json();
+  renderViewers(data.viewers || []);
+}
+
+async function removeViewer(email) {
+  const res = await fetch(adminPath("/api/admin/viewers"), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Could not remove user");
+    return;
+  }
+  const data = await res.json();
+  renderViewers(data.viewers || []);
 }
 
 async function loadSiteAdmins() {
@@ -919,6 +959,48 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+document.getElementById("viewerForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.getElementById("viewerEmail");
+  const email = input?.value?.trim() || "";
+  const res = await fetch(adminPath("/api/admin/viewers"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Could not add user");
+    return;
+  }
+  if (input) input.value = "";
+  renderViewers((await res.json()).viewers || []);
+  flashSaved("viewerSaved");
+});
+
+document.querySelectorAll(".bulk-row button").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const res = await fetch(adminPath("/api/admin/devices/exposure"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          group: btn.dataset.group,
+          column: btn.dataset.column,
+          mode: btn.dataset.mode,
+        }),
+      });
+      if (!res.ok) {
+        alert((await res.json().catch(() => ({}))).error || "Could not update the list");
+        return;
+      }
+      renderDeviceGroups((await res.json()).devices || []);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
 
 document.getElementById("fwUpload")?.addEventListener("click", async () => {
   const input = document.getElementById("fwFile");

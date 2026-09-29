@@ -53,6 +53,7 @@ import {
   listDevicesForViewer,
   listAllDevices,
   setDeviceAcl,
+  setGroupExposure,
   getDevice,
   enqueueDeviceCommand,
   claimPendingCommands,
@@ -66,7 +67,16 @@ import {
   verifyAuthentication,
   verifyRegistration,
 } from "./passkeys.js";
-import { isSiteAdmin, listPublicSites, loadSites, setLinkedSiteAdmin } from "./sites.js";
+import {
+  addSiteViewer,
+  canViewSite,
+  isSiteAdmin,
+  listPublicSites,
+  listSiteViewers,
+  loadSites,
+  removeSiteViewer,
+  setLinkedSiteAdmin,
+} from "./sites.js";
 import {
   enqueueZbgwRestart,
   listZbgwEvents,
@@ -389,6 +399,9 @@ function requireSite(req, res, next) {
   const site = siteFromRequest(req);
   if (!site) {
     return res.status(404).json({ error: "unknown_site" });
+  }
+  if (req.user && !canViewSite(db, site, req.user.email)) {
+    return res.status(403).json({ error: "forbidden" });
   }
   req.site = site;
   return next();
@@ -945,6 +958,44 @@ app.post("/api/diag/zbgw", authorizeZbgwDiag, rateLimitZbgwDiag, (req, res) => {
   }
 });
 
+app.get("/api/admin/viewers", requireSiteAdmin, (req, res) => {
+  res.json({ viewers: listSiteViewers(db, req.site.slug) });
+});
+
+app.post("/api/admin/viewers", requireSiteAdmin, (req, res) => {
+  try {
+    const email = String(req.body?.email || "");
+    const viewers = addSiteViewer(db, req.site.slug, email);
+    ensureApprovedUser(db, { email, displayName: email });
+    res.json({ viewers });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "viewer_failed" });
+  }
+});
+
+app.delete("/api/admin/viewers", requireSiteAdmin, (req, res) => {
+  try {
+    const viewers = removeSiteViewer(db, req.site.slug, req.body?.email);
+    res.json({ viewers });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "viewer_failed" });
+  }
+});
+
+app.post("/api/admin/devices/exposure", requireSiteAdmin, (req, res) => {
+  try {
+    const devices = setGroupExposure(req.site.db, {
+      group: req.body?.group,
+      column: req.body?.column,
+      mode: req.body?.mode,
+    });
+    broadcastDevices(req.site);
+    res.json({ devices });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "exposure_failed" });
+  }
+});
+
 app.post("/api/admin/devices/:entityId/acl", requireSiteAdmin, (req, res) => {
   const entityId = decodeURIComponent(req.params.entityId);
   const device = setDeviceAcl(req.site.db, entityId, {
@@ -1212,6 +1263,11 @@ server.on("upgrade", (req, socket, head) => {
     }
 
     const site = getSite(url.searchParams.get("site") || "home") || sites.get("home");
+    if (!canViewSite(db, site, user.email)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.userId = user.id;
       ws.siteSlug = site.slug;
@@ -1255,7 +1311,12 @@ setInterval(() => {
 app.get("/:slug", (req, res, next) => {
   const site = getSite(req.params.slug);
   if (!site || site.default) return next();
-  requireApproved(req, res, () => sendDashboard(res, site));
+  requireApproved(req, res, () => {
+    if (!canViewSite(db, site, req.user.email)) {
+      return res.status(403).type("text").send("This dashboard has not been shared with you.");
+    }
+    return sendDashboard(res, site);
+  });
 });
 
 server.listen(PORT, () => {

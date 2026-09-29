@@ -28,6 +28,22 @@
         </div>
       </header>
 
+      <section class="panel admin-panel">
+        <h2>Page users</h2>
+        <p class="hint">
+          Add the Microsoft email of each person who may open this dashboard.
+          On a paired installation, only you and the people listed here can open the page.
+          They see items ticked for users, and they cannot change this admin page.
+          The original home page stays open to every approved account.
+        </p>
+        <form id="viewerForm" class="toggle-row">
+          <input type="email" id="viewerEmail" required placeholder="name@example.com" />
+          <button type="submit" class="toolbar-btn">Add user</button>
+        </form>
+        <ul class="viewer-list" id="viewerList"></ul>
+        <p class="hint" id="viewerSaved" hidden>Saved</p>
+      </section>
+
       <section class="panel admin-panel" data-home-admin>
         <h2>Registration settings</h2>
         <label class="toggle-row">
@@ -198,6 +214,14 @@
           <strong>Admin</strong> = on the board for admin only ·
           neither = hidden from the board
         </p>
+        <p class="bulk-row">
+          <span>Admin</span>
+          <button type="button" class="toolbar-btn" data-group="sensors" data-column="admin" data-mode="all">Select all</button>
+          <button type="button" class="toolbar-btn" data-group="sensors" data-column="admin" data-mode="none">Select none</button>
+          <span>User</span>
+          <button type="button" class="toolbar-btn" data-group="sensors" data-column="user" data-mode="all">Select all</button>
+          <button type="button" class="toolbar-btn" data-group="sensors" data-column="user" data-mode="none">Select none</button>
+        </p>
         <div class="table-wrap">
           <table class="admin-table" id="sensorsTable">
             <thead>
@@ -223,6 +247,14 @@
           <strong>User</strong> = on the board for everyone ·
           <strong>Admin</strong> = on the board for admin only ·
           neither = hidden from the board
+        </p>
+        <p class="bulk-row">
+          <span>Admin</span>
+          <button type="button" class="toolbar-btn" data-group="switches" data-column="admin" data-mode="all">Select all</button>
+          <button type="button" class="toolbar-btn" data-group="switches" data-column="admin" data-mode="none">Select none</button>
+          <span>User</span>
+          <button type="button" class="toolbar-btn" data-group="switches" data-column="user" data-mode="all">Select all</button>
+          <button type="button" class="toolbar-btn" data-group="switches" data-column="user" data-mode="none">Select none</button>
         </p>
         <div class="table-wrap">
           <table class="admin-table" id="devicesTable">
