@@ -46,7 +46,7 @@ body.theme-lcars .lcars-shell {
   grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   column-gap: 10px;
-  row-gap: 8px;
+  row-gap: 4px;
   min-height: calc(100vh - 26px);
 }
 
@@ -62,7 +62,7 @@ body.theme-lcars .lcars-top-main {
 body.theme-lcars .lcars-bar-row {
   display: grid;
   grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
-  column-gap: 10px;
+  column-gap: 4px;
   align-items: end;
   height: var(--lcars-bar);
 }
