@@ -62,6 +62,7 @@ import {
   enqueueDeviceCommand,
   claimPendingCommands,
   completeDeviceCommand,
+  getDeviceCommand,
   listTrackedEntityIds,
   countDevices,
 } from "./db.js";
@@ -1146,7 +1147,26 @@ app.get("/api/devices", requireApproved, requireSite, (req, res) => {
   });
 });
 
-app.post("/api/devices/:entityId/toggle", requireApproved, requireSite, (req, res) => {
+function waitForDeviceCommand(db, id, timeoutMs = 25000) {
+  const started = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      const row = getDeviceCommand(db, id);
+      if (row && (row.status === "done" || row.status === "error")) {
+        resolve(row);
+        return;
+      }
+      if (Date.now() - started >= timeoutMs) {
+        resolve(null);
+        return;
+      }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+}
+
+app.post("/api/devices/:entityId/toggle", requireApproved, requireSite, async (req, res) => {
   const entityId = decodeURIComponent(req.params.entityId);
   const sdb = req.site.db;
   const device = getDevice(sdb, entityId);
@@ -1162,15 +1182,21 @@ app.post("/api/devices/:entityId/toggle", requireApproved, requireSite, (req, re
     device.allow_users === 1 || (admin && device.allow_admin === 1);
   if (!allowed) return res.status(403).json({ error: "forbidden" });
 
-  enqueueDeviceCommand(sdb, {
+  const commandId = enqueueDeviceCommand(sdb, {
     entityId,
     action: "toggle",
     userId: req.user.id,
   });
-
+  const finished = await waitForDeviceCommand(sdb, commandId);
+  const devices = listDevicesForViewer(sdb, { isAdmin: admin });
+  if (!finished || finished.status !== "done") {
+    return res.status(504).json({ error: "toggle_timeout", devices });
+  }
   res.json({
     ok: true,
-    devices: listDevicesForViewer(sdb, { isAdmin: admin }),
+    entityId,
+    state: finished.result_state,
+    devices,
   });
 });
 
@@ -1226,17 +1252,16 @@ app.get("/api/agent/commands/:slug", authorizeSiteIngest, (req, res) => {
   });
 });
 
-app.post("/api/agent/commands/:id/complete", authorizeIngest, (req, res) => {
+function finishDeviceCommand(req, res) {
   const id = Number(req.params.id);
-  completeDeviceCommand(req.site.db, id, req.body?.ok !== false);
+  completeDeviceCommand(req.site.db, id, req.body?.ok !== false, req.body?.state);
+  broadcastDevices(req.site);
   res.json({ ok: true });
-});
+}
 
-app.post("/api/agent/:slug/commands/:id/complete", authorizeSiteIngest, (req, res) => {
-  const id = Number(req.params.id);
-  completeDeviceCommand(req.site.db, id, req.body?.ok !== false);
-  res.json({ ok: true });
-});
+app.post("/api/agent/commands/:id/complete", authorizeIngest, finishDeviceCommand);
+
+app.post("/api/agent/:slug/commands/:id/complete", authorizeSiteIngest, finishDeviceCommand);
 
 app.get("/api/health", (_req, res) => {
   res.json({

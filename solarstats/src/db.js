@@ -174,6 +174,8 @@ export function openDatabase(dbPath) {
   ensureColumn(db, "ha_devices", "device_class", "TEXT");
   ensureColumn(db, "ha_devices", "unit", "TEXT");
   ensureColumn(db, "ha_devices", "display_name", "TEXT");
+  ensureColumn(db, "ha_devices", "state_hold_until", "TEXT");
+  ensureColumn(db, "device_commands", "result_state", "TEXT");
   ensureHaFieldTables(db);
 
   if (getMeta(db, "allow_new_accounts") == null) {
@@ -1622,7 +1624,13 @@ export function upsertDeviceStates(db, devices) {
       const entityId = String(d?.entity_id || d?.entityId || "").trim();
       if (!entityId) continue;
       const domain = entityId.split(".")[0] || "sensor";
-      const state = d.state == null ? null : String(d.state);
+      let state = d.state == null ? null : String(d.state);
+      const existing = db
+        .prepare(`SELECT state, state_hold_until FROM ha_devices WHERE entity_id = ?`)
+        .get(entityId);
+      if (existing?.state_hold_until && existing.state_hold_until > now) {
+        state = existing.state;
+      }
       upsert.run({
         entity_id: entityId,
         domain,
@@ -1826,13 +1834,55 @@ export function claimPendingCommands(db, limit = 20) {
   return claimed;
 }
 
-export function completeDeviceCommand(db, id, ok) {
+const SWITCH_HOLD_MS = 15000;
+
+export function holdDeviceState(db, entityId, state, ms = SWITCH_HOLD_MS) {
+  const now = new Date();
+  const until = new Date(now.getTime() + ms).toISOString();
+  const info = db
+    .prepare(
+      `UPDATE ha_devices
+       SET state = ?, updated_at = ?, state_hold_until = ?
+       WHERE entity_id = ?`,
+    )
+    .run(state, now.toISOString(), until, entityId);
+  return info.changes > 0;
+}
+
+export function getDeviceCommand(db, id) {
+  return (
+    db
+      .prepare(
+        `SELECT id, entity_id, status, result_state
+         FROM device_commands
+         WHERE id = ?`,
+      )
+      .get(id) || null
+  );
+}
+
+export function completeDeviceCommand(db, id, ok, reportedState) {
   const now = new Date().toISOString();
+  const row = db.prepare(`SELECT entity_id FROM device_commands WHERE id = ?`).get(id);
+  let state = reportedState == null ? null : String(reportedState).toLowerCase();
+  if (state !== "on" && state !== "off") state = null;
+  if (ok && row && !state) {
+    const device = db.prepare(`SELECT state FROM ha_devices WHERE entity_id = ?`).get(row.entity_id);
+    const current = String(device?.state || "").toLowerCase();
+    if (current === "on") state = "off";
+    else if (current === "off") state = "on";
+  }
   db.prepare(
     `UPDATE device_commands
-     SET status = ?, completed_at = ?
+     SET status = ?, completed_at = ?, result_state = ?
      WHERE id = ?`,
-  ).run(ok ? "done" : "error", now, id);
+  ).run(ok ? "done" : "error", now, state, id);
+  if (ok && row && state) holdDeviceState(db, row.entity_id, state);
+  return {
+    entityId: row?.entity_id || null,
+    status: ok ? "done" : "error",
+    state,
+  };
 }
 
 export { LOAD_KEYS, MIN_LIVE_BATTERY_V };

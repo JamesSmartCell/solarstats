@@ -77,10 +77,12 @@ const state = {
   },
   devices: [],
   pendingToggles: new Map(),
+  toggleHolds: new Map(),
   pieRows: [],
 };
 
 const TOGGLE_LOCK_MS = 20000;
+const TOGGLE_HOLD_MS = 15000;
 
 function switchState(device) {
   const value = String(device?.state || "").toLowerCase();
@@ -119,6 +121,29 @@ function overlayPendingDevice(device) {
   const pending = state.pendingToggles.get(device.entityId);
   if (!pending) return device;
   return { ...device, state: pending.to, on: pending.to === "on" };
+}
+
+function holdToggleState(entityId, nextState) {
+  clearPendingToggle(entityId);
+  state.toggleHolds.set(entityId, { state: nextState, until: Date.now() + TOGGLE_HOLD_MS });
+  state.devices = state.devices.map((device) =>
+    device.entityId === entityId
+      ? { ...device, state: nextState, on: nextState === "on" }
+      : device,
+  );
+}
+
+function applyToggleHolds(devices) {
+  const now = Date.now();
+  return devices.map((device) => {
+    const hold = state.toggleHolds.get(device.entityId);
+    if (!hold) return device;
+    if (hold.until <= now) {
+      state.toggleHolds.delete(device.entityId);
+      return device;
+    }
+    return { ...device, state: hold.state, on: hold.state === "on" };
+  });
 }
 
 function confirmPendingFrom(devices) {
@@ -796,7 +821,7 @@ function setLive(live) {
 function renderDevices(devices, { confirmPending = true } = {}) {
   if (Array.isArray(devices)) {
     if (confirmPending) confirmPendingFrom(devices);
-    state.devices = devices.map(overlayPendingDevice);
+    state.devices = applyToggleHolds(devices.map(overlayPendingDevice));
   }
   paintDevices();
 }
@@ -895,8 +920,10 @@ async function toggleDevice(entityId) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`toggle ${res.status}`);
-    const data = await res.json();
+    const next = data.state === "on" || data.state === "off" ? data.state : null;
+    if (next) holdToggleState(entityId, next);
     if (data.devices) renderDevices(data.devices, { confirmPending: false });
   } catch (err) {
     console.error(err);

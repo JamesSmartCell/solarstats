@@ -22,6 +22,9 @@ import {
   tilesMode,
   tileViews,
   upsertDeviceStates,
+  completeDeviceCommand,
+  enqueueDeviceCommand,
+  getDevice,
 } from "./db.js";
 
 function openTemp() {
@@ -195,6 +198,21 @@ test("select all and select none apply to one column of one group", () => {
   assert.equal(tileViews(db).length, 2);
   setSensorTops(db, false);
   assert.deepEqual(tileViews(db), []);
+
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a completed switch keeps its reported state through the next snapshot", () => {
+  const { dir, db } = openTemp();
+  upsertDeviceStates(db, [{ entityId: "switch.pump", name: "Pump", state: "on" }]);
+  const id = enqueueDeviceCommand(db, { entityId: "switch.pump", action: "toggle", userId: null });
+  const done = completeDeviceCommand(db, id, true, "off");
+  assert.equal(done.state, "off");
+  assert.equal(getDevice(db, "switch.pump").state, "off");
+
+  upsertDeviceStates(db, [{ entityId: "switch.pump", name: "Pump", state: "on" }]);
+  assert.equal(getDevice(db, "switch.pump").state, "off");
 
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
