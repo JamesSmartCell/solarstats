@@ -86,6 +86,12 @@ body {
   color: var(--muted);
 }
 
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

@@ -23,14 +23,13 @@
   <body class="{{THEME_CLASS}}">
     <div class="lcars-shell">
       <div class="lcars-top-main" aria-hidden="true">
-        <div class="lcars-banner">SOLARSTATS</div>
         <div class="lcars-bar-row">
           <div class="lcars-shoulder"></div>
           <div class="lcars-bars">
             <i class="w1"></i>
             <i class="w2"></i>
             <i class="w3"></i>
-            <i class="w4"></i>
+            <div class="lcars-banner">SOLARSTATS</div>
             <i class="w5"></i>
           </div>
         </div>
@@ -53,11 +52,13 @@
           <p class="sub" id="accountNotice" hidden></p>
         </div>
         <div class="status">
-          <div class="pill">
-            <span class="dot" id="connDot"></span>
-            <span id="connection">Connecting…</span>
+          <div class="status-line">
+            <div>Last update: <span id="lastUpdate">—</span></div>
+            <div class="pill">
+              <span class="dot" id="connDot"></span>
+              <span id="connection">Connecting…</span>
+            </div>
           </div>
-          <div>Last update: <span id="lastUpdate">—</span></div>
           <div class="nav-links">
             <a class="toolbar-btn" href="/admin" id="adminLink" hidden>Admin</a>
             <form method="post" action="/logout" style="display: inline">

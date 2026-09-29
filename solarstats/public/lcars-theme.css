@@ -74,15 +74,22 @@ body.theme-lcars .lcars-shoulder {
 }
 
 body.theme-lcars .lcars-banner {
-  margin: 0 0 0.45rem;
-  padding-right: 0.15rem;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0 0.45rem;
+  background: #000;
   color: var(--lcars-orange);
-  font-size: clamp(2.2rem, 4.6vw, 4.4rem);
+  font-size: 1.15rem;
   font-weight: 400;
-  line-height: 0.85;
-  letter-spacing: 0.03em;
-  text-align: right;
+  line-height: 1;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 body.theme-lcars .lcars-bars {
@@ -96,10 +103,9 @@ body.theme-lcars .lcars-bars i {
   height: 100%;
 }
 
-body.theme-lcars .lcars-bars .w1 { width: 38%; background: var(--lcars-bluey); }
+body.theme-lcars .lcars-bars .w1 { width: 22%; background: var(--lcars-bluey); }
 body.theme-lcars .lcars-bars .w2 { width: 4%; background: var(--lcars-orange); }
-body.theme-lcars .lcars-bars .w3 { width: 16%; background: var(--lcars-violet); }
-body.theme-lcars .lcars-bars .w4 { flex: 1; background: var(--lcars-violet); }
+body.theme-lcars .lcars-bars .w3 { width: 8%; background: var(--lcars-violet); }
 body.theme-lcars .lcars-bars .w5 { width: 4%; background: var(--lcars-red); }
 
 body.theme-lcars .lcars-side {
