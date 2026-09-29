@@ -191,7 +191,7 @@ body.theme-lcars .panel h2,
 body.theme-lcars .panel h3,
 body.theme-lcars .devices-title,
 body.theme-lcars .current-load-group {
-  color: var(--lcars-violet);
+  color: var(--lcars-orange);
   font-family: Antonio, "Arial Narrow", sans-serif;
   letter-spacing: 0.08em;
 }

@@ -610,7 +610,7 @@ function updateCurrentLoads(power) {
   } else {
     for (const group of groups) {
       const heading = document.createElement("li");
-      heading.className = "hint";
+      heading.className = "current-load-group";
       heading.textContent = group.title;
       els.currentLoadsList.appendChild(heading);
       for (const row of group.rows) {
