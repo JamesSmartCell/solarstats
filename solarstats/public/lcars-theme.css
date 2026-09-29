@@ -280,6 +280,21 @@ body.theme-lcars .device-btn.is-unknown {
     grid-template-columns: var(--lcars-rail) minmax(0, 1fr);
   }
 
+  body.theme-lcars .device-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  body.theme-lcars .device-btn {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+    overflow-wrap: anywhere;
+  }
+
   body.theme-lcars .charts .panel {
     padding-left: 0;
     padding-right: 0;

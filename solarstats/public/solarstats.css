@@ -554,7 +554,7 @@ body {
 @media (max-width: 800px) {
   .device-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.5rem;
   }
 
@@ -564,9 +564,11 @@ body {
 
   .device-btn {
     min-width: 0;
+    max-width: 100%;
     width: 100%;
-    padding-left: 0.55rem;
-    padding-right: 0.55rem;
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+    overflow-wrap: anywhere;
   }
 }
 
