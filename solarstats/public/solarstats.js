@@ -21,9 +21,6 @@ const RANGE_LABELS = {
   "30d": "30 days",
 };
 
-const PIE_GAP_COLOR = "#12181e";
-const PIE_GAP_FRACTION = 0.045;
-
 function isSolarSource(source) {
   return source === "inverter" || source === "solar";
 }
@@ -290,16 +287,8 @@ function pieChartModel(slices, kwhMap) {
   }
   const invVals = inverter.map((s) => sumMapValues(kwhMap, sliceKeys(s)));
   const gridVals = grid.map((s) => sumMapValues(kwhMap, sliceKeys(s)));
-  const invSum = invVals.reduce((a, b) => a + b, 0);
-  const gridSum = gridVals.reduce((a, b) => a + b, 0);
   const rows = [];
   inverter.forEach((slice, i) => rows.push({ slice, value: invVals[i] }));
-  if (invSum > 0 && gridSum > 0) {
-    rows.push({
-      slice: { key: "__pie_gap__", label: "", color: PIE_GAP_COLOR, gap: true },
-      value: Math.max((invSum + gridSum) * PIE_GAP_FRACTION, 0.002),
-    });
-  }
   grid.forEach((slice, i) => rows.push({ slice, value: gridVals[i] }));
   return rows;
 }
@@ -478,6 +467,35 @@ const outChart = new Chart(document.getElementById("outChart"), {
   },
 });
 
+function drawSolarRing(chart) {
+  const rows = state.pieRows || [];
+  const meta = chart.getDatasetMeta(0);
+  if (!meta?.data?.length) return;
+  let start = null;
+  let end = null;
+  let arc = null;
+  rows.forEach((row, index) => {
+    if (!row?.value || row.slice?.gap || !isSolarSource(row.slice?.source)) return;
+    const piece = meta.data[index];
+    if (!piece) return;
+    if (start == null) {
+      start = piece.startAngle;
+      arc = piece;
+    }
+    end = piece.endAngle;
+  });
+  if (start == null || end == null || !arc || end - start < 0.02) return;
+  const ctx = chart.ctx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.strokeStyle = "#3ecf8e";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "butt";
+  ctx.arc(arc.x, arc.y, arc.outerRadius + 8, start, end);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawPieGroupLabels(chart) {
   const rows = state.pieRows || [];
   const meta = chart.getDatasetMeta(0);
@@ -518,6 +536,7 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
     {
       id: "pieGroupLabels",
       afterDatasetsDraw(chart) {
+        drawSolarRing(chart);
         drawPieGroupLabels(chart);
       },
     },
@@ -537,6 +556,7 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
   options: {
     responsive: true,
     maintainAspectRatio: false,
+    layout: { padding: 14 },
     plugins: {
       legend: {
         position: "bottom",
