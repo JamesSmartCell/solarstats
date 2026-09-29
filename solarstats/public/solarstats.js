@@ -523,15 +523,7 @@ const loadsPieChart = new Chart(document.getElementById("loadsPieChart"), {
     maintainAspectRatio: false,
     layout: { padding: 14 },
     plugins: {
-      legend: {
-        position: "bottom",
-        labels: {
-          color: "#8b9aab",
-          boxWidth: 12,
-          font: { size: 11 },
-          filter: (item) => !!item.text,
-        },
-      },
+      legend: { display: false },
       tooltip: {
         backgroundColor: "#12181e",
         borderColor: "#2a3540",
