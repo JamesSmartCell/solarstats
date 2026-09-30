@@ -175,6 +175,7 @@ export function openDatabase(dbPath) {
   ensureColumn(db, "ha_devices", "unit", "TEXT");
   ensureColumn(db, "ha_devices", "display_name", "TEXT");
   ensureColumn(db, "ha_devices", "state_hold_until", "TEXT");
+  ensureColumn(db, "ha_devices", "device_id", "TEXT");
   ensureColumn(db, "device_commands", "result_state", "TEXT");
   ensureHaFieldTables(db);
 
@@ -1287,11 +1288,14 @@ export function insertSample(db, payload) {
     .prepare(`SELECT * FROM samples ORDER BY ts DESC LIMIT 1`)
     .get();
 
-  const devices = Array.isArray(payload.devices)
-    ? payload.devices
-    : Array.isArray(payload.states)
-      ? payload.states
-      : [];
+  const devices = stabilizePlugPower(
+    db,
+    Array.isArray(payload.devices)
+      ? payload.devices
+      : Array.isArray(payload.states)
+        ? payload.states
+        : [],
+  );
   if (devices.length) {
     upsertDeviceStates(db, devices);
     upsertHaCatalog(db, devices, ts);
@@ -1640,17 +1644,93 @@ export function listTrackedEntityIds(db) {
   return db.prepare(`SELECT entity_id FROM ha_devices ORDER BY entity_id`).all().map((r) => r.entity_id);
 }
 
+function deviceEntityId(device) {
+  return String(device?.entity_id || device?.entityId || "").trim();
+}
+
+function namedPlugSwitchId(powerEntityId) {
+  const match = /^sensor\.(.+)_power(_\d+)?$/i.exec(powerEntityId);
+  if (!match) return null;
+  return `switch.${match[1]}${match[2] || ""}`;
+}
+
+/**
+ * Zigbee plugs report watts only when the number changes. While the sibling
+ * switch still says on, keep the last watts. Off, unavailable, or a real 0
+ * clears the load.
+ */
+export function stabilizePlugPower(db, devices) {
+  if (!Array.isArray(devices) || !devices.length) return [];
+  const rows = devices.map((device) => ({ ...device }));
+  const incoming = new Map(rows.map((device) => [deviceEntityId(device), device]));
+  const storedSwitches = db
+    .prepare(
+      `SELECT entity_id, state, device_id FROM ha_devices
+       WHERE entity_id LIKE 'switch.%'`,
+    )
+    .all();
+
+  function switchLiveness(powerId, deviceId) {
+    const named = namedPlugSwitchId(powerId);
+    const seen = new Map();
+    const consider = (id, state) => {
+      if (!id.startsWith("switch.") || seen.has(id)) return;
+      seen.set(id, state);
+    };
+    for (const device of incoming.values()) {
+      const id = deviceEntityId(device);
+      const sameDevice = deviceId && (device.device_id || device.deviceId) === deviceId;
+      if (sameDevice || id === named) consider(id, device.state);
+    }
+    for (const row of storedSwitches) {
+      const sameDevice = deviceId && row.device_id === deviceId;
+      if (sameDevice || row.entity_id === named) consider(row.entity_id, row.state);
+    }
+    const states = [...seen.values()];
+    if (states.some((state) => String(state || "").toLowerCase() === "on")) return "on";
+    if (states.some((state) => String(state || "").toLowerCase() === "off")) return "off";
+    if (states.length) return "dead";
+    return null;
+  }
+
+  for (const device of rows) {
+    const entityId = deviceEntityId(device);
+    if (
+      !isPowerSensor({
+        entityId,
+        domain: device.domain,
+        deviceClass: device.device_class || device.deviceClass,
+        unit: device.unit,
+      })
+    ) {
+      continue;
+    }
+    const liveness = switchLiveness(entityId, device.device_id || device.deviceId || null);
+    if (!liveness) continue;
+    if (liveness !== "on") {
+      device.state = "0";
+      continue;
+    }
+    if (toNumber(device.state) != null) continue;
+    const previous = db.prepare(`SELECT state FROM ha_devices WHERE entity_id = ?`).get(entityId);
+    const held = toNumber(previous?.state);
+    device.state = held != null && held > 0 ? String(held) : "0";
+  }
+  return rows;
+}
+
 export function upsertDeviceStates(db, devices) {
   if (!Array.isArray(devices) || !devices.length) return;
   const now = new Date().toISOString();
   const upsert = db.prepare(
-    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit)
-     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at, @device_class, @unit)
+    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit, device_id)
+     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at, @device_class, @unit, @device_id)
      ON CONFLICT(entity_id) DO UPDATE SET
        state = excluded.state,
        name = COALESCE(excluded.name, ha_devices.name),
        device_class = COALESCE(excluded.device_class, ha_devices.device_class),
        unit = COALESCE(excluded.unit, ha_devices.unit),
+       device_id = COALESCE(excluded.device_id, ha_devices.device_id),
        updated_at = excluded.updated_at`,
   );
   const tx = db.transaction((rows) => {
@@ -1675,6 +1755,7 @@ export function upsertDeviceStates(db, devices) {
         updated_at: now,
         device_class: d.device_class || d.deviceClass || null,
         unit: d.unit || d.unit_of_measurement || null,
+        device_id: d.device_id || d.deviceId || null,
       });
     }
   });

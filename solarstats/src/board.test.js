@@ -257,3 +257,47 @@ test("solar-marked loads are removed from inverter supply", () => {
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("a plug keeps its last watts while its switch stays on", () => {
+  const { dir, db } = openTemp();
+  const plug = (power, switchState) =>
+    insertSample(db, {
+      devices: [
+        {
+          entityId: "sensor.ts011f_power",
+          name: "Pi5 power",
+          state: power,
+          unit: "W",
+          device_class: "power",
+          device_id: "plug1",
+        },
+        {
+          entityId: "switch.pi5_server",
+          name: "Pi5",
+          state: switchState,
+          device_id: "plug1",
+        },
+      ],
+    });
+
+  plug("4", "on");
+  setPieSlot(db, 0, { on: true, entityId: "sensor.ts011f_power", source: "grid" });
+  assert.equal(getLatestLoadsPower(db).slot0, 4);
+
+  plug("unavailable", "on");
+  assert.equal(getLatestLoadsPower(db).slot0, 4);
+
+  plug("0", "on");
+  assert.equal(getLatestLoadsPower(db).slot0, 0);
+
+  plug("4", "on");
+  plug("unavailable", "off");
+  assert.equal(getLatestLoadsPower(db).slot0, 0);
+
+  plug("4", "on");
+  plug("4", "unavailable");
+  assert.equal(getLatestLoadsPower(db).slot0, 0);
+
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
