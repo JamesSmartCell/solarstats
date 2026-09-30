@@ -1,0 +1,180 @@
+body.theme-expanse {
+  --bg0: #12100e;
+  --bg1: #1b1814;
+  --bg2: #2a241c;
+  --line: #6b5428;
+  --text: #f0d7a2;
+  --muted: #b08958;
+  --accent: #e39b2b;
+  --amber: #f2c14e;
+  --cyan: #d4782a;
+  --danger: #c4503a;
+  --tile: #0e0c0a;
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 2px, transparent 2px 4px),
+    #12100e;
+  color: var(--text);
+}
+
+body.theme-expanse .roci-frame {
+  display: block;
+  margin-bottom: 0.9rem;
+  border: 3px solid #3a332c;
+}
+
+body.theme-expanse .roci-stripe {
+  height: 12px;
+  background: repeating-linear-gradient(
+    -45deg,
+    #141210 0 10px,
+    #e0b000 10px 20px
+  );
+}
+
+body.theme-expanse .roci-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.35rem 0.7rem;
+  background: #1a1612;
+}
+
+body.theme-expanse .roci-title {
+  font-family: Teko, "Barlow Condensed", sans-serif;
+  font-size: 1.7rem;
+  letter-spacing: 0.18em;
+  line-height: 1;
+  color: #f2c14e;
+}
+
+body.theme-expanse .roci-sub {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b08958;
+  font-size: 0.95rem;
+}
+
+body.theme-expanse .roci-lamp {
+  margin-left: auto;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: #e39b2b;
+  box-shadow: 0 0 8px #e39b2b;
+}
+
+body.theme-expanse .brand {
+  font-family: Teko, "Barlow Condensed", sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+body.theme-expanse .brand span {
+  color: #e39b2b;
+}
+
+body.theme-expanse .top,
+body.theme-expanse .panel,
+body.theme-expanse .tile,
+body.theme-expanse .toolbar-btn,
+body.theme-expanse .range-select,
+body.theme-expanse .pill {
+  border-color: #5c4630;
+  border-radius: 2px;
+}
+
+body.theme-expanse .panel {
+  border: 3px solid #3a332c;
+  border-top: 7px solid #c9842a;
+  background: linear-gradient(180deg, #241f19, #14110e);
+  box-shadow: inset 0 0 0 1px #5c4a32;
+}
+
+body.theme-expanse .panel h2,
+body.theme-expanse .devices-title,
+body.theme-expanse .current-load-group {
+  font-family: Teko, "Barlow Condensed", sans-serif;
+  letter-spacing: 0.14em;
+  font-size: 1.25rem;
+  color: #f2c14e;
+}
+
+body.theme-expanse .tile {
+  border: 3px solid #3f3428;
+  background: #0e0c0a;
+  box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.7);
+}
+
+body.theme-expanse .tile .label {
+  color: #b08958;
+  letter-spacing: 0.12em;
+}
+
+body.theme-expanse .tile .value,
+body.theme-expanse .tile .unit {
+  color: #ffb43a;
+  text-shadow: 0 0 6px rgba(255, 160, 40, 0.4);
+}
+
+body.theme-expanse .chart-wrap {
+  height: 240px;
+  background: #0c0b09;
+  border: 1px solid #3a332c;
+}
+
+body.theme-expanse .device-btn {
+  border: 3px solid #4a3d30;
+  border-radius: 2px;
+  background: #1a1612;
+  color: #c9a36a;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+body.theme-expanse .device-btn.is-on {
+  background: #e39b2b;
+  color: #1a1208;
+  border-color: #ffd27a;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25);
+}
+
+body.theme-expanse .device-btn.is-off {
+  background: #241c16;
+  color: #8a7050;
+  border-color: #3a3028;
+}
+
+body.theme-expanse .device-btn.is-unknown {
+  background: #1a1612;
+  color: #6d5b48;
+}
+
+body.theme-expanse .toolbar-btn,
+body.theme-expanse .range-select {
+  background: #1a1612;
+  color: #f0d7a2;
+  font-family: "Barlow Condensed", sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.theme-expanse .pill {
+  background: #1a1612;
+  color: #f0d7a2;
+}
+
+body.theme-expanse .dot.live {
+  background: #e39b2b;
+  box-shadow: 0 0 6px #e39b2b;
+}
+
+@media (max-width: 800px) {
+  body.theme-expanse .roci-bar {
+    flex-wrap: wrap;
+  }
+}

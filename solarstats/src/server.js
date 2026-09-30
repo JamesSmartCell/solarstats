@@ -441,10 +441,11 @@ function sendAccessDenied(res, site, user) {
 
 function sendDashboard(res, site) {
   const template = fs.readFileSync(path.join(publicDir, "solarstats.html"), "utf8");
+  const theme = getTheme(site.db);
   const html = template
     .replaceAll("{{SITE_SLUG}}", site.slug)
     .replaceAll("{{SITE_NAME}}", site.name)
-    .replaceAll("{{THEME_CLASS}}", getTheme(site.db) === "lcars" ? "theme-lcars" : "");
+    .replaceAll("{{THEME_CLASS}}", theme === "standard" ? "" : `theme-${theme}`);
   res.type("html").send(html);
 }
 

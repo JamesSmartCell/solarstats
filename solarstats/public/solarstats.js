@@ -229,21 +229,129 @@ function appendChartPoint(key, point) {
   else points.push({ x, y: point.value });
 }
 
+const THEME_CLASSES = ["theme-lcars", "theme-jarvis", "theme-expanse"];
+
+const CHART_THEMES = {
+  standard: {
+    tick: "#8b9aab",
+    grid: "rgba(42,53,64,0.7)",
+    tipBg: "#12181e",
+    tipBorder: "#2a3540",
+    tipText: "#e8eef3",
+    soc: "#3ecf8e",
+    pv: "#e6b35a",
+    out: "#5ec8d6",
+    kwh: "#3ecf8e",
+    pieBorder: "#12181e",
+    ring: "#3ecf8e",
+  },
+  jarvis: {
+    tick: "#7ec8ff",
+    grid: "rgba(40,120,200,0.35)",
+    tipBg: "#041018",
+    tipBorder: "#1d6dff",
+    tipText: "#d7f1ff",
+    soc: "#3ec6ff",
+    pv: "#7aa2ff",
+    out: "#4fd2ff",
+    kwh: "#9ad7ff",
+    pieBorder: "#041018",
+    ring: "#3ec6ff",
+  },
+  expanse: {
+    tick: "#e6b15a",
+    grid: "rgba(180,120,40,0.28)",
+    tipBg: "#16130f",
+    tipBorder: "#8a5a22",
+    tipText: "#f0d7a2",
+    soc: "#e6b15a",
+    pv: "#f2c14e",
+    out: "#d4782a",
+    kwh: "#c9a227",
+    pieBorder: "#16130f",
+    ring: "#e6b15a",
+  },
+};
+
+function themeName() {
+  if (document.body.classList.contains("theme-jarvis")) return "jarvis";
+  if (document.body.classList.contains("theme-expanse")) return "expanse";
+  if (document.body.classList.contains("theme-lcars")) return "lcars";
+  return "standard";
+}
+
+function paintChartChrome(theme) {
+  const pal = CHART_THEMES[theme] || CHART_THEMES.standard;
+  state.solarRing = pal.ring;
+  const tint = (chart) => {
+    for (const scale of Object.values(chart.options.scales || {})) {
+      if (scale.ticks) scale.ticks.color = pal.tick;
+      if (scale.grid && scale.grid.drawOnChartArea !== false) scale.grid.color = pal.grid;
+    }
+    const tip = chart.options.plugins?.tooltip;
+    if (tip) {
+      tip.backgroundColor = pal.tipBg;
+      tip.borderColor = pal.tipBorder;
+      tip.titleColor = pal.tipText;
+      tip.bodyColor = pal.tipText;
+    }
+  };
+  tint(socChart);
+  tint(pvChart);
+  tint(outChart);
+  tint(loadsPieChart);
+  socChart.data.datasets[0].borderColor = pal.soc;
+  socChart.data.datasets[0].backgroundColor = `${pal.soc}33`;
+  pvChart.data.datasets[0].borderColor = pal.pv;
+  pvChart.data.datasets[0].backgroundColor = `${pal.pv}33`;
+  outChart.data.datasets[0].borderColor = pal.out;
+  outChart.data.datasets[0].backgroundColor = `${pal.out}33`;
+  outChart.data.datasets[1].borderColor = pal.kwh;
+  if (outChart.options.plugins.legend?.labels) {
+    outChart.options.plugins.legend.labels.color = pal.tick;
+  }
+  loadsPieChart.data.datasets[0].borderColor = pal.pieBorder;
+  loadsPieChart.update("none");
+  for (const chart of charts) chart.update("none");
+}
+
+function applyTheme(theme) {
+  const name = theme === "lcars" || theme === "jarvis" || theme === "expanse" ? theme : "standard";
+  const next = name === "standard" ? "" : `theme-${name}`;
+  const current = THEME_CLASSES.find((cls) => document.body.classList.contains(cls)) || "";
+  if (current === next && state.chartTheme === name) return;
+  for (const cls of THEME_CLASSES) document.body.classList.remove(cls);
+  if (next) document.body.classList.add(next);
+  state.chartTheme = name;
+  paintChartChrome(name);
+  requestAnimationFrame(() => {
+    loadsPieChart.resize();
+    for (const chart of charts) chart.resize();
+  });
+}
+
+function dialFraction(text, unit) {
+  const n = Number(String(text ?? "").replace(/[^0-9.-]/g, ""));
+  if (!Number.isFinite(n)) return 0.16;
+  const u = String(unit || "").toLowerCase();
+  let span = 100;
+  if (u === "v") span = 60;
+  else if (u === "a") span = 40;
+  else if (u === "w") span = 2500;
+  else if (u === "kwh") span = 40;
+  return Math.max(0.08, Math.min(1, n / span));
+}
+
+function paintDial(article, text, unit) {
+  if (!article) return;
+  article.style.setProperty("--dial", String(dialFraction(text, unit)));
+}
+
 function applyBoard(payload) {
   if (!payload) return;
   if (payload.tilesMode) state.tilesMode = payload.tilesMode;
   if (payload.showPie != null) state.showPie = !!payload.showPie;
-  if (payload.theme) {
-    const on = payload.theme === "lcars";
-    const changed = document.body.classList.contains("theme-lcars") !== on;
-    document.body.classList.toggle("theme-lcars", on);
-    if (changed) {
-      requestAnimationFrame(() => {
-        loadsPieChart.resize();
-        for (const chart of charts) chart.resize();
-      });
-    }
-  }
+  if (payload.theme) applyTheme(payload.theme);
   if (Array.isArray(payload.tiles)) state.customTiles = payload.tiles;
   applyCharts(payload.charts);
   paintTiles();
@@ -301,6 +409,7 @@ function renderCustomTiles() {
       value.textContent = shown;
     }
     article.append(label, value);
+    paintDial(article, shown, tile.unit);
     root.appendChild(article);
   }
 }
@@ -512,7 +621,7 @@ function drawSolarRing(chart) {
   const ctx = chart.ctx;
   ctx.save();
   ctx.beginPath();
-  ctx.strokeStyle = "#3ecf8e";
+  ctx.strokeStyle = state.solarRing || "#3ecf8e";
   ctx.lineWidth = 5;
   ctx.lineCap = "butt";
   ctx.arc(arc.x, arc.y, arc.outerRadius + 8, start, end);
@@ -690,10 +799,12 @@ function updateTiles(sample) {
       el.textContent = text;
       flash(el);
     }
+    paintDial(el.closest(".tile"), text, el.parentElement?.querySelector(".unit")?.textContent);
   }
 
   const total = sample.energyKwhTotal ?? state.energyKwhTotal;
   els.energyTotal.textContent = fmt(total, 3);
+  paintDial(els.energyTotal.closest(".tile"), fmt(total, 3), "kWh");
   els.lastUpdate.textContent = sample.ts
     ? new Date(sample.ts).toLocaleString()
     : "—";
@@ -1035,6 +1146,7 @@ els.rangeSelect.addEventListener("change", () => {
   loadHistory().catch((err) => console.error(err));
 });
 
+applyTheme(themeName());
 paintTiles();
 paintPie();
 updateChrome();

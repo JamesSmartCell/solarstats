@@ -58,6 +58,10 @@ test("a linked site hides the home pie and uses chosen top boxes", () => {
   assert.equal(getTheme(db), "standard");
   assert.equal(setTheme(db, "lcars"), "lcars");
   assert.equal(getTheme(db), "lcars");
+  assert.equal(setTheme(db, "jarvis"), "jarvis");
+  assert.equal(getTheme(db), "jarvis");
+  assert.equal(setTheme(db, "expanse"), "expanse");
+  assert.equal(setTheme(db, "nope"), "standard");
   assert.equal(setTheme(db, "standard"), "standard");
   assert.equal(tilesMode(db), "custom");
   assert.equal(getLoadConfig(db).some((row) => row.key === "fridge"), false);

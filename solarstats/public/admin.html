@@ -62,12 +62,22 @@
       <section class="panel admin-panel">
         <h2>Display</h2>
         <label class="toggle-row">
-          <input type="checkbox" id="themeLcars" />
+          <input type="radio" name="dashboardTheme" value="standard" />
+          <span>Standard</span>
+        </label>
+        <label class="toggle-row">
+          <input type="radio" name="dashboardTheme" value="lcars" />
           <span>LCARS — classic Enterprise bridge frame</span>
         </label>
-        <p class="hint">
-          The readings stay where they are. LCARS adds the side bar, the top bar, and the Antonio font.
-        </p>
+        <label class="toggle-row">
+          <input type="radio" name="dashboardTheme" value="jarvis" />
+          <span>JARVIS — blue diagnostics, dials, and charts</span>
+        </label>
+        <label class="toggle-row">
+          <input type="radio" name="dashboardTheme" value="expanse" />
+          <span>Expanse — heavy industrial bus panels</span>
+        </label>
+        <p class="hint">One theme at a time. The readings stay in the same places.</p>
         <p class="hint" id="themeSaved" hidden>Saved</p>
       </section>
 

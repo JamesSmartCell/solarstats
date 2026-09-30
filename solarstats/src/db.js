@@ -624,14 +624,18 @@ export function setShowPie(db, on) {
   return getShowPie(db);
 }
 
+const THEMES = new Set(["standard", "lcars", "jarvis", "expanse"]);
+
 export function getTheme(db) {
-  return getMeta(db, "theme") === "lcars" ? "lcars" : "standard";
+  const theme = getMeta(db, "theme");
+  return THEMES.has(theme) ? theme : "standard";
 }
 
 export function setTheme(db, theme) {
-  const next = String(theme || "").trim().toLowerCase() === "lcars" ? "lcars" : "standard";
-  setMeta(db, "theme", next);
-  return next;
+  const next = String(theme || "").trim().toLowerCase();
+  const stored = THEMES.has(next) ? next : "standard";
+  setMeta(db, "theme", stored);
+  return stored;
 }
 
 export function getDisplayTileIds(db) {

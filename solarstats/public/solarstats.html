@@ -17,9 +17,15 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=Orbitron:wght@500;700&family=Share+Tech+Mono&family=Teko:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/solarstats.css" />
     <link rel="stylesheet" href="/auth.css" />
     <link rel="stylesheet" href="/lcars-theme.css" />
+    <link rel="stylesheet" href="/jarvis-theme.css" />
+    <link rel="stylesheet" href="/expanse-theme.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   </head>
@@ -48,6 +54,19 @@
         <span class="orange"></span>
       </aside>
       <div class="shell">
+      <div class="hud-frame" aria-hidden="true">
+        <span class="hud-title">J.A.R.V.I.S.</span>
+        <span class="hud-sub">System diagnostics</span>
+        <span class="hud-pips"><i></i><i></i><i></i><i></i></span>
+      </div>
+      <div class="roci-frame" aria-hidden="true">
+        <div class="roci-stripe"></div>
+        <div class="roci-bar">
+          <span class="roci-title">ROCI</span>
+          <span class="roci-sub">Main bus · Power</span>
+          <span class="roci-lamp"></span>
+        </div>
+      </div>
       <header class="top">
         <div>
           <h1 class="brand">Solar<span>stats</span></h1>

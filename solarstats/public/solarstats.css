@@ -42,6 +42,11 @@ body {
   padding: 1.25rem clamp(1rem, 3vw, 2rem) 2rem;
 }
 
+.hud-frame,
+.roci-frame {
+  display: none;
+}
+
 .shell {
   max-width: 1200px;
   margin: 0 auto;

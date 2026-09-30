@@ -1,0 +1,270 @@
+body.theme-jarvis {
+  --bg0: #02060c;
+  --bg1: #071018;
+  --bg2: #0c1c2e;
+  --line: #1c4e86;
+  --text: #d7f1ff;
+  --muted: #7eb6d8;
+  --accent: #3ec6ff;
+  --amber: #7aa2ff;
+  --cyan: #9ad7ff;
+  --tile: #061018;
+  --font-display: "Share Tech Mono", ui-monospace, monospace;
+  --font-mono: "Share Tech Mono", ui-monospace, monospace;
+  background:
+    linear-gradient(rgba(40, 120, 190, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(40, 120, 190, 0.07) 1px, transparent 1px),
+    radial-gradient(900px 480px at 50% -10%, rgba(20, 80, 170, 0.4), transparent 62%),
+    #02060c;
+  background-size: 28px 28px, 28px 28px, auto, auto;
+  color: var(--text);
+}
+
+body.theme-jarvis .hud-frame {
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid rgba(62, 198, 255, 0.35);
+}
+
+body.theme-jarvis .hud-title {
+  font-family: Orbitron, sans-serif;
+  letter-spacing: 0.22em;
+  font-size: 0.95rem;
+  color: #3ec6ff;
+  text-shadow: 0 0 10px rgba(62, 198, 255, 0.8);
+}
+
+body.theme-jarvis .hud-sub {
+  color: #7eb6d8;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+body.theme-jarvis .hud-pips {
+  margin-left: auto;
+  display: flex;
+  gap: 0.35rem;
+}
+
+body.theme-jarvis .hud-pips i {
+  width: 0.45rem;
+  height: 0.45rem;
+  background: #3ec6ff;
+  box-shadow: 0 0 8px #3ec6ff;
+  animation: jarvis-blink 1.5s steps(1) infinite;
+}
+
+body.theme-jarvis .hud-pips i:nth-child(2) { animation-delay: 0.2s; }
+body.theme-jarvis .hud-pips i:nth-child(3) { animation-delay: 0.4s; }
+body.theme-jarvis .hud-pips i:nth-child(4) { animation-delay: 0.6s; }
+
+body.theme-jarvis .brand {
+  font-family: Orbitron, sans-serif;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  text-shadow: 0 0 12px rgba(62, 198, 255, 0.45);
+}
+
+body.theme-jarvis .brand span {
+  color: #3ec6ff;
+}
+
+body.theme-jarvis .pill {
+  border-color: #1d6dff;
+  color: #d7f1ff;
+}
+
+body.theme-jarvis .dot.live {
+  background: #3ec6ff;
+  box-shadow: 0 0 8px #3ec6ff;
+}
+
+body.theme-jarvis .tiles,
+body.theme-jarvis #customTiles {
+  grid-template-columns: repeat(auto-fit, minmax(8.6rem, 1fr));
+  gap: 1rem;
+}
+
+body.theme-jarvis .tile {
+  aspect-ratio: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.15rem;
+  position: relative;
+  background:
+    radial-gradient(circle at 50% 50%, #041018 0 58%, transparent 59%),
+    conic-gradient(from -90deg, #3ec6ff calc(var(--dial, 0.2) * 1turn), rgba(18, 52, 86, 0.55) 0);
+  box-shadow: 0 0 18px rgba(40, 140, 220, 0.35);
+}
+
+body.theme-jarvis .tile::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1px dashed rgba(158, 220, 255, 0.55);
+  animation: jarvis-spin 22s linear infinite;
+  pointer-events: none;
+}
+
+body.theme-jarvis .tile .label,
+body.theme-jarvis .tile .value,
+body.theme-jarvis .tile .unit {
+  position: relative;
+  z-index: 1;
+  color: #d7f1ff;
+}
+
+body.theme-jarvis .tile .label {
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+}
+
+body.theme-jarvis .tile .value {
+  margin-top: 0.15rem;
+  font-family: "Share Tech Mono", ui-monospace, monospace;
+  font-size: 1.05rem;
+  text-shadow: 0 0 8px rgba(80, 180, 255, 0.85);
+}
+
+body.theme-jarvis .charts .panel {
+  border-color: rgba(62, 198, 255, 0.45);
+  background: rgba(4, 12, 22, 0.9);
+  box-shadow: 0 0 24px rgba(20, 80, 160, 0.16);
+}
+
+body.theme-jarvis .panel {
+  position: relative;
+}
+
+body.theme-jarvis .panel::before,
+body.theme-jarvis .panel::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #3ec6ff;
+  pointer-events: none;
+}
+
+body.theme-jarvis .panel::before {
+  top: -1px;
+  left: -1px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+body.theme-jarvis .panel::after {
+  right: -1px;
+  bottom: -1px;
+  border-left: 0;
+  border-top: 0;
+}
+
+body.theme-jarvis .panel h2::before,
+body.theme-jarvis .devices-title::before {
+  content: "";
+  display: inline-block;
+  width: 0.48rem;
+  height: 0.48rem;
+  margin-right: 0.5rem;
+  background: #3ec6ff;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  box-shadow: 0 0 8px #3ec6ff;
+  animation: jarvis-blink 1.4s steps(1) infinite;
+  vertical-align: 0.05rem;
+}
+
+body.theme-jarvis .charts .panel:nth-child(3) h2::before { animation-delay: 0.35s; }
+body.theme-jarvis .charts .panel:nth-child(4) h2::before { animation-delay: 0.7s; }
+
+body.theme-jarvis .chart-wrap {
+  height: 300px;
+}
+
+body.theme-jarvis .pie-wrap {
+  height: 280px;
+}
+
+body.theme-jarvis .toolbar-btn,
+body.theme-jarvis .range-select {
+  border-color: #1d6dff;
+  color: #d7f1ff;
+  background: #071018;
+}
+
+body.theme-jarvis .device-btn {
+  border: 1px solid #1d6dff;
+  background: #071018;
+  color: #9ad7ff;
+  border-radius: 0;
+}
+
+body.theme-jarvis .device-btn.is-on {
+  background: rgba(30, 110, 200, 0.35);
+  color: #eaf7ff;
+  border-color: #3ec6ff;
+  box-shadow: 0 0 12px rgba(62, 198, 255, 0.35);
+}
+
+body.theme-jarvis .device-btn.is-on::before {
+  content: "";
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.4rem;
+  background: #3ec6ff;
+  box-shadow: 0 0 8px #3ec6ff;
+  animation: jarvis-blink 1.1s steps(1) infinite;
+  vertical-align: 0.05rem;
+}
+
+body.theme-jarvis .device-btn.is-off {
+  background: #061018;
+  color: #5f86a4;
+  border-color: #16365c;
+}
+
+@keyframes jarvis-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes jarvis-blink {
+  50% { opacity: 0.2; }
+}
+
+@media (max-width: 800px) {
+  body.theme-jarvis .tiles,
+  body.theme-jarvis #customTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.theme-jarvis .chart-wrap,
+  body.theme-jarvis .pie-wrap {
+    height: 220px;
+  }
+
+  body.theme-jarvis .hud-frame {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.theme-jarvis .tile::after,
+  body.theme-jarvis .hud-pips i,
+  body.theme-jarvis .panel h2::before,
+  body.theme-jarvis .devices-title::before,
+  body.theme-jarvis .device-btn.is-on::before {
+    animation: none;
+  }
+}

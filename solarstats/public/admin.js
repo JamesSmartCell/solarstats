@@ -51,15 +51,14 @@ async function load() {
     renderUsers(data.users);
     loadSiteAdmins().catch((err) => console.warn(err));
   }
-  const themeLcars = document.getElementById("themeLcars");
-  if (themeLcars) {
-    themeLcars.checked = data.theme === "lcars";
-    themeLcars.onchange = () => {
-      postPieSettings({ theme: themeLcars.checked ? "lcars" : "standard" }, "themeSaved").catch((err) =>
-        console.error(err),
-      );
+  const theme = data.theme || "standard";
+  document.querySelectorAll('input[name="dashboardTheme"]').forEach((input) => {
+    input.checked = input.value === theme;
+    input.onchange = () => {
+      if (!input.checked) return;
+      postPieSettings({ theme: input.value }, "themeSaved").catch((err) => console.error(err));
     };
-  }
+  });
 
   const showPie = document.getElementById("showPie");
   if (showPie) {
