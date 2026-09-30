@@ -5,7 +5,18 @@ import os from "node:os";
 import path from "node:path";
 import { openDatabase } from "./db.js";
 import { checkSiteName, claimPairing, pollPairing, startPairing, updateSiteProfile } from "./pairing.js";
-import { addSiteViewer, canViewSite, isSiteAdmin, loadSites, removeSiteViewer, resolveRootSite } from "./sites.js";
+import {
+  addSiteViewer,
+  allowSiteAccess,
+  canViewSite,
+  denySiteAccess,
+  isSiteAdmin,
+  listAccessRequests,
+  loadSites,
+  removeSiteViewer,
+  requestSiteAccess,
+  resolveRootSite,
+} from "./sites.js";
 
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solarstats-pair-"));
@@ -104,6 +115,48 @@ test("unknown and expired codes are rejected", () => {
     () => claimPairing(authDb, sites, dbPath, { code: "H3K7M" }),
     (err) => err.message === "code_not_found",
   );
+  for (const site of sites.values()) site.db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("an access request is allowed onto the viewer list or wiped", () => {
+  const { dir, dbPath, authDb, sites } = fixture();
+  startPairing(authDb, sites, {
+    code: "K7M3P",
+    name: "Verdun",
+    email: "owner@example.com",
+    pollToken: "access-poll-token-0123456789ab",
+  });
+  const claimed = claimPairing(authDb, sites, dbPath, {
+    code: "K7M3P",
+    claimerEmail: "claimer@example.com",
+  });
+  const slug = claimed.slug;
+  assert.throws(
+    () => requestSiteAccess(authDb, "home", "guest@example.com"),
+    (err) => err.message === "not_requestable",
+  );
+  requestSiteAccess(authDb, slug, "Guest@Example.com");
+  requestSiteAccess(authDb, slug, "guest@example.com");
+  assert.deepEqual(
+    listAccessRequests(authDb, slug).map((row) => row.email),
+    ["guest@example.com"],
+  );
+  assert.equal(canViewSite(authDb, sites.get(slug), "guest@example.com"), false);
+
+  denySiteAccess(authDb, slug, "guest@example.com");
+  assert.equal(listAccessRequests(authDb, slug).length, 0);
+  assert.equal(canViewSite(authDb, sites.get(slug), "guest@example.com"), false);
+
+  requestSiteAccess(authDb, slug, "guest@example.com");
+  const allowed = allowSiteAccess(authDb, slug, "guest@example.com");
+  assert.equal(allowed.requests.length, 0);
+  assert.equal(canViewSite(authDb, sites.get(slug), "guest@example.com"), true);
+  assert.equal(
+    allowed.viewers.some((row) => row.email === "guest@example.com"),
+    true,
+  );
+
   for (const site of sites.values()) site.db.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -49,6 +49,13 @@ export function ensureSiteRegistry(authDb) {
       created_at TEXT NOT NULL,
       PRIMARY KEY (slug, email)
     );
+
+    CREATE TABLE IF NOT EXISTS site_access_requests (
+      slug TEXT NOT NULL,
+      email TEXT NOT NULL COLLATE NOCASE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (slug, email)
+    );
   `);
 }
 
@@ -80,6 +87,9 @@ export function addSiteViewer(authDb, slug, email) {
        ON CONFLICT(slug, email) DO NOTHING`,
     )
     .run(key, address, new Date().toISOString());
+  authDb
+    .prepare(`DELETE FROM site_access_requests WHERE slug = ? AND email = ? COLLATE NOCASE`)
+    .run(key, address);
   return listSiteViewers(authDb, key);
 }
 
@@ -90,6 +100,53 @@ export function removeSiteViewer(authDb, slug, email) {
     .prepare(`DELETE FROM site_viewers WHERE slug = ? AND email = ? COLLATE NOCASE`)
     .run(key, viewerEmail(email));
   return listSiteViewers(authDb, key);
+}
+
+export function listAccessRequests(authDb, slug) {
+  ensureSiteRegistry(authDb);
+  return authDb
+    .prepare(
+      `SELECT email, created_at FROM site_access_requests WHERE slug = ? ORDER BY created_at`,
+    )
+    .all(String(slug || "").toLowerCase());
+}
+
+/** Ask to open a named installation. The root home page does not take requests. */
+export function requestSiteAccess(authDb, slug, email) {
+  ensureSiteRegistry(authDb);
+  const address = viewerEmail(email);
+  const key = String(slug || "").toLowerCase();
+  if (!key || key === "home" || isReservedSlug(key)) {
+    const err = new Error("not_requestable");
+    err.status = 400;
+    throw err;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+    const err = new Error("invalid_email");
+    err.status = 400;
+    throw err;
+  }
+  authDb
+    .prepare(
+      `INSERT INTO site_access_requests (slug, email, created_at) VALUES (?, ?, ?)
+       ON CONFLICT(slug, email) DO NOTHING`,
+    )
+    .run(key, address, new Date().toISOString());
+  return listAccessRequests(authDb, key).find((row) => row.email === address) || null;
+}
+
+export function denySiteAccess(authDb, slug, email) {
+  ensureSiteRegistry(authDb);
+  const key = String(slug || "").toLowerCase();
+  authDb
+    .prepare(`DELETE FROM site_access_requests WHERE slug = ? AND email = ? COLLATE NOCASE`)
+    .run(key, viewerEmail(email));
+  return listAccessRequests(authDb, key);
+}
+
+export function allowSiteAccess(authDb, slug, email) {
+  const viewers = addSiteViewer(authDb, slug, email);
+  return { viewers, requests: listAccessRequests(authDb, slug) };
 }
 
 /** Home stays open to every approved login. A paired page is the owner plus people they add. */
@@ -235,6 +292,8 @@ export function applyLinkedSiteProfile(authDb, sites, defaultDbPath, { slug, nam
     authDb
       .prepare("UPDATE linked_sites SET slug = ?, name = ?, admin_email = ? WHERE slug = ?")
       .run(target, displayName, email, slug);
+    ensureSiteRegistry(authDb);
+    authDb.prepare("UPDATE site_access_requests SET slug = ? WHERE slug = ?").run(target, slug);
     sites.delete(slug);
     site.slug = target;
     site.dbPath = nextPath;

@@ -3,6 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <title>Admin — Solarstats</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -27,6 +32,16 @@
           </form>
         </div>
       </header>
+
+      <section class="panel admin-panel" id="accessRequests" hidden>
+        <h2>Access requests</h2>
+        <p class="hint">
+          People who asked to open this dashboard. Allow adds their email as a page user.
+          Deny removes the request.
+        </p>
+        <ul class="viewer-list" id="accessRequestList"></ul>
+        <p class="hint" id="accessRequestsEmpty">No pending requests.</p>
+      </section>
 
       <section class="panel admin-panel">
         <h2>Page users</h2>

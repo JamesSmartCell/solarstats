@@ -8,7 +8,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <title>Pending approval — Solarstats</title>
+    <title>Access — Solarstats</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,25 +18,18 @@
     <link rel="stylesheet" href="/solarstats.css" />
     <link rel="stylesheet" href="/auth.css" />
   </head>
-  <body class="auth-body">
+  <body class="auth-body" data-slug="{{SITE_SLUG}}" data-applied="{{APPLIED}}">
     <main class="auth-card">
       <h1 class="brand">Solar<span>stats</span></h1>
-      <p class="sub">Waiting for admin approval</p>
-      <p class="auth-copy">
-        Signed in as <strong id="email">…</strong>. An admin must approve your account
-        before you can view the dashboard.
-      </p>
-      <form method="post" action="/logout">
+      <p class="sub">{{SITE_NAME}}</p>
+      <p class="auth-copy">This dashboard has not been shared with you.</p>
+      <p class="auth-copy">Signed in as <strong>{{EMAIL}}</strong>.</p>
+      <button type="button" class="auth-btn" id="apply">Apply for access</button>
+      <p class="auth-status" id="status" hidden></p>
+      <form method="post" action="/logout?next=/{{SITE_SLUG}}">
         <button type="submit" class="auth-btn secondary">Sign out</button>
       </form>
     </main>
-    <script>
-      fetch("/api/me")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((me) => {
-          if (me?.email) document.getElementById("email").textContent = me.email;
-        })
-        .catch(() => {});
-    </script>
+    <script type="module" src="/access.js"></script>
   </body>
 </html>

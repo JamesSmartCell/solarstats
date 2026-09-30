@@ -74,8 +74,12 @@ import {
 } from "./passkeys.js";
 import {
   addSiteViewer,
+  allowSiteAccess,
   canViewSite,
+  denySiteAccess,
   isSiteAdmin,
+  listAccessRequests,
+  requestSiteAccess,
   listPublicSites,
   listSiteViewers,
   loadSites,
@@ -412,6 +416,27 @@ function requireSite(req, res, next) {
   }
   req.site = site;
   return next();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function sendAccessDenied(res, site, user) {
+  const pending = listAccessRequests(db, site.slug).some(
+    (row) => row.email.toLowerCase() === String(user.email).toLowerCase(),
+  );
+  const template = fs.readFileSync(path.join(publicDir, "access.html"), "utf8");
+  const html = template
+    .replaceAll("{{SITE_SLUG}}", escapeHtml(site.slug))
+    .replaceAll("{{SITE_NAME}}", escapeHtml(site.name))
+    .replaceAll("{{EMAIL}}", escapeHtml(user.email))
+    .replaceAll("{{APPLIED}}", pending ? "1" : "0");
+  res.status(403).type("html").send(html);
 }
 
 function sendDashboard(res, site) {
@@ -996,6 +1021,45 @@ app.delete("/api/admin/viewers", requireSiteAdmin, (req, res) => {
   }
 });
 
+app.post("/api/access-requests", requireApproved, (req, res) => {
+  const site = getSite(req.body?.slug);
+  if (!site || site.default) {
+    return res.status(400).json({ error: "not_requestable" });
+  }
+  if (canViewSite(db, site, req.user.email)) {
+    return res.json({ already: true });
+  }
+  try {
+    requestSiteAccess(db, site.slug, req.user.email);
+    res.json({ pending: true });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "request_failed" });
+  }
+});
+
+app.get("/api/admin/access-requests", requireSiteAdmin, (req, res) => {
+  if (req.site.default) return res.json({ requests: [] });
+  res.json({ requests: listAccessRequests(db, req.site.slug) });
+});
+
+app.post("/api/admin/access-requests/allow", requireSiteAdmin, (req, res) => {
+  if (req.site.default) return res.status(400).json({ error: "not_requestable" });
+  try {
+    res.json(allowSiteAccess(db, req.site.slug, req.body?.email));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "request_failed" });
+  }
+});
+
+app.post("/api/admin/access-requests/deny", requireSiteAdmin, (req, res) => {
+  if (req.site.default) return res.status(400).json({ error: "not_requestable" });
+  try {
+    res.json({ requests: denySiteAccess(db, req.site.slug, req.body?.email) });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "request_failed" });
+  }
+});
+
 app.post("/api/admin/devices/exposure", requireSiteAdmin, (req, res) => {
   try {
     const sdb = req.site.db;
@@ -1374,9 +1438,12 @@ setInterval(() => {
 app.get("/:slug", (req, res, next) => {
   const site = getSite(req.params.slug);
   if (!site || site.default) return next();
+  if (!currentUser(req)) {
+    return res.redirect(`/login?next=/${encodeURIComponent(site.slug)}`);
+  }
   requireApproved(req, res, () => {
     if (!canViewSite(db, site, req.user.email)) {
-      return res.status(403).type("text").send("This dashboard has not been shared with you.");
+      return sendAccessDenied(res, site, req.user);
     }
     return sendDashboard(res, site);
   });

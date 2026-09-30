@@ -83,6 +83,7 @@ async function load() {
   renderPieSlots(data.pieSlots || []);
   renderChartControls(data.charts || {}, sensors);
   loadViewers().catch((err) => console.warn(err));
+  loadAccessRequests().catch((err) => console.warn(err));
 
   if (zbgwRes.ok) {
     const zbgwData = await zbgwRes.json();
@@ -212,6 +213,58 @@ function renderViewers(viewers) {
     li.append(email, remove);
     list.appendChild(li);
   }
+}
+
+function renderAccessRequests(requests) {
+  const section = document.getElementById("accessRequests");
+  const list = document.getElementById("accessRequestList");
+  const empty = document.getElementById("accessRequestsEmpty");
+  if (!section || !list) return;
+  section.hidden = SITE === "home";
+  list.replaceChildren();
+  const rows = requests || [];
+  if (empty) empty.hidden = rows.length > 0;
+  for (const request of rows) {
+    const li = document.createElement("li");
+    const email = document.createElement("span");
+    email.textContent = request.email;
+    const allow = document.createElement("button");
+    allow.type = "button";
+    allow.className = "toolbar-btn";
+    allow.textContent = "Allow";
+    allow.addEventListener("click", () => decideAccess(request.email, "allow"));
+    const deny = document.createElement("button");
+    deny.type = "button";
+    deny.className = "toolbar-btn";
+    deny.textContent = "Deny";
+    deny.addEventListener("click", () => decideAccess(request.email, "deny"));
+    li.append(email, allow, deny);
+    list.appendChild(li);
+  }
+}
+
+async function loadAccessRequests() {
+  const section = document.getElementById("accessRequests");
+  if (!section || SITE === "home") return;
+  const res = await fetch(adminPath("/api/admin/access-requests"));
+  if (!res.ok) return;
+  const data = await res.json();
+  renderAccessRequests(data.requests || []);
+}
+
+async function decideAccess(email, action) {
+  const res = await fetch(adminPath(`/api/admin/access-requests/${action}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    alert((await res.json().catch(() => ({}))).error || "Could not update the request");
+    return;
+  }
+  const data = await res.json();
+  renderAccessRequests(data.requests || []);
+  if (action === "allow") renderViewers(data.viewers || []);
 }
 
 async function loadViewers() {
