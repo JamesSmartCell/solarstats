@@ -12,6 +12,13 @@ fetch("/api/me")
 const form = document.getElementById("connectForm");
 const errorBox = document.getElementById("errorBox");
 const statusBox = document.getElementById("statusBox");
+const codeInput = document.getElementById("code");
+const preset = new URLSearchParams(location.search)
+  .get("code")
+  ?.toUpperCase()
+  .replace(/[^A-Z0-9]/g, "")
+  .slice(0, 5);
+if (preset && codeInput) codeInput.value = preset;
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -40,3 +47,7 @@ form.addEventListener("submit", async (event) => {
   statusBox.textContent = `${body.name} is connected. You are its admin. Opening the dashboard…`;
   location.href = body.path;
 });
+
+if (preset && preset.length === 5) {
+  form.requestSubmit();
+}

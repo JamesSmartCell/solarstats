@@ -6,6 +6,7 @@ import "dotenv/config";
 import cookieSession from "cookie-session";
 import express from "express";
 import helmet from "helmet";
+import QRCode from "qrcode";
 import { WebSocketServer } from "ws";
 import {
   authConfigured,
@@ -95,7 +96,16 @@ import {
   receiveZbgwDiag,
 } from "./zbgw_diag.js";
 import { listHaFields, setFieldBinding } from "./ha_fields.js";
-import { checkSiteName, claimPairing, pollPairing, startPairing, updateSiteProfile } from "./pairing.js";
+import {
+  CODE_ALPHABET,
+  checkSiteName,
+  claimPairing,
+  normalizeCode,
+  pollPairing,
+  slugFromName,
+  startPairing,
+  updateSiteProfile,
+} from "./pairing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -366,8 +376,50 @@ function authorizeSiteIngest(req, res, next) {
   return authorizeBearer(site.secret, req, res, next);
 }
 
-function safeNext(value) {
+function pairCode(raw) {
+  const code = normalizeCode(raw);
+  if (code.length !== 5 || [...code].some((ch) => !CODE_ALPHABET.includes(ch))) return "";
+  return code;
+}
+
+function publicOrigin(req) {
+  const proto = req.get("x-forwarded-proto") || req.protocol;
+  const host = req.get("x-forwarded-host") || req.get("host");
+  return `${proto}://${host}`;
+}
+
+async function sendQrPng(res, target) {
+  try {
+    const png = await QRCode.toBuffer(target, {
+      margin: 1,
+      width: 320,
+      errorCorrectionLevel: "M",
+    });
+    res.set("Cache-Control", "no-store");
+    res.type("png").send(png);
+  } catch (err) {
+    console.error("qr failed:", err);
+    res.status(500).end();
+  }
+}
+
+function connectNext(value) {
   if (value === "/connect") return "/connect";
+  if (typeof value !== "string" || !value.startsWith("/connect")) return "";
+  let url;
+  try {
+    url = new URL(value, "http://solarstats.local");
+  } catch {
+    return "";
+  }
+  if (url.pathname !== "/connect") return "";
+  const code = pairCode(url.searchParams.get("code"));
+  return code ? `/connect?code=${code}` : "/connect";
+}
+
+function safeNext(value) {
+  const connect = connectNext(value);
+  if (connect) return connect;
   if (typeof value === "string" && /^\/[a-z0-9-]+$/.test(value)) {
     const site = getSite(value.slice(1));
     if (site && !site.default) return `/${site.slug}`;
@@ -379,7 +431,8 @@ function takeAfterLogin(req) {
   const after = req.session?.afterLogin;
   delete req.session.afterLogin;
   if (after === "create_passkey") return "/setup-passkey";
-  if (after === "/connect") return "/connect";
+  const connect = connectNext(after);
+  if (connect) return connect;
   if (typeof after === "string" && after.startsWith("/")) {
     const site = getSite(after.slice(1));
     if (site && !site.default) return `/${site.slug}`;
@@ -437,6 +490,49 @@ function sendAccessDenied(res, site, user) {
     .replaceAll("{{EMAIL}}", escapeHtml(user.email))
     .replaceAll("{{APPLIED}}", pending ? "1" : "0");
   res.status(403).type("html").send(html);
+}
+
+function siteByInstallationName(raw) {
+  const name = String(Array.isArray(raw) ? raw[0] : raw || "").trim();
+  if (!name || name.length > 80) return null;
+  const lower = name.toLowerCase();
+  for (const site of sites.values()) {
+    if (!site || site.slug === "home") continue;
+    if (String(site.name || "").trim().toLowerCase() === lower) return site;
+  }
+  const slug = slugFromName(name);
+  const bySlug = slug ? getSite(slug) : null;
+  if (bySlug && bySlug.slug !== "home") return bySlug;
+  return null;
+}
+
+async function sendHelp(req, res) {
+  const template = fs.readFileSync(path.join(publicDir, "help.html"), "utf8");
+  const site = siteByInstallationName(req.query.name);
+  if (!site) {
+    const requested = String(Array.isArray(req.query.name) ? req.query.name[0] : req.query.name || "").trim();
+    const message = requested
+      ? `No installation named ${escapeHtml(requested)} was found.`
+      : "That installation was not found.";
+    const html = template
+      .replaceAll("{{THEME_CLASS}}", "")
+      .replaceAll("{{SITE_NAME}}", "Help")
+      .replaceAll("{{HELP_BODY}}", `<article class="panel help-panel"><p>${message}</p></article>`);
+    return res.status(404).type("html").send(html);
+  }
+  const theme = getTheme(site.db);
+  const url = `${publicOrigin(req)}/${site.slug}`;
+  const qr = await QRCode.toDataURL(url, {
+    margin: 1,
+    width: 320,
+    errorCorrectionLevel: "M",
+  });
+  const body = `<article class="panel help-panel"><img src="${escapeHtml(qr)}" alt="QR code for ${escapeHtml(site.name)}" width="280" height="280" /><p>Scan the QR or <a href="${escapeHtml(url)}">click the link</a> for the display page for this installation.</p></article>`;
+  const html = template
+    .replaceAll("{{THEME_CLASS}}", theme === "standard" ? "" : `theme-${theme}`)
+    .replaceAll("{{SITE_NAME}}", escapeHtml(site.name))
+    .replaceAll("{{HELP_BODY}}", body);
+  res.type("html").send(html);
 }
 
 function sendDashboard(res, site) {
@@ -1110,13 +1206,31 @@ app.post("/api/admin/devices/:entityId/acl", requireSiteAdmin, (req, res) => {
 
 // --- Protected dashboard / data ---
 
+app.get("/help", (req, res) => {
+  sendHelp(req, res).catch((err) => {
+    console.error("help page failed:", err);
+    if (!res.headersSent) res.status(500).type("text").send("Help page failed");
+  });
+});
+
 app.get("/connect", (req, res) => {
+  const code = pairCode(req.query.code);
   const user = currentUser(req);
   if (!user || user.status !== "approved") {
-    req.session.afterLogin = "/connect";
+    req.session.afterLogin = code ? `/connect?code=${code}` : "/connect";
     return res.redirect("/login");
   }
   res.sendFile(path.join(publicDir, "connect.html"));
+});
+
+app.get("/api/pair/qr.png", async (req, res) => {
+  const ip = req.ip || "unknown";
+  if (!allowPairHit(`qr:${ip}`, 60)) {
+    return res.status(429).end();
+  }
+  const code = pairCode(req.query.code);
+  if (!code) return res.status(400).end();
+  await sendQrPng(res, `${publicOrigin(req)}/connect?code=${code}`);
 });
 
 app.post("/api/pair/name", (req, res) => {

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <title>{{SITE_NAME}} — Solarstats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=Orbitron:wght@500;700&family=Share+Tech+Mono&family=Teko:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/solarstats.css" />
+    <link rel="stylesheet" href="/lcars-theme.css" />
+    <link rel="stylesheet" href="/jarvis-theme.css" />
+    <link rel="stylesheet" href="/expanse-theme.css" />
+  </head>
+  <body class="{{THEME_CLASS}}">
+    <div class="lcars-shell">
+      <div class="lcars-top-main" aria-hidden="true">
+        <div class="lcars-bar-row">
+          <div class="lcars-shoulder"></div>
+          <div class="lcars-bars">
+            <i class="w1"></i>
+            <i class="w2"></i>
+            <i class="w3"></i>
+            <div class="lcars-banner">SOLARSTATS</div>
+            <i class="w5"></i>
+          </div>
+        </div>
+      </div>
+      <aside class="lcars-side" aria-hidden="true">
+        <span class="violet"></span>
+        <span class="red"></span>
+        <span class="orange"></span>
+        <span class="gold"></span>
+        <span class="bluey"></span>
+        <span class="gold"></span>
+        <span class="red grow"></span>
+        <span class="orange"></span>
+      </aside>
+      <div class="shell">
+        <div class="hud-frame" aria-hidden="true">
+          <span class="hud-title">J.A.R.V.I.S.</span>
+          <span class="hud-sub">System diagnostics</span>
+          <span class="hud-pips"><i></i><i></i><i></i><i></i></span>
+        </div>
+        <div class="roci-frame" aria-hidden="true">
+          <div class="roci-stripe"></div>
+          <div class="roci-bar">
+            <span class="roci-title">ROCI</span>
+            <span class="roci-sub">Main bus · Power</span>
+            <span class="roci-lamp"></span>
+          </div>
+        </div>
+        <header class="top">
+          <div>
+            <h1 class="brand">Solar<span>stats</span></h1>
+            <p class="sub">{{SITE_NAME}}</p>
+          </div>
+        </header>
+        {{HELP_BODY}}
+      </div>
+    </div>
+  </body>
+</html>

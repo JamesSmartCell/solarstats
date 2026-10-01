@@ -611,3 +611,31 @@ body {
     padding-top: 0.85rem;
   }
 }
+
+.help-panel {
+  max-width: 36rem;
+  padding: 1.25rem 1.4rem 1.5rem;
+}
+
+.help-panel img {
+  display: block;
+  width: min(280px, 100%);
+  height: auto;
+  margin: 0 0 1rem;
+  background: #fff;
+  padding: 10px;
+}
+
+.help-panel p {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+
+.help-panel a {
+  color: var(--accent);
+}
+
+body.theme-lcars .help-panel a {
+  color: var(--lcars-orange);
+}
