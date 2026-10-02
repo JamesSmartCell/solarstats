@@ -3,9 +3,9 @@
   "name": "Home Solar",
   "codeowners": [],
   "config_flow": true,
-  "documentation": "https://homesolar.percolate.one/connect",
+  "documentation": "https://homesolar.percolate.one/help",
   "integration_type": "hub",
   "iot_class": "cloud_push",
   "requirements": [],
-  "version": "0.4.2"
+  "version": "0.4.6"
 }

@@ -191,7 +191,12 @@ class HomeSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="link",
                 progress_action="pair",
                 progress_task=self._pair_task,
-                description_placeholders={"code": self._code, "base_url": self._base},
+                description_placeholders={
+                    "code": self._code,
+                    "base_url": self._base,
+                    "url": f"{self._base}/connect?code={self._code}",
+                    "qr_url": f"{self._base}/api/pair/qr.png?code={self._code}",
+                },
             )
         try:
             result = self._pair_task.result()

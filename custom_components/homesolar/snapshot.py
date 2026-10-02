@@ -72,7 +72,7 @@ def export_entity_ids(entry) -> set[str] | None:
     return {str(entity_id) for entity_id in raw or []}
 
 
-def build_snapshot(states, allowed: set[str] | None = None) -> dict:
+def build_snapshot(states, allowed: set[str] | None = None, device_id_for=None) -> dict:
     devices = []
     loads: dict[str, float | None] = {}
     for state in states:
@@ -89,6 +89,7 @@ def build_snapshot(states, allowed: set[str] | None = None) -> dict:
             "name": attrs.get("friendly_name"),
             "device_class": attrs.get("device_class"),
             "unit": attrs.get("unit_of_measurement"),
+            "device_id": device_id_for(entity_id) if device_id_for else None,
         }
         devices.append(device)
         if _is_energy(entity_id, device["device_class"], device["unit"]):

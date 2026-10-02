@@ -29,7 +29,7 @@
       }
     },
     "progress": {
-      "pair": "Waiting for {code} to be entered at {base_url}/connect"
+      "pair": "![Scan to connect]({qr_url})\n\nCode {code}\n\nScan the code, or open {url}. The signed-in account becomes this home's admin."
     },
     "error": {
       "cannot_connect": "Could not reach Home Solar",
