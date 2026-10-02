@@ -11,3 +11,5 @@ zigbee-gateway/sdkconfig.old
 zigbee-gateway/dependencies.lock
 zigbee-gateway/managed_components/
 rivermillsolar/
+
+ha_config.txt
