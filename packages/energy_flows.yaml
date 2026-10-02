@@ -68,16 +68,16 @@ template:
             0
           {% endif %}
 
-  # Washer W ≈ d(kWh)/dt (derivative is kW → ×1000).
-  # Re-check every minute so a stuck rate ages out after 20 min with no energy change.
-  # Also force 0 when Machine state is Stopped or energy sensor is offline.
+  # Cycle-average washer power.
+  # On the first Running sample, latch lifetime kWh and the time.
+  # While Running, W = (kWh now − latch) × 1000 × 3600 / seconds since latch.
+  # Any other machine state reports 0 and clears the latch.
   - trigger:
       - platform: time_pattern
-        minutes: "/1"
+        seconds: "/30"
       - platform: state
         entity_id:
           - sensor.laundry_room_washer_energy
-          - sensor.laundry_room_washer_power_derived
           - sensor.laundry_room_washer_machine_state
       - platform: homeassistant
         event: start
@@ -90,21 +90,85 @@ template:
         device_class: power
         state_class: measurement
         state: >-
-          {% set src = 'sensor.laundry_room_washer_power_derived' %}
-          {% set energy = 'sensor.laundry_room_washer_energy' %}
-          {% set mstate = 'sensor.laundry_room_washer_machine_state' %}
-          {% if not has_value(energy) %}
+          {% set running = states('sensor.laundry_room_washer_machine_state') == 'Running' %}
+          {% set energy = states('sensor.laundry_room_washer_energy') | float(none) %}
+          {% set attrs = this.attributes | default({}, true) %}
+          {% set raw_e = attrs.get('latch_energy', none) %}
+          {% set raw_t = attrs.get('latch_time', none) %}
+          {% set blank = [none, '', 'unknown', 'unavailable', 'none'] %}
+          {% set latch_e = raw_e | float(none) if raw_e not in blank else none %}
+          {% set latch_t = as_datetime(raw_t) if raw_t not in blank else none %}
+          {% if not running %}
             0
-          {% elif has_value(mstate) and states(mstate) == 'Stopped' %}
-            0
-          {% elif (now() - states[energy].last_changed).total_seconds() >= 1200 %}
-            0
-          {% elif has_value(src) %}
-            {% set w = (states(src) | float(0) * 1000) | round(0) %}
-            {{ [[w, 0] | max, 3500] | min }}
+          {% elif energy is none or latch_e is none or latch_t is none or energy + 0.001 < latch_e %}
+            {{ 0 if energy is not none else this.state | float(0) }}
           {% else %}
-            0
+            {% set diff = energy - latch_e %}
+            {% set dt = (now() - latch_t).total_seconds() %}
+            {% if diff > 0 and dt > 0 %}
+              {{ ((diff * 1000) * 3600 / dt) | round(0) }}
+            {% else %}
+              0
+            {% endif %}
           {% endif %}
+        attributes:
+          latch_energy: >-
+            {% set running = states('sensor.laundry_room_washer_machine_state') == 'Running' %}
+            {% set energy = states('sensor.laundry_room_washer_energy') | float(none) %}
+            {% set attrs = this.attributes | default({}, true) %}
+            {% set raw_e = attrs.get('latch_energy', none) %}
+            {% set blank = [none, '', 'unknown', 'unavailable', 'none'] %}
+            {% set latch_e = raw_e | float(none) if raw_e not in blank else none %}
+            {% if not running or energy is none and latch_e is none %}
+              none
+            {% elif energy is none %}
+              {{ latch_e }}
+            {% elif latch_e is none or energy + 0.001 < latch_e %}
+              {{ energy }}
+            {% else %}
+              {{ latch_e }}
+            {% endif %}
+          latch_time: >-
+            {% set running = states('sensor.laundry_room_washer_machine_state') == 'Running' %}
+            {% set energy = states('sensor.laundry_room_washer_energy') | float(none) %}
+            {% set attrs = this.attributes | default({}, true) %}
+            {% set raw_e = attrs.get('latch_energy', none) %}
+            {% set raw_t = attrs.get('latch_time', none) %}
+            {% set blank = [none, '', 'unknown', 'unavailable', 'none'] %}
+            {% set latch_e = raw_e | float(none) if raw_e not in blank else none %}
+            {% set have_t = raw_t not in blank %}
+            {% if not running or energy is none and latch_e is none %}
+              none
+            {% elif energy is none %}
+              {{ raw_t if have_t else 'none' }}
+            {% elif latch_e is none or energy + 0.001 < latch_e or not have_t %}
+              {{ now().isoformat() }}
+            {% else %}
+              {{ raw_t }}
+            {% endif %}
+          latch_diff_energy: >-
+            {% set running = states('sensor.laundry_room_washer_machine_state') == 'Running' %}
+            {% set energy = states('sensor.laundry_room_washer_energy') | float(none) %}
+            {% set attrs = this.attributes | default({}, true) %}
+            {% set raw_e = attrs.get('latch_energy', none) %}
+            {% set blank = [none, '', 'unknown', 'unavailable', 'none'] %}
+            {% set latch_e = raw_e | float(none) if raw_e not in blank else none %}
+            {% if not running or energy is none or latch_e is none or energy + 0.001 < latch_e %}
+              none
+            {% else %}
+              {{ (energy - latch_e) | round(5) }}
+            {% endif %}
+          latch_diff_time_seconds: >-
+            {% set running = states('sensor.laundry_room_washer_machine_state') == 'Running' %}
+            {% set attrs = this.attributes | default({}, true) %}
+            {% set raw_t = attrs.get('latch_time', none) %}
+            {% set blank = [none, '', 'unknown', 'unavailable', 'none'] %}
+            {% set latch_t = as_datetime(raw_t) if raw_t not in blank else none %}
+            {% if not running or latch_t is none %}
+              none
+            {% else %}
+              {{ (now() - latch_t).total_seconds() | round(0) }}
+            {% endif %}
 
   - sensor:
       - name: "Inverter loads power"
@@ -727,18 +791,10 @@ template:
 # ---------------------------------------------------------------------------
 # Cumulative energy (kWh) — Riemann left sum for inverter/solar only.
 # Grid plugs already expose lifetime kWh → use those with utility_meter below.
-# Washer power: derivative of *latched* energy so daily/utility meters stay valid offline.
-# Live W zeros on unavailable / Machine state Stopped / 20 min flat energy (see template above).
+# Washer live watts are the cycle average in the template above, not a derivative.
+# The latched lifetime kWh sensor still feeds the daily washer meter while the plug is offline.
 # ---------------------------------------------------------------------------
 sensor:
-  - platform: derivative
-    source: sensor.laundry_room_washer_energy_latched
-    name: Laundry room washer power derived
-    unique_id: energy_washer_power_derived
-    round: 3
-    unit_time: h
-    time_window: "00:01:00"
-
   - platform: integration
     source: sensor.solar_production_power
     name: Solar production energy
