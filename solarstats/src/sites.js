@@ -13,6 +13,7 @@ const RESERVED = new Set([
   "fw",
   "connect",
   "help",
+  "about",
   "create-passkey",
   "setup-passkey",
   "solarstats",

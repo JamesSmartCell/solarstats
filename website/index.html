@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Home Solar — Home Assistant integration</title>
+    <meta
+      name="description"
+      content="Home Solar sends the switches, lights, and sensors you choose from Home Assistant to a private dashboard. Change the theme, and choose what each person can see."
+    />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%231c1915' width='32' height='32'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23e8a04a'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="site-header">
+      <a class="mark" href="#top">
+        <span class="sun" aria-hidden="true"></span>
+        Home Solar
+      </a>
+      <nav class="nav" aria-label="Page">
+        <a href="#how">How it works</a>
+        <a href="#install">Install</a>
+        <a href="#expose">What to send</a>
+        <a href="#themes">Themes</a>
+      </nav>
+    </header>
+
+    <main id="content">
+      <section class="hero" id="top">
+        <p class="kicker">Home Assistant integration</p>
+        <h1>A private dashboard for the solar gear already in Home Assistant.</h1>
+        <p class="lede">
+          Home Solar watches the switches, lights, and sensors you tick, and publishes them to
+          a page of their own. You name the installation. That name is the address. You pick
+          the look, and you pick who can see each control, locked with passkeys.
+        </p>
+        <p class="status">
+          <strong>Not in the HACS default store yet.</strong>
+          It will be. Until then, copy the integration in by hand, then add it from
+          Settings → Devices &amp; services.
+        </p>
+      </section>
+
+      <section id="how">
+        <h2>How it works</h2>
+        <p class="section-lead">
+          Home Assistant stays in charge of the devices. Home Solar only forwards what you
+          selected, about every 15 seconds.
+        </p>
+        <ol class="flow">
+          <li>
+            <span class="step">1</span>
+            <h3>Choose the entities</h3>
+            <p>Tick the switches, lights, sensors, and binary sensors that may leave the house.</p>
+          </li>
+          <li>
+            <span class="step">2</span>
+            <h3>Name the installation</h3>
+            <p>Humanhouse becomes <span class="addr">homesolar.percolate.one/humanhouse</span>.</p>
+          </li>
+          <li>
+            <span class="step">3</span>
+            <h3>Claim it</h3>
+            <p>Scan the QR, or type the five-character code. The signed-in account becomes the admin.</p>
+          </li>
+          <li>
+            <span class="step">4</span>
+            <h3>Use the board</h3>
+            <p>Readings update live. A switch or light pressed on the page is sent back to Home Assistant.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="install">
+        <h2>Install</h2>
+        <div class="split">
+          <article class="card soon">
+            <p class="label">Soon</p>
+            <h3>From HACS</h3>
+            <ol>
+              <li>Open HACS, then Integrations.</li>
+              <li>Search for <strong>Home Solar</strong> and download it.</li>
+              <li>Restart Home Assistant.</li>
+              <li>Go to Settings → Devices &amp; services → Add integration, and choose Home Solar.</li>
+            </ol>
+          </article>
+          <article class="card">
+            <p class="label">Today</p>
+            <h3>Copy the folder</h3>
+            <ol>
+              <li>
+                Place the integration at
+                <span class="addr">/config/custom_components/homesolar</span>.
+                The folder name has to stay <span class="addr">homesolar</span>.
+              </li>
+              <li>Restart Home Assistant.</li>
+              <li>Add the Home Solar integration the same way as above.</li>
+            </ol>
+            <p class="note">
+              The icon in Settings and in HACS comes from
+              <span class="addr">custom_components/homesolar/brand/icon.png</span>
+              on the Home Assistant machine.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="pair">
+        <h2>Pair an installation</h2>
+        <p class="section-lead">
+          The contact email on the first screen is only a contact. The admin is whichever
+          account is signed in on Home Solar when the code is accepted.
+        </p>
+        <ol class="steps">
+          <li>
+            <h3>Home Solar URL</h3>
+            <p>
+              Leave the address as <span class="addr">https://homesolar.percolate.one</span>
+              unless you run your own server.
+            </p>
+          </li>
+          <li>
+            <h3>Choose what to send</h3>
+            <p>
+              The list scrolls. Tick each switch, light, sensor, and binary sensor you want
+              on the dashboard. Anything left unticked is not uploaded.
+            </p>
+          </li>
+          <li>
+            <h3>Installation name</h3>
+            <p>
+              Type the name and submit. It becomes the dashboard address: lower case, spaces
+              and punctuation turned into hyphens. <em>Home</em> is reserved. If the name is
+              already used, pick another.
+            </p>
+          </li>
+          <li>
+            <h3>Scan or type the code</h3>
+            <p>
+              A QR code and a five-character code appear. The code lasts 10 minutes and uses
+              letters and digits that are hard to mix up, so it skips I, O, 0, and 1.
+              Scanning opens the connect page with the code filled in. The account that
+              finishes that page is this home’s admin.
+            </p>
+          </li>
+        </ol>
+        <p class="note">
+          Later, the question-mark button on the integration page opens a help page for that
+          installation. Its QR opens the dashboard itself, not the pairing screen.
+        </p>
+      </section>
+
+      <section id="expose">
+        <h2>Choose what to expose</h2>
+        <p class="section-lead">
+          There are two lists. The first decides what Home Assistant uploads. The second
+          decides who on the dashboard can see it.
+        </p>
+        <div class="split">
+          <article class="card">
+            <p class="label">In Home Assistant</p>
+            <h3>Export list</h3>
+            <p>
+              Open the Home Solar integration and choose Configure. The same checklist from
+              pairing is there, with the installation name and the admin email. Submit to
+              change what is sent. New entities do not appear until you tick them.
+            </p>
+            <ul class="mock-list" aria-hidden="true">
+              <li><span class="box on"></span> Garden inverter output</li>
+              <li><span class="box on"></span> Battery state of charge</li>
+              <li><span class="box"></span> Lounge lamp</li>
+              <li><span class="box on"></span> Pi rack switch</li>
+            </ul>
+          </article>
+          <article class="card">
+            <p class="label">On the dashboard admin page</p>
+            <h3>Who can see it</h3>
+            <p>
+              After data has arrived, open Admin for that installation. Sensors can be
+              <strong>Top</strong> (one of the eight boxes at the top), <strong>User</strong>
+              (everyone), or <strong>Admin</strong> (you only). Switches and lights use
+              User and Admin. Leave both off to hide an entity from the board.
+            </p>
+            <table class="mock">
+              <thead>
+                <tr>
+                  <th>Entity</th>
+                  <th>Top</th>
+                  <th>Admin</th>
+                  <th>User</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Battery SoC</td>
+                  <td><span class="box on"></span></td>
+                  <td><span class="box"></span></td>
+                  <td><span class="box on"></span></td>
+                </tr>
+                <tr>
+                  <td>Shed plug</td>
+                  <td></td>
+                  <td><span class="box on"></span></td>
+                  <td><span class="box"></span></td>
+                </tr>
+                <tr>
+                  <td>Hall light</td>
+                  <td></td>
+                  <td><span class="box"></span></td>
+                  <td><span class="box on"></span></td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="note">
+              Page users only see rows marked User. Add their email under Page users.
+              They still need an approved Home Solar account. If someone opens the address
+              without access, they can apply, and you allow or deny it on that same admin page.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="themes">
+        <h2>Switch themes</h2>
+        <p class="section-lead">
+          On the admin page, under Display, pick one theme. The readings stay in the same
+          places. Every dashboard already open for that installation changes with it.
+        </p>
+        <div class="themes">
+          <article class="theme theme-standard">
+            <div class="preview" aria-hidden="true">
+              <div class="std-top">
+                <span><small>SoC</small> 86%</span>
+                <span><small>PV</small> 1.4 kW</span>
+                <span><small>Out</small> 420 W</span>
+              </div>
+              <div class="std-chart"></div>
+            </div>
+            <h3>Standard</h3>
+            <p>Dark board, green readings, the default layout.</p>
+          </article>
+          <article class="theme theme-lcars">
+            <div class="preview" aria-hidden="true">
+              <div class="lcars-bar">
+                <i class="b"></i><i class="o"></i><i class="v"></i><b>SOLARSTATS</b><i class="r"></i>
+              </div>
+              <div class="lcars-body">
+                <span>86%</span>
+                <span>420W</span>
+              </div>
+            </div>
+            <h3>LCARS</h3>
+            <p>Black frame and the coloured bars of a classic bridge console.</p>
+          </article>
+          <article class="theme theme-jarvis">
+            <div class="preview" aria-hidden="true">
+              <div class="jarvis-hud">J.A.R.V.I.S.</div>
+              <div class="dial"><span>86</span></div>
+            </div>
+            <h3>JARVIS</h3>
+            <p>Blue diagnostics, circular dials, and taller charts.</p>
+          </article>
+          <article class="theme theme-expanse">
+            <div class="preview" aria-hidden="true">
+              <div class="stripe"></div>
+              <div class="roci">ROCI <em>MAIN BUS</em></div>
+              <div class="seg">0420</div>
+            </div>
+            <h3>Expanse</h3>
+            <p>Heavy industrial panels, a hazard stripe, and amber figures.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="use">
+        <h2>Day to day</h2>
+        <ul class="plain">
+          <li>Sign in on Home Solar, then open the installation address.</li>
+          <li>The board shows the latest readings, today’s energy, charts, and the switches you exposed.</li>
+          <li>Pressing a switch or light on the page asks Home Assistant to toggle it.</li>
+          <li>Rename the installation or change the export list from Configure on the integration. The address follows the saved name.</li>
+          <li>Share the page by adding emails under Page users, or by letting someone apply from the address itself.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <p>Home Solar · version 0.4.6 · dashboard at homesolar.percolate.one</p>
+    </footer>
+  </body>
+</html>
