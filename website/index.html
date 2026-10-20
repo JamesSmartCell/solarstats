@@ -6,7 +6,7 @@
     <title>Home Solar — Home Assistant integration</title>
     <meta
       name="description"
-      content="Home Solar sends the switches, lights, and sensors you choose from Home Assistant to a private dashboard. Change the theme, and choose what each person can see."
+      content="Home Solar is a fully customisable home automation panel. Choose which Home Assistant switches, lights, and sensors to show, who can see each control, and how the board looks."
     />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%231c1915' width='32' height='32'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23e8a04a'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -35,11 +35,13 @@
     <main id="content">
       <section class="hero" id="top">
         <p class="kicker">Home Assistant integration</p>
-        <h1>A private dashboard for the solar gear already in Home Assistant.</h1>
+        <h1>A fully customisable home automation panel.</h1>
         <p class="lede">
-          Home Solar watches the switches, lights, and sensors you tick, and publishes them to
-          a page of their own. You name the installation. That name is the address. You pick
-          the look, and you pick who can see each control, locked with passkeys.
+          Home Solar is an optimisation panel for the home you already run in Home Assistant.
+          Tick the switches, lights, and sensors you want on the board — lights, plugs, climate,
+          power, or anything else it exposes — and they publish to a page of their own. You name
+          the installation. That name is the address. You pick the look, and you pick who can
+          see each control, locked with passkeys.
         </p>
         <p class="status">
           <strong>Not in the HACS default store yet.</strong>
@@ -51,8 +53,8 @@
       <section id="how">
         <h2>How it works</h2>
         <p class="section-lead">
-          Home Assistant stays in charge of the devices. Home Solar only forwards what you
-          selected, about every 15 seconds.
+          You build the board from Home Assistant. Home Solar forwards only what you
+          selected, about every 15 seconds, and sends switch and light presses back.
         </p>
         <ol class="flow">
           <li>
@@ -114,6 +116,7 @@
 
       <section id="pair">
         <h2>Pair an installation</h2>
+        <p class="section-lead">This system is designed to be extremely easy to pair with your HomeAssistant setup.</p>
         <p class="section-lead">
           The contact email on the first screen is only a contact. The admin is whichever
           account is signed in on Home Solar when the code is accepted.
@@ -173,10 +176,10 @@
               change what is sent. New entities do not appear until you tick them.
             </p>
             <ul class="mock-list" aria-hidden="true">
-              <li><span class="box on"></span> Garden inverter output</li>
-              <li><span class="box on"></span> Battery state of charge</li>
+              <li><span class="box on"></span> Kitchen temperature</li>
+              <li><span class="box on"></span> Front door</li>
               <li><span class="box"></span> Lounge lamp</li>
-              <li><span class="box on"></span> Pi rack switch</li>
+              <li><span class="box on"></span> Hall switch</li>
             </ul>
           </article>
           <article class="card">
@@ -199,7 +202,7 @@
               </thead>
               <tbody>
                 <tr>
-                  <td>Battery SoC</td>
+                  <td>Kitchen temperature</td>
                   <td><span class="box on"></span></td>
                   <td><span class="box"></span></td>
                   <td><span class="box on"></span></td>
@@ -237,9 +240,9 @@
           <article class="theme theme-standard">
             <div class="preview" aria-hidden="true">
               <div class="std-top">
-                <span><small>SoC</small> 86%</span>
-                <span><small>PV</small> 1.4 kW</span>
-                <span><small>Out</small> 420 W</span>
+                <span><small>Temp</small> 21°</span>
+                <span><small>Lamp</small> On</span>
+                <span><small>Plug</small> 42 W</span>
               </div>
               <div class="std-chart"></div>
             </div>
@@ -252,8 +255,8 @@
                 <i class="b"></i><i class="o"></i><i class="v"></i><b>SOLARSTATS</b><i class="r"></i>
               </div>
               <div class="lcars-body">
-                <span>86%</span>
-                <span>420W</span>
+                <span>21°</span>
+                <span>On</span>
               </div>
             </div>
             <h3>LCARS</h3>
@@ -262,7 +265,7 @@
           <article class="theme theme-jarvis">
             <div class="preview" aria-hidden="true">
               <div class="jarvis-hud">J.A.R.V.I.S.</div>
-              <div class="dial"><span>86</span></div>
+              <div class="dial"><span>21</span></div>
             </div>
             <h3>JARVIS</h3>
             <p>Blue diagnostics, circular dials, and taller charts.</p>
@@ -283,7 +286,7 @@
         <h2>Day to day</h2>
         <ul class="plain">
           <li>Sign in on Home Solar, then open the installation address.</li>
-          <li>The board shows the latest readings, today’s energy, charts, and the switches you exposed.</li>
+          <li>The board shows the readings, charts, and controls you chose.</li>
           <li>Pressing a switch or light on the page asks Home Assistant to toggle it.</li>
           <li>Rename the installation or change the export list from Configure on the integration. The address follows the saved name.</li>
           <li>Share the page by adding emails under Page users, or by letting someone apply from the address itself.</li>
