@@ -1,0 +1,100 @@
+name: Deploy Solarstats Dashboard
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'solarstats/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+# Prevent concurrent deploys to avoid conflicts
+concurrency:
+  group: solarstats-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: [self-hosted, solarstats]
+    
+    # Only deploy from the main repository to prevent forks from deploying
+    if: github.repository == 'JamesSmartCell/solarstats'
+    
+    defaults:
+      run:
+        working-directory: solarstats
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          clean: false  # Don't delete untracked files (preserves .env, data/)
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: solarstats/package-lock.json
+      
+      - name: Verify deployment path
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Git branch: $(git rev-parse --abbrev-ref HEAD)"
+          echo "Git commit: $(git rev-parse --short HEAD)"
+          ls -la
+      
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+        env:
+          NODE_ENV: production
+      
+      - name: Restart solarstats service
+        run: |
+          echo "Restarting solarstats.service..."
+          sudo systemctl restart solarstats
+          
+          # Wait a moment for the service to start
+          sleep 3
+      
+      - name: Check service status
+        run: |
+          sudo systemctl is-active --quiet solarstats || (
+            echo "Service failed to start. Checking logs:"
+            sudo journalctl -u solarstats -n 50 --no-pager
+            exit 1
+          )
+          
+          echo "✅ Service is running"
+          sudo systemctl status solarstats --no-pager -l
+      
+      - name: Health check
+        run: |
+          echo "Waiting for service to be ready..."
+          
+          # Wait up to 30 seconds for the service to respond
+          for i in {1..30}; do
+            if curl -f -s http://localhost:8787/api/health > /dev/null; then
+              echo "✅ Health check passed"
+              curl -s http://localhost:8787/api/health | jq .
+              exit 0
+            fi
+            echo "Attempt $i/30 - Service not ready yet..."
+            sleep 1
+          done
+          
+          echo "❌ Health check failed after 30 seconds"
+          echo "Service logs:"
+          sudo journalctl -u solarstats -n 100 --no-pager
+          exit 1
+      
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "🚀 Deployment successful!"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Triggered by: ${{ github.event_name }}"
+          echo "Dashboard: https://homesolar.percolate.one/"
