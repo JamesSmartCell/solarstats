@@ -14,6 +14,11 @@ concurrency:
   group: solarstats-deploy
   cancel-in-progress: false
 
+env:
+  # Path where the service runs (WorkingDirectory from solarstats.service)
+  # Change this if your deployment path differs
+  DEPLOY_PATH: /home/james/dev/solarstats/solarstats
+
 jobs:
   deploy:
     name: Deploy to Production
@@ -22,32 +27,41 @@ jobs:
     # Only deploy from the main repository to prevent forks from deploying
     if: github.repository == 'JamesSmartCell/solarstats'
     
-    defaults:
-      run:
-        working-directory: solarstats
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          clean: false  # Don't delete untracked files (preserves .env, data/)
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: solarstats/package-lock.json
-      
-      - name: Verify deployment path
+      - name: Verify deployment directory
         run: |
+          if [ ! -d "$DEPLOY_PATH" ]; then
+            echo "❌ Deployment directory does not exist: $DEPLOY_PATH"
+            exit 1
+          fi
+          
+          if [ ! -d "$DEPLOY_PATH/.git" ]; then
+            echo "❌ Not a git repository: $DEPLOY_PATH"
+            exit 1
+          fi
+          
+          echo "✅ Deployment directory exists: $DEPLOY_PATH"
+      
+      - name: Update code from origin
+        run: |
+          cd "$DEPLOY_PATH"
+          
           echo "Current directory: $(pwd)"
-          echo "Git branch: $(git rev-parse --abbrev-ref HEAD)"
-          echo "Git commit: $(git rev-parse --short HEAD)"
-          ls -la
+          echo "Current commit: $(git rev-parse --short HEAD)"
+          
+          # Fetch latest changes
+          git fetch origin
+          
+          # Reset to origin/master (preserves .env and data/ as they're not tracked)
+          git reset --hard origin/master
+          
+          echo "Updated to commit: $(git rev-parse --short HEAD)"
+          echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
       
       - name: Install production dependencies
-        run: npm ci --omit=dev
+        run: |
+          cd "$DEPLOY_PATH"
+          npm ci --omit=dev
         env:
           NODE_ENV: production
       
@@ -62,7 +76,7 @@ jobs:
       - name: Check service status
         run: |
           sudo systemctl is-active --quiet solarstats || (
-            echo "Service failed to start. Checking logs:"
+            echo "❌ Service failed to start. Checking logs:"
             sudo journalctl -u solarstats -n 50 --no-pager
             exit 1
           )
@@ -93,8 +107,10 @@ jobs:
       - name: Deployment summary
         if: success()
         run: |
+          cd "$DEPLOY_PATH"
           echo "🚀 Deployment successful!"
+          echo "Deployed to: $DEPLOY_PATH"
+          echo "Commit: $(git rev-parse --short HEAD) ($(git log -1 --pretty=%B | head -1))"
           echo "Branch: ${{ github.ref_name }}"
-          echo "Commit: ${{ github.sha }}"
           echo "Triggered by: ${{ github.event_name }}"
           echo "Dashboard: https://homesolar.percolate.one/"
