@@ -1647,13 +1647,24 @@ async function sendAlertPushNotifications(site, alert) {
     return;
   }
   
+  // Extract event type from entity ID (e.g. "binary_sensor.garden_rainfall_rain_detected" -> "rain")
+  const eventType = alert.entityId.includes("rain") ? "rain" : "alert";
+  
+  // Build target URL: homepage (/) or non-default site (/:slug) with event query param
+  let targetUrl = "/";
+  if (site && !site.default && site.slug) {
+    targetUrl = `/${site.slug}`;
+  }
+  targetUrl += `?event=${encodeURIComponent(eventType)}`;
+  
   const payload = JSON.stringify({
     title: alert.message,
     body: alert.stateLabel || alert.state,
     icon: "/android-chrome-192x192.png",
     tag: alert.entityId,
     renotify: true,
-    url: site?.slug ? `/${site.slug}` : "/",
+    url: targetUrl,
+    eventType,
   });
   
   let sent = 0;
