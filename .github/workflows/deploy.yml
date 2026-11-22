@@ -16,6 +16,8 @@ concurrency:
 
 env:
   # Path where the service runs (WorkingDirectory from solarstats.service)
+  # This is the solarstats/ subfolder; git root is /home/james/dev/solarstats
+  # Runner must run as the user that owns this checkout (james)
   # Change this if your deployment path differs
   DEPLOY_PATH: /home/james/dev/solarstats/solarstats
 
@@ -35,8 +37,8 @@ jobs:
             exit 1
           fi
           
-          if [ ! -d "$DEPLOY_PATH/.git" ]; then
-            echo "❌ Not a git repository: $DEPLOY_PATH"
+          if ! git -C "$DEPLOY_PATH" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+            echo "❌ Not inside a git working tree: $DEPLOY_PATH"
             exit 1
           fi
           
