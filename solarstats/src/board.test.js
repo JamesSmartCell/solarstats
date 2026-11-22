@@ -26,6 +26,8 @@ import {
   completeDeviceCommand,
   enqueueDeviceCommand,
   getDevice,
+  hasNotifiedAlert,
+  markAlertNotified,
 } from "./db.js";
 
 function openTemp() {
@@ -306,6 +308,39 @@ test("a plug keeps its last watts while its switch stays on", () => {
   plug("4", "unavailable");
   assert.equal(getLatestLoadsPower(db).slot0, 0);
 
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("push notifications are deduped per activation window", () => {
+  const { dir, db } = openTemp();
+  
+  const entityId = "binary_sensor.test_alert";
+  // Use timestamps that are actually in 10-minute buckets
+  const bucket1 = 1700000400000; // Timestamp already on a 10-minute boundary
+  const activationTs1 = bucket1;
+  const activationTs2 = bucket1 + 300000; // 5 minutes later (same bucket)
+  const activationTs3 = bucket1 + 600000; // 10 minutes later (next bucket)
+  
+  // First activation - not notified yet
+  assert.equal(hasNotifiedAlert(db, entityId, activationTs1), false);
+  
+  // Mark as notified
+  markAlertNotified(db, entityId, activationTs1);
+  
+  // Same activation - already notified
+  assert.equal(hasNotifiedAlert(db, entityId, activationTs1), true);
+  
+  // Different timestamp but same bucket - not marked (dedupe is per exact timestamp)
+  assert.equal(hasNotifiedAlert(db, entityId, activationTs2), false);
+  
+  // Different bucket - not notified yet
+  assert.equal(hasNotifiedAlert(db, entityId, activationTs3), false);
+  
+  // Mark second bucket
+  markAlertNotified(db, entityId, activationTs3);
+  assert.equal(hasNotifiedAlert(db, entityId, activationTs3), true);
+  
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });

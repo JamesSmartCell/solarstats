@@ -7,6 +7,7 @@ import cookieSession from "cookie-session";
 import express from "express";
 import helmet from "helmet";
 import QRCode from "qrcode";
+import webpush from "web-push";
 import { WebSocketServer } from "ws";
 import {
   authConfigured,
@@ -68,6 +69,14 @@ import {
   countDevices,
   setDeviceAlert,
   getActiveAlerts,
+  getVapidKeys,
+  setVapidKeys,
+  savePushSubscription,
+  removePushSubscription,
+  listPushSubscriptions,
+  hasNotifiedAlert,
+  markAlertNotified,
+  pruneAlertNotifications,
 } from "./db.js";
 import {
   authenticationOptions,
@@ -169,6 +178,21 @@ const zbgwDiag = openZbgwDiagDb(ZBGW_DIAG_DB_PATH);
 const diagHits = new Map();
 
 const db = openDatabase(DB_PATH);
+
+// Generate or load VAPID keys for Web Push
+let vapidKeys = getVapidKeys(db);
+if (!vapidKeys) {
+  console.log("Generating VAPID keys for Web Push...");
+  vapidKeys = webpush.generateVAPIDKeys();
+  setVapidKeys(db, vapidKeys);
+  console.log("VAPID keys generated and saved");
+}
+webpush.setVapidDetails(
+  "mailto:" + (getAdminEmail() || "admin@example.com"),
+  vapidKeys.publicKey,
+  vapidKeys.privateKey
+);
+
 const sites = loadSites({
   authDb: db,
   defaultDbPath: DB_PATH,
@@ -1463,11 +1487,111 @@ app.post("/api/agent/commands/:id/complete", authorizeIngest, finishDeviceComman
 
 app.post("/api/agent/:slug/commands/:id/complete", authorizeSiteIngest, finishDeviceCommand);
 
+// Web Push endpoints
+app.get("/api/push/vapid-public-key", (_req, res) => {
+  res.json({ publicKey: vapidKeys.publicKey });
+});
+
+app.post("/api/push/subscribe", requireApproved, (req, res) => {
+  try {
+    const subscription = req.body?.subscription;
+    if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+      return res.status(400).json({ error: "invalid_subscription" });
+    }
+    
+    savePushSubscription(db, {
+      userId: req.user.id,
+      endpoint: subscription.endpoint,
+      keys: subscription.keys,
+    });
+    
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Failed to save push subscription:", err);
+    res.status(500).json({ error: "subscription_failed" });
+  }
+});
+
+app.post("/api/push/unsubscribe", requireApproved, (req, res) => {
+  try {
+    const endpoint = req.body?.endpoint;
+    if (!endpoint) {
+      return res.status(400).json({ error: "endpoint_required" });
+    }
+    
+    removePushSubscription(db, endpoint);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Failed to remove push subscription:", err);
+    res.status(500).json({ error: "unsubscribe_failed" });
+  }
+});
+
+app.post("/api/push/test", requireApproved, async (req, res) => {
+  try {
+    const subscriptions = listPushSubscriptions(db);
+    const userSubs = subscriptions.filter(sub => sub.user_id === req.user.id);
+    
+    if (userSubs.length === 0) {
+      return res.status(400).json({ error: "no_subscriptions" });
+    }
+    
+    const payload = JSON.stringify({
+      title: "Test Notification",
+      body: "This is a test notification from Solarstats",
+      icon: "/android-chrome-192x192.png",
+      tag: "test",
+      url: "/",
+    });
+    
+    let sent = 0;
+    let failed = 0;
+    
+    for (const sub of userSubs) {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: {
+              p256dh: sub.p256dh,
+              auth: sub.auth,
+            },
+          },
+          payload
+        );
+        sent++;
+      } catch (err) {
+        console.error("Failed to send test notification:", err);
+        
+        // Remove dead subscriptions (404/410)
+        if (err.statusCode === 404 || err.statusCode === 410 || err.statusCode === 403) {
+          removePushSubscription(db, sub.endpoint);
+        }
+        
+        failed++;
+      }
+    }
+    
+    res.json({ ok: true, sent, failed });
+  } catch (err) {
+    console.error("Test notification error:", err);
+    res.status(500).json({ error: "test_failed" });
+  }
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     authConfigured: authConfigured(),
   });
+});
+
+// Serve service worker with no-cache headers
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Service-Worker-Allowed", "/");
+  res.sendFile(path.join(publicDir, "sw.js"));
 });
 
 app.use(express.static(publicDir));
@@ -1504,10 +1628,86 @@ function broadcastDevices(site) {
   }
 }
 
+// Track alert states per site to detect activations
+const alertStates = new Map(); // slug -> Set<entityId>
+
+async function sendAlertPushNotifications(site, alert) {
+  const sdb = site?.db || db;
+  const now = Date.now();
+  
+  // Check if we already notified for this activation
+  // Use a 10-minute window to avoid re-notifying on every ingest
+  const activationTs = Math.floor(now / 600000) * 600000; // Round to 10-minute bucket
+  if (hasNotifiedAlert(sdb, alert.entityId, activationTs)) {
+    return;
+  }
+  
+  const subscriptions = listPushSubscriptions(db);
+  if (subscriptions.length === 0) {
+    return;
+  }
+  
+  const payload = JSON.stringify({
+    title: alert.message,
+    body: alert.stateLabel || alert.state,
+    icon: "/android-chrome-192x192.png",
+    tag: alert.entityId,
+    renotify: true,
+    url: site?.slug ? `/${site.slug}` : "/",
+  });
+  
+  let sent = 0;
+  for (const sub of subscriptions) {
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: {
+            p256dh: sub.p256dh,
+            auth: sub.auth,
+          },
+        },
+        payload
+      );
+      sent++;
+    } catch (err) {
+      console.error(`Push notification failed for ${sub.endpoint}:`, err.message);
+      
+      // Remove dead subscriptions (404/410/403)
+      if (err.statusCode === 404 || err.statusCode === 410 || err.statusCode === 403) {
+        console.log(`Removing dead subscription: ${sub.endpoint}`);
+        removePushSubscription(db, sub.endpoint);
+      }
+    }
+  }
+  
+  if (sent > 0) {
+    markAlertNotified(sdb, alert.entityId, activationTs);
+    console.log(`Sent push notifications for alert ${alert.entityId} to ${sent} device(s)`);
+  }
+}
+
 function broadcastAlerts(site) {
   const sdb = site?.db || db;
   const slug = site?.slug || "home";
-  broadcast({ type: "alerts", alerts: getActiveAlerts(sdb) }, slug);
+  const alerts = getActiveAlerts(sdb);
+  
+  broadcast({ type: "alerts", alerts }, slug);
+  
+  // Detect new alert activations and send push notifications
+  const previousAlerts = alertStates.get(slug) || new Set();
+  const currentAlerts = new Set(alerts.map(a => a.entityId));
+  
+  for (const alert of alerts) {
+    if (!previousAlerts.has(alert.entityId)) {
+      // New activation - send push notification
+      sendAlertPushNotifications(site, alert).catch(err => {
+        console.error(`Failed to send push notifications for ${alert.entityId}:`, err);
+      });
+    }
+  }
+  
+  alertStates.set(slug, currentAlerts);
 }
 
 function runSession(req, res, next) {
@@ -1576,6 +1776,9 @@ setInterval(() => {
       if (pruned > 0) {
         console.log(`prune ${site.slug}: deleted ${pruned} old samples`);
       }
+      
+      // Also prune old alert notifications (keep 7 days)
+      pruneAlertNotifications(site.db);
     } catch (err) {
       console.error(`prune ${site.slug} failed:`, err.message);
     }

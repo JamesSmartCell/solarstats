@@ -178,9 +178,26 @@ export function openDatabase(dbPath) {
       PRIMARY KEY (entity_id, ts)
     );
 
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS alert_notifications (
+      entity_id TEXT NOT NULL,
+      activation_ts INTEGER NOT NULL,
+      PRIMARY KEY (entity_id, activation_ts)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sensor_history_ts ON sensor_history(ts);
     CREATE INDEX IF NOT EXISTS idx_sensor_history_entity_ts ON sensor_history(entity_id, ts);
     CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
+    CREATE INDEX IF NOT EXISTS idx_alert_notifications_ts ON alert_notifications(activation_ts);
   `);
 
   ensureColumn(db, "samples", "loads_daily_kwh", "TEXT");
@@ -2161,6 +2178,64 @@ export function completeDeviceCommand(db, id, ok, reportedState) {
     status: ok ? "done" : "error",
     state,
   };
+}
+
+// Web Push functions
+export function getVapidKeys(db) {
+  const publicKey = getMeta(db, "vapid_public_key");
+  const privateKey = getMeta(db, "vapid_private_key");
+  if (publicKey && privateKey) {
+    return { publicKey, privateKey };
+  }
+  return null;
+}
+
+export function setVapidKeys(db, { publicKey, privateKey }) {
+  setMeta(db, "vapid_public_key", publicKey);
+  setMeta(db, "vapid_private_key", privateKey);
+}
+
+export function savePushSubscription(db, { userId, endpoint, keys }) {
+  const now = new Date().toISOString();
+  const info = db.prepare(
+    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       p256dh = excluded.p256dh,
+       auth = excluded.auth`,
+  ).run(userId, endpoint, keys.p256dh, keys.auth, now);
+  return info.lastInsertRowid || info.changes;
+}
+
+export function removePushSubscription(db, endpoint) {
+  const info = db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+  return info.changes;
+}
+
+export function listPushSubscriptions(db) {
+  return db.prepare(
+    `SELECT id, user_id, endpoint, p256dh, auth, created_at
+     FROM push_subscriptions
+     ORDER BY created_at DESC`,
+  ).all();
+}
+
+export function hasNotifiedAlert(db, entityId, activationTs) {
+  const row = db.prepare(
+    "SELECT 1 FROM alert_notifications WHERE entity_id = ? AND activation_ts = ?",
+  ).get(entityId, activationTs);
+  return !!row;
+}
+
+export function markAlertNotified(db, entityId, activationTs) {
+  db.prepare(
+    "INSERT OR IGNORE INTO alert_notifications (entity_id, activation_ts) VALUES (?, ?)",
+  ).run(entityId, activationTs);
+}
+
+export function pruneAlertNotifications(db, olderThanMs = 7 * 86400000) {
+  const cutoff = Date.now() - olderThanMs;
+  db.prepare("DELETE FROM alert_notifications WHERE activation_ts < ?").run(cutoff);
 }
 
 export { LOAD_KEYS, MIN_LIVE_BATTERY_V, stateLabelForDevice };
