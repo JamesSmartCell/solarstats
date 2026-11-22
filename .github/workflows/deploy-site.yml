@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Path where the dashboard service runs (WorkingDirectory from solarstats.service)
+  # Path where the dashboard service runs (WorkingDirectory from homesolar.service)
   # This is the solarstats/ subfolder; git root is /home/james/dev/solarstats
   # Runner must run as user 'james'
   # ⚠️ IMPORTANT: Confirm this path matches your systemd service WorkingDirectory
@@ -67,24 +67,24 @@ jobs:
         env:
           NODE_ENV: production
       
-      - name: Restart solarstats service
+      - name: Restart homesolar service
         run: |
-          echo "Restarting solarstats.service..."
-          sudo systemctl restart solarstats
+          echo "Restarting homesolar.service..."
+          sudo systemctl restart homesolar
           
           # Wait a moment for the service to start
           sleep 3
       
       - name: Check service status
         run: |
-          sudo systemctl is-active --quiet solarstats || (
+          sudo systemctl is-active --quiet homesolar || (
             echo "❌ Service failed to start. Checking logs:"
-            sudo journalctl -u solarstats -n 50 --no-pager
+            sudo journalctl -u homesolar -n 50 --no-pager
             exit 1
           )
           
           echo "✅ Service is running"
-          sudo systemctl status solarstats --no-pager -l
+          sudo systemctl status homesolar --no-pager -l
       
       - name: Health check
         run: |
@@ -103,7 +103,7 @@ jobs:
           
           echo "❌ Health check failed after 30 seconds"
           echo "Service logs:"
-          sudo journalctl -u solarstats -n 100 --no-pager
+          sudo journalctl -u homesolar -n 100 --no-pager
           exit 1
       
       - name: Deployment summary
