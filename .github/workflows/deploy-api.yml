@@ -1,0 +1,96 @@
+name: Deploy Solarstats API (Pi)
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'solarstatsapi/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
+
+# Prevent concurrent deploys to avoid conflicts
+concurrency:
+  group: solarstats-api-deploy
+  cancel-in-progress: false
+
+env:
+  # Path where the API service runs
+  # Repo root: /home/pi/dev/solarstats
+  # Runner must run as user 'pi'
+  DEPLOY_PATH: /home/pi/dev/solarstats/solarstatsapi
+
+jobs:
+  deploy:
+    name: Deploy API to Raspberry Pi
+    runs-on: [self-hosted, solarstats]
+    
+    # Only deploy from the main repository to prevent forks from deploying
+    if: github.repository == 'JamesSmartCell/solarstats'
+    
+    steps:
+      - name: Verify deployment directory
+        run: |
+          if [ ! -d "$DEPLOY_PATH" ]; then
+            echo "❌ Deployment directory does not exist: $DEPLOY_PATH"
+            exit 1
+          fi
+          
+          if ! git -C "$DEPLOY_PATH" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+            echo "❌ Not inside a git working tree: $DEPLOY_PATH"
+            exit 1
+          fi
+          
+          echo "✅ Deployment directory exists: $DEPLOY_PATH"
+      
+      - name: Update code from origin
+        run: |
+          cd "$DEPLOY_PATH"
+          
+          echo "Current directory: $(pwd)"
+          echo "Current commit: $(git rev-parse --short HEAD)"
+          
+          # Fetch latest changes
+          git fetch origin
+          
+          # Reset to origin/master (preserves .env as it's not tracked)
+          git reset --hard origin/master
+          
+          echo "Updated to commit: $(git rev-parse --short HEAD)"
+          echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
+      
+      - name: Install production dependencies
+        run: |
+          cd "$DEPLOY_PATH"
+          npm ci --omit=dev
+        env:
+          NODE_ENV: production
+      
+      - name: Restart solarapi service
+        run: |
+          echo "Restarting solarapi.service..."
+          sudo systemctl restart solarapi
+          
+          # Wait a moment for the service to start
+          sleep 3
+      
+      - name: Check service status
+        run: |
+          sudo systemctl is-active --quiet solarapi || (
+            echo "❌ Service failed to start. Checking logs:"
+            sudo journalctl -u solarapi -n 50 --no-pager
+            exit 1
+          )
+          
+          echo "✅ Service is running"
+          sudo systemctl status solarapi --no-pager -l
+      
+      - name: Deployment summary
+        if: success()
+        run: |
+          cd "$DEPLOY_PATH"
+          echo "🚀 Deployment successful!"
+          echo "Deployed to: $DEPLOY_PATH"
+          echo "Commit: $(git rev-parse --short HEAD) ($(git log -1 --pretty=%B | head -1))"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Triggered by: ${{ github.event_name }}"
