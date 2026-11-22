@@ -866,7 +866,42 @@ function renderDeviceTable(devices, tableId, emptyId) {
         setDisplayTile(d.entityId, topCb.checked, topCb);
       });
       topTd.appendChild(topCb);
-      tr.append(nameTd, entityTd, stateTd, topTd, adminTd, userTd);
+      
+      const alertTd = document.createElement("td");
+      alertTd.className = "acl-cell alert-cell";
+      const alertCb = document.createElement("input");
+      alertCb.type = "checkbox";
+      alertCb.title = "Show notification when active";
+      alertCb.checked = !!d.isAlert;
+      alertCb.addEventListener("change", () => {
+        const message = alertCb.checked ? prompt("Alert message:", d.alertMessage || d.name || d.entityId) : null;
+        if (!alertCb.checked || message !== null) {
+          setDeviceAlert(d.entityId, alertCb.checked, message, alertCb);
+        } else {
+          alertCb.checked = false;
+        }
+      });
+      alertTd.appendChild(alertCb);
+      if (d.isAlert && d.alertMessage) {
+        const msgSpan = document.createElement("small");
+        msgSpan.className = "alert-message-hint";
+        msgSpan.textContent = d.alertMessage;
+        msgSpan.title = "Click to edit";
+        msgSpan.style.cursor = "pointer";
+        msgSpan.style.display = "block";
+        msgSpan.style.fontSize = "0.75rem";
+        msgSpan.style.color = "#8b9aab";
+        msgSpan.style.marginTop = "0.25rem";
+        msgSpan.addEventListener("click", () => {
+          const message = prompt("Alert message:", d.alertMessage || d.name || d.entityId);
+          if (message !== null) {
+            setDeviceAlert(d.entityId, true, message, alertCb);
+          }
+        });
+        alertTd.appendChild(msgSpan);
+      }
+      
+      tr.append(nameTd, entityTd, stateTd, topTd, alertTd, adminTd, userTd);
     } else {
       tr.append(nameTd, entityTd, stateTd, adminTd, userTd);
     }
@@ -930,6 +965,21 @@ async function setDeviceExposure(entityId, exposure) {
       note.hidden = true;
     }, 1200);
   }
+}
+
+async function setDeviceAlert(entityId, isAlert, alertMessage, checkbox) {
+  const res = await fetch(adminPath(`/api/admin/devices/${encodeURIComponent(entityId)}/alert`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isAlert, alertMessage: alertMessage || null }),
+  });
+  if (!res.ok) {
+    if (checkbox) checkbox.checked = !isAlert;
+    alert((await res.json().catch(() => ({}))).error || "Alert update failed");
+    return;
+  }
+  load().catch(console.error);
+  flashSaved("sensorsSaved");
 }
 
 function renderGateways(gateways, events) {

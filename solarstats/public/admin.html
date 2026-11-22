@@ -250,6 +250,7 @@
         <p class="hint">
           Type a name to show on the dashboard. Leave it blank to keep the Home Assistant name. ·
           <strong>Top</strong> = one of the boxes at the top of the dashboard (up to 8) ·
+          <strong>Alert</strong> = show notification when active (configure message) ·
           <strong>User</strong> = on the board for everyone ·
           <strong>Admin</strong> = on the board for admin only ·
           neither = hidden from the board
@@ -264,6 +265,9 @@
                 <th class="col-toggle">
                   <input type="checkbox" data-group="sensors" data-column="top" aria-label="Top, all or none" />
                   Top
+                </th>
+                <th class="col-toggle">
+                  Alert
                 </th>
                 <th class="col-toggle">
                   <input type="checkbox" data-group="sensors" data-column="admin" aria-label="Admin, all or none" />

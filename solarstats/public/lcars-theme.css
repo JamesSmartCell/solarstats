@@ -318,3 +318,11 @@ body.theme-lcars .device-btn.is-unknown {
     margin: 0;
   }
 }
+
+body.theme-lcars .alert-banner {
+  background: var(--lcars-red);
+  border: 2px solid var(--lcars-orange);
+  box-shadow: 0 4px 12px rgba(204, 68, 68, 0.4);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}

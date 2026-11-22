@@ -268,3 +268,12 @@ body.theme-jarvis .device-btn.is-off {
     animation: none;
   }
 }
+
+body.theme-jarvis .alert-banner {
+  background: linear-gradient(135deg, #ff5252 0%, #c43a3a 100%);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 20px rgba(255, 82, 82, 0.5), inset 0 0 10px rgba(0, 0, 0, 0.2);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}

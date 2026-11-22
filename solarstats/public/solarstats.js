@@ -57,6 +57,7 @@ const els = {
   sensorList: document.getElementById("sensorList"),
   currentLoadsList: document.getElementById("currentLoadsList"),
   currentLoadsTotal: document.getElementById("currentLoadsTotal"),
+  alertBanners: document.getElementById("alertBanners"),
 };
 
 const state = {
@@ -79,6 +80,9 @@ const state = {
   pendingToggles: new Map(),
   toggleHolds: new Map(),
   pieRows: [],
+  alerts: [],
+  shownAlerts: new Set(),
+  notificationPermission: "default",
 };
 
 const TOGGLE_LOCK_MS = 20000;
@@ -1066,6 +1070,9 @@ function connectWs() {
         if (msg.loadsDailyKwh) updateLoadsPie(msg.loadsDailyKwh);
         if (msg.loadsPowerW) updateCurrentLoads(msg.loadsPowerW);
         if (msg.devices) renderDevices(msg.devices);
+        if (msg.alerts) paintAlerts(msg.alerts);
+      } else if (msg.type === "alerts") {
+        paintAlerts(msg.alerts);
       } else if (msg.type === "chartPoint") {
         appendChartPoint("battery", msg.battery);
         appendChartPoint("inverter", msg.inverter);
@@ -1092,6 +1099,130 @@ function connectWs() {
       console.error("ws message error", err);
     }
   });
+}
+
+function loadShownAlerts() {
+  try {
+    const stored = localStorage.getItem("solarstats_shown_alerts");
+    if (stored) {
+      const data = JSON.parse(stored);
+      if (Array.isArray(data)) {
+        state.shownAlerts = new Set(data);
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to load shown alerts:", err);
+  }
+}
+
+function saveShownAlert(entityId) {
+  try {
+    state.shownAlerts.add(entityId);
+    localStorage.setItem("solarstats_shown_alerts", JSON.stringify([...state.shownAlerts]));
+  } catch (err) {
+    console.warn("Failed to save shown alert:", err);
+  }
+}
+
+function clearShownAlert(entityId) {
+  try {
+    state.shownAlerts.delete(entityId);
+    localStorage.setItem("solarstats_shown_alerts", JSON.stringify([...state.shownAlerts]));
+  } catch (err) {
+    console.warn("Failed to clear shown alert:", err);
+  }
+}
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) {
+    state.notificationPermission = "unsupported";
+    return;
+  }
+  
+  if (Notification.permission === "granted") {
+    state.notificationPermission = "granted";
+    return;
+  }
+  
+  if (Notification.permission === "denied") {
+    state.notificationPermission = "denied";
+    return;
+  }
+  
+  try {
+    const permission = await Notification.requestPermission();
+    state.notificationPermission = permission;
+  } catch (err) {
+    console.warn("Failed to request notification permission:", err);
+    state.notificationPermission = "denied";
+  }
+}
+
+function showBrowserNotification(alert) {
+  if (state.notificationPermission !== "granted") return;
+  if (!("Notification" in window)) return;
+  
+  try {
+    const notification = new Notification(alert.message, {
+      body: alert.stateLabel || alert.state,
+      icon: "/favicon-32x32.png",
+      tag: alert.entityId,
+      requireInteraction: false,
+    });
+    
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
+  } catch (err) {
+    console.warn("Failed to show notification:", err);
+  }
+}
+
+function paintAlerts(alerts) {
+  if (!els.alertBanners) return;
+  
+  const active = Array.isArray(alerts) ? alerts : [];
+  state.alerts = active;
+  
+  if (active.length === 0) {
+    els.alertBanners.hidden = true;
+    els.alertBanners.replaceChildren();
+    return;
+  }
+  
+  els.alertBanners.hidden = false;
+  els.alertBanners.replaceChildren();
+  
+  for (const alert of active) {
+    const banner = document.createElement("div");
+    banner.className = "alert-banner";
+    
+    const message = document.createElement("span");
+    message.className = "alert-message";
+    message.textContent = alert.message;
+    
+    if (alert.stateLabel && alert.stateLabel !== alert.message) {
+      const stateSpan = document.createElement("span");
+      stateSpan.className = "alert-state";
+      stateSpan.textContent = `(${alert.stateLabel})`;
+      message.append(" ", stateSpan);
+    }
+    
+    banner.append(message);
+    els.alertBanners.append(banner);
+    
+    if (!state.shownAlerts.has(alert.entityId)) {
+      showBrowserNotification(alert);
+      saveShownAlert(alert.entityId);
+    }
+  }
+  
+  for (const entityId of state.shownAlerts) {
+    if (!active.some((a) => a.entityId === entityId)) {
+      clearShownAlert(entityId);
+    }
+  }
 }
 
 async function loadMe() {
@@ -1150,6 +1281,8 @@ applyTheme(themeName());
 paintTiles();
 paintPie();
 updateChrome();
+loadShownAlerts();
+requestNotificationPermission().catch(() => {});
 loadMe().catch(() => {});
 loadDevices().catch(() => {});
 loadHistory()
