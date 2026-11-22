@@ -93,12 +93,6 @@
 
       <div id="alertBanners" class="alert-banners" hidden></div>
 
-      <div id="pushNotificationContainer" style="margin: 1rem; text-align: center;">
-        <button id="enablePushButton" class="push-button" style="display: none;">
-          <span id="pushButtonText">Enable phone notifications</span>
-        </button>
-      </div>
-
       <section id="tileRow" aria-label="Current readings">
         <div class="tiles" id="legacyTiles">
         <article class="tile">
@@ -197,6 +191,15 @@
       </section>
 
       <p class="foot" id="footNote">Window: 24h · ingest interval 15s · smoothed series · trapezoid kWh</p>
+
+      <div id="pushNotificationContainer" style="margin: 1rem 0 0.5rem; text-align: center;">
+        <button id="enablePushButton" class="push-button" style="display: none;">
+          <span id="pushButtonText">Enable phone notifications</span>
+        </button>
+        <p id="pushBlockedNote" style="display: none; font-size: 0.85rem; color: #666; margin: 0.5rem 0;">
+          Push notifications are blocked in browser settings
+        </p>
+      </div>
       </div>
     </div>
 

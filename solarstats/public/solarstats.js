@@ -1376,17 +1376,21 @@ function urlBase64ToUint8Array(base64String) {
 async function updatePushButtonState() {
   const btn = document.getElementById("enablePushButton");
   const text = document.getElementById("pushButtonText");
-  if (!btn || !text) return;
+  const blockedNote = document.getElementById("pushBlockedNote");
+  const container = document.getElementById("pushNotificationContainer");
+  
+  if (!btn || !text || !blockedNote || !container) return;
   
   // Check if push is supported
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    btn.style.display = "none";
+    container.style.display = "none";
     return;
   }
   
-  btn.style.display = "inline-block";
-  
   if (!swRegistration) {
+    // Show button while SW is loading
+    btn.style.display = "inline-block";
+    blockedNote.style.display = "none";
     text.textContent = "Enable phone notifications";
     btn.className = "push-button";
     btn.disabled = false;
@@ -1396,27 +1400,33 @@ async function updatePushButtonState() {
   try {
     const subscription = await swRegistration.pushManager.getSubscription();
     pushSubscription = subscription;
+    const permission = Notification.permission;
     
-    if (subscription) {
-      text.textContent = "Phone notifications enabled ✓";
-      btn.className = "push-button enabled";
-      btn.disabled = false;
+    if (subscription && permission === "granted") {
+      // Fully enabled - hide everything
+      container.style.display = "none";
+    } else if (permission === "denied") {
+      // Blocked - show subtle note
+      btn.style.display = "none";
+      blockedNote.style.display = "block";
     } else {
+      // Default or subscription missing - show button
+      btn.style.display = "inline-block";
+      blockedNote.style.display = "none";
       text.textContent = "Enable phone notifications";
       btn.className = "push-button";
       btn.disabled = false;
     }
   } catch (err) {
     console.error("Failed to check subscription:", err);
-    text.textContent = "Phone notifications unavailable";
-    btn.className = "push-button blocked";
-    btn.disabled = true;
+    // On error, show subtle note
+    btn.style.display = "none";
+    blockedNote.style.display = "block";
   }
 }
 
 async function handlePushButtonClick() {
   const btn = document.getElementById("enablePushButton");
-  const text = document.getElementById("pushButtonText");
   if (!btn) return;
   
   btn.disabled = true;
@@ -1424,31 +1434,20 @@ async function handlePushButtonClick() {
   try {
     if (pushSubscription) {
       // Unsubscribe
-      const success = await unsubscribeFromPush();
-      if (success) {
-        text.textContent = "Enable phone notifications";
-        btn.className = "push-button";
-      }
+      await unsubscribeFromPush();
     } else {
       // Subscribe
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
-        text.textContent = "Notifications blocked";
-        btn.className = "push-button blocked";
+        await updatePushButtonState();
         return;
       }
       
-      const success = await subscribeToPush();
-      if (success) {
-        text.textContent = "Phone notifications enabled ✓";
-        btn.className = "push-button enabled";
-      } else {
-        text.textContent = "Failed to enable notifications";
-        btn.className = "push-button";
-      }
+      await subscribeToPush();
     }
   } finally {
     btn.disabled = false;
+    await updatePushButtonState();
   }
 }
 

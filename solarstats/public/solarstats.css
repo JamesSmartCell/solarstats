@@ -698,23 +698,28 @@ body.theme-lcars .help-panel a {
   color: var(--lcars-orange);
 }
 
-/* Push notification button */
+/* Push notification UI */
+#pushNotificationContainer {
+  margin: 1rem 0 0.5rem;
+  text-align: center;
+}
+
 .push-button {
   background: var(--accent);
   color: #fff;
   border: none;
-  padding: 0.75rem 1.5rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  border-radius: 8px;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 .push-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .push-button:active {
@@ -726,23 +731,23 @@ body.theme-lcars .help-panel a {
   cursor: not-allowed;
 }
 
-.push-button.enabled {
-  background: #4caf50;
-}
-
-.push-button.blocked {
-  background: #f44336;
+#pushBlockedNote {
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  margin: 0.5rem 0;
+  opacity: 0.7;
 }
 
 body.theme-lcars .push-button {
   background: var(--lcars-orange);
-  border-radius: 20px;
+  border-radius: 15px;
 }
 
 body.theme-jarvis .push-button {
   background: var(--jarvis-cyan);
   border: 1px solid rgba(0, 255, 255, 0.5);
-  box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+  box-shadow: 0 0 8px rgba(0, 255, 255, 0.2);
 }
 
 body.theme-expanse .push-button {
