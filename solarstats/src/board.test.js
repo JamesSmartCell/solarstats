@@ -200,7 +200,11 @@ test("select all and select none apply to one column of one group", () => {
 
   const topped = setSensorTops(db, true);
   assert.equal(topped.capped, false);
-  assert.equal(tileViews(db).length, 2);
+  // Should select all sensors (the 2 test sensors + the seeded rain sensor)
+  const sensorCount = db.prepare(
+    "SELECT COUNT(*) as n FROM ha_devices WHERE domain IN ('sensor', 'binary_sensor')"
+  ).get().n;
+  assert.equal(tileViews(db).length, sensorCount);
   setSensorTops(db, false);
   assert.deepEqual(tileViews(db), []);
 

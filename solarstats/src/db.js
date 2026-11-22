@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { ensureHaFieldTables, resolveInverterFields, upsertHaCatalog } from "./ha_fields.js";
 
 const MAX_GAP_MS = 5 * 60 * 1000;
+const POWER_STALE_MS = 5 * 60 * 1000; // Power readings older than 5 minutes are stale
 
 /** Admin email from ADMIN_EMAIL in the site .env (lowercased). */
 export function getAdminEmail() {
@@ -93,6 +94,14 @@ export function openDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
+  
+  // Enable incremental auto-vacuum for future space reclamation
+  const currentAutoVacuum = db.pragma("auto_vacuum", { simple: true });
+  if (currentAutoVacuum === 0) {
+    // Can only change auto_vacuum when database is empty or via VACUUM
+    // We'll set it and it will take effect after the one-time VACUUM below
+    db.pragma("auto_vacuum = INCREMENTAL");
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS samples (
@@ -168,6 +177,10 @@ export function openDatabase(dbPath) {
       value REAL NOT NULL,
       PRIMARY KEY (entity_id, ts)
     );
+
+    CREATE INDEX IF NOT EXISTS idx_sensor_history_ts ON sensor_history(ts);
+    CREATE INDEX IF NOT EXISTS idx_sensor_history_entity_ts ON sensor_history(entity_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
   `);
 
   ensureColumn(db, "samples", "loads_daily_kwh", "TEXT");
@@ -178,8 +191,25 @@ export function openDatabase(dbPath) {
   ensureColumn(db, "ha_devices", "device_id", "TEXT");
   ensureColumn(db, "ha_devices", "is_alert", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "ha_devices", "alert_message", "TEXT");
+  ensureColumn(db, "ha_devices", "last_updated", "TEXT");
   ensureColumn(db, "device_commands", "result_state", "TEXT");
   ensureHaFieldTables(db);
+
+  // One-time VACUUM to reclaim space and enable incremental auto-vacuum
+  // This can take a while on large databases (needs ~2x DB size disk space temporarily)
+  if (getMeta(db, "vacuum_v1_done") == null) {
+    console.log("Running one-time VACUUM to reclaim space (this may take a few minutes)...");
+    const startMs = Date.now();
+    try {
+      db.exec("VACUUM");
+      const elapsedSec = ((Date.now() - startMs) / 1000).toFixed(1);
+      console.log(`VACUUM completed in ${elapsedSec}s`);
+      setMeta(db, "vacuum_v1_done", "1");
+    } catch (err) {
+      console.error("VACUUM failed:", err.message);
+      console.error("Continuing without VACUUM - space will be reclaimed incrementally");
+    }
+  }
 
   if (getMeta(db, "allow_new_accounts") == null) {
     setMeta(db, "allow_new_accounts", "1");
@@ -930,7 +960,41 @@ export function isWattSensor(device) {
   return unit === "" && /(^|[._])power(_\d+)?$/i.test(entityId);
 }
 
+/** Check if a device reading is stale (unavailable, unknown, or too old). */
+function isPowerStale(device) {
+  if (!device) return true;
+  
+  // Check for unavailable/unknown states
+  const state = String(device.state || "").toLowerCase();
+  if (!state || state === "unavailable" || state === "unknown" || state === "none") {
+    return true;
+  }
+  
+  // Check if reading is too old (for power sensors, we want fresh data)
+  // Prefer HA's last_updated if available, fall back to our updated_at
+  const timestamp = device.lastUpdated || device.updatedAt;
+  if (timestamp) {
+    try {
+      const updatedMs = Date.parse(timestamp);
+      if (Number.isFinite(updatedMs)) {
+        const ageMs = Date.now() - updatedMs;
+        if (ageMs > POWER_STALE_MS) {
+          return true;
+        }
+      }
+    } catch {
+      // Invalid timestamp, treat as stale
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 function powerWatts(device) {
+  // Return 0 for stale/unavailable readings instead of holding last value
+  if (isPowerStale(device)) return null;
+  
   const n = toNumber(device?.state);
   if (n == null) return null;
   return n;
@@ -1661,8 +1725,33 @@ export function getHistory(db, range = "24h") {
 
 export function pruneOldSamples(db, retentionDays) {
   const cutoff = Date.now() - retentionDays * 86400000;
-  db.prepare("DELETE FROM samples WHERE ts < ?").run(cutoff);
-  db.prepare("DELETE FROM sensor_history WHERE ts < ?").run(cutoff);
+  
+  // Delete in batches to avoid blocking the event loop for too long
+  const batchSize = 1000;
+  let totalDeleted = 0;
+  
+  // Prune samples table
+  let deleted;
+  do {
+    deleted = db.prepare("DELETE FROM samples WHERE ts < ? LIMIT ?").run(cutoff, batchSize).changes;
+    totalDeleted += deleted;
+  } while (deleted === batchSize);
+  
+  // Prune sensor_history table
+  do {
+    deleted = db.prepare("DELETE FROM sensor_history WHERE ts < ? LIMIT ?").run(cutoff, batchSize).changes;
+    totalDeleted += deleted;
+  } while (deleted === batchSize);
+  
+  if (totalDeleted > 0) {
+    // Run incremental vacuum to reclaim some space
+    db.pragma("incremental_vacuum(100)");
+    
+    // Checkpoint WAL to truncate it
+    db.pragma("wal_checkpoint(TRUNCATE)");
+  }
+  
+  return totalDeleted;
 }
 
 export function listTrackedEntityIds(db) {
@@ -1748,15 +1837,16 @@ export function upsertDeviceStates(db, devices) {
   if (!Array.isArray(devices) || !devices.length) return;
   const now = new Date().toISOString();
   const upsert = db.prepare(
-    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit, device_id)
-     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at, @device_class, @unit, @device_id)
+    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at, last_updated, device_class, unit, device_id)
+     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at, @last_updated, @device_class, @unit, @device_id)
      ON CONFLICT(entity_id) DO UPDATE SET
        state = excluded.state,
        name = COALESCE(excluded.name, ha_devices.name),
        device_class = COALESCE(excluded.device_class, ha_devices.device_class),
        unit = COALESCE(excluded.unit, ha_devices.unit),
        device_id = COALESCE(excluded.device_id, ha_devices.device_id),
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at,
+       last_updated = COALESCE(excluded.last_updated, ha_devices.last_updated)`,
   );
   const tx = db.transaction((rows) => {
     for (const d of rows) {
@@ -1778,6 +1868,7 @@ export function upsertDeviceStates(db, devices) {
         allow_admin: 1,
         state,
         updated_at: now,
+        last_updated: d.last_updated || d.lastUpdated || null,
         device_class: d.device_class || d.deviceClass || null,
         unit: d.unit || d.unit_of_measurement || null,
         device_id: d.device_id || d.deviceId || null,
@@ -1811,13 +1902,14 @@ function mapDeviceRow(r) {
     allowUsers: r.allow_users === 1,
     allowAdmin: r.allow_admin === 1,
     updatedAt: r.updated_at,
+    lastUpdated: r.last_updated || null,
   };
 }
 
 export function listDevicesForViewer(db, { isAdmin }) {
   const rows = db
     .prepare(
-      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, device_class, unit
+      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, last_updated, device_class, unit
        FROM ha_devices
        ORDER BY domain ASC, name ASC`,
     )
@@ -1831,7 +1923,7 @@ export function listAllDevices(db) {
   const tiles = new Set(getDisplayTileIds(db));
   return db
     .prepare(
-      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, device_class, unit, is_alert, alert_message
+      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, last_updated, device_class, unit, is_alert, alert_message
        FROM ha_devices ORDER BY domain ASC, name ASC`,
     )
     .all()
