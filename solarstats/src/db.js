@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { ensureHaFieldTables, resolveInverterFields, upsertHaCatalog } from "./ha_fields.js";
 
 const MAX_GAP_MS = 5 * 60 * 1000;
+const POWER_STALE_MS = 5 * 60 * 1000; // Power readings older than 5 minutes are stale
 
 /** Admin email from ADMIN_EMAIL in the site .env (lowercased). */
 export function getAdminEmail() {
@@ -190,6 +191,7 @@ export function openDatabase(dbPath) {
   ensureColumn(db, "ha_devices", "device_id", "TEXT");
   ensureColumn(db, "ha_devices", "is_alert", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "ha_devices", "alert_message", "TEXT");
+  ensureColumn(db, "ha_devices", "last_updated", "TEXT");
   ensureColumn(db, "device_commands", "result_state", "TEXT");
   ensureHaFieldTables(db);
 
@@ -958,7 +960,41 @@ export function isWattSensor(device) {
   return unit === "" && /(^|[._])power(_\d+)?$/i.test(entityId);
 }
 
+/** Check if a device reading is stale (unavailable, unknown, or too old). */
+function isPowerStale(device) {
+  if (!device) return true;
+  
+  // Check for unavailable/unknown states
+  const state = String(device.state || "").toLowerCase();
+  if (!state || state === "unavailable" || state === "unknown" || state === "none") {
+    return true;
+  }
+  
+  // Check if reading is too old (for power sensors, we want fresh data)
+  // Prefer HA's last_updated if available, fall back to our updated_at
+  const timestamp = device.lastUpdated || device.updatedAt;
+  if (timestamp) {
+    try {
+      const updatedMs = Date.parse(timestamp);
+      if (Number.isFinite(updatedMs)) {
+        const ageMs = Date.now() - updatedMs;
+        if (ageMs > POWER_STALE_MS) {
+          return true;
+        }
+      }
+    } catch {
+      // Invalid timestamp, treat as stale
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 function powerWatts(device) {
+  // Return 0 for stale/unavailable readings instead of holding last value
+  if (isPowerStale(device)) return null;
+  
   const n = toNumber(device?.state);
   if (n == null) return null;
   return n;
@@ -1801,15 +1837,16 @@ export function upsertDeviceStates(db, devices) {
   if (!Array.isArray(devices) || !devices.length) return;
   const now = new Date().toISOString();
   const upsert = db.prepare(
-    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at, device_class, unit, device_id)
-     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at, @device_class, @unit, @device_id)
+    `INSERT INTO ha_devices (entity_id, domain, name, allow_users, allow_admin, state, updated_at, last_updated, device_class, unit, device_id)
+     VALUES (@entity_id, @domain, @name, @allow_users, @allow_admin, @state, @updated_at, @last_updated, @device_class, @unit, @device_id)
      ON CONFLICT(entity_id) DO UPDATE SET
        state = excluded.state,
        name = COALESCE(excluded.name, ha_devices.name),
        device_class = COALESCE(excluded.device_class, ha_devices.device_class),
        unit = COALESCE(excluded.unit, ha_devices.unit),
        device_id = COALESCE(excluded.device_id, ha_devices.device_id),
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at,
+       last_updated = COALESCE(excluded.last_updated, ha_devices.last_updated)`,
   );
   const tx = db.transaction((rows) => {
     for (const d of rows) {
@@ -1831,6 +1868,7 @@ export function upsertDeviceStates(db, devices) {
         allow_admin: 1,
         state,
         updated_at: now,
+        last_updated: d.last_updated || d.lastUpdated || null,
         device_class: d.device_class || d.deviceClass || null,
         unit: d.unit || d.unit_of_measurement || null,
         device_id: d.device_id || d.deviceId || null,
@@ -1864,13 +1902,14 @@ function mapDeviceRow(r) {
     allowUsers: r.allow_users === 1,
     allowAdmin: r.allow_admin === 1,
     updatedAt: r.updated_at,
+    lastUpdated: r.last_updated || null,
   };
 }
 
 export function listDevicesForViewer(db, { isAdmin }) {
   const rows = db
     .prepare(
-      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, device_class, unit
+      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, last_updated, device_class, unit
        FROM ha_devices
        ORDER BY domain ASC, name ASC`,
     )
@@ -1884,7 +1923,7 @@ export function listAllDevices(db) {
   const tiles = new Set(getDisplayTileIds(db));
   return db
     .prepare(
-      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, device_class, unit, is_alert, alert_message
+      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, last_updated, device_class, unit, is_alert, alert_message
        FROM ha_devices ORDER BY domain ASC, name ASC`,
     )
     .all()
