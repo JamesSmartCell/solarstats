@@ -1159,8 +1159,8 @@ async function requestNotificationPermission() {
 }
 
 function showBrowserNotification(alert) {
-  if (state.notificationPermission !== "granted") return;
-  if (!("Notification" in window)) return;
+  if (state.notificationPermission !== "granted") return false;
+  if (!("Notification" in window)) return false;
   
   try {
     const notification = new Notification(alert.message, {
@@ -1174,8 +1174,10 @@ function showBrowserNotification(alert) {
       window.focus();
       notification.close();
     };
+    return true;
   } catch (err) {
     console.warn("Failed to show notification:", err);
+    return false;
   }
 }
 
@@ -1213,8 +1215,10 @@ function paintAlerts(alerts) {
     els.alertBanners.append(banner);
     
     if (!state.shownAlerts.has(alert.entityId)) {
-      showBrowserNotification(alert);
-      saveShownAlert(alert.entityId);
+      const shown = showBrowserNotification(alert);
+      if (shown) {
+        saveShownAlert(alert.entityId);
+      }
     }
   }
   
@@ -1275,6 +1279,190 @@ async function loadMe() {
 els.rangeSelect.addEventListener("change", () => {
   state.range = els.rangeSelect.value;
   loadHistory().catch((err) => console.error(err));
+});
+
+// Web Push support
+let pushSubscription = null;
+let swRegistration = null;
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    console.log("Service Worker not supported");
+    return null;
+  }
+  
+  try {
+    const registration = await navigator.serviceWorker.register("/sw.js", {
+      scope: "/"
+    });
+    console.log("Service Worker registered:", registration.scope);
+    return registration;
+  } catch (err) {
+    console.error("Service Worker registration failed:", err);
+    return null;
+  }
+}
+
+async function subscribeToPush() {
+  if (!swRegistration) {
+    console.error("No service worker registration");
+    return false;
+  }
+  
+  try {
+    // Get VAPID public key from server
+    const keyRes = await fetch("/api/push/vapid-public-key");
+    if (!keyRes.ok) {
+      throw new Error("Failed to get VAPID key");
+    }
+    const { publicKey } = await keyRes.json();
+    
+    // Subscribe to push notifications
+    const subscription = await swRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    
+    // Send subscription to server
+    const subRes = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subscription }),
+    });
+    
+    if (!subRes.ok) {
+      throw new Error("Failed to save subscription");
+    }
+    
+    pushSubscription = subscription;
+    return true;
+  } catch (err) {
+    console.error("Push subscription failed:", err);
+    return false;
+  }
+}
+
+async function unsubscribeFromPush() {
+  if (!pushSubscription) return true;
+  
+  try {
+    await pushSubscription.unsubscribe();
+    
+    await fetch("/api/push/unsubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: pushSubscription.endpoint }),
+    });
+    
+    pushSubscription = null;
+    return true;
+  } catch (err) {
+    console.error("Unsubscribe failed:", err);
+    return false;
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/\-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function updatePushButtonState() {
+  const btn = document.getElementById("enablePushButton");
+  const text = document.getElementById("pushButtonText");
+  if (!btn || !text) return;
+  
+  // Check if push is supported
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    btn.style.display = "none";
+    return;
+  }
+  
+  btn.style.display = "inline-block";
+  
+  if (!swRegistration) {
+    text.textContent = "Enable phone notifications";
+    btn.className = "push-button";
+    btn.disabled = false;
+    return;
+  }
+  
+  try {
+    const subscription = await swRegistration.pushManager.getSubscription();
+    pushSubscription = subscription;
+    
+    if (subscription) {
+      text.textContent = "Phone notifications enabled ✓";
+      btn.className = "push-button enabled";
+      btn.disabled = false;
+    } else {
+      text.textContent = "Enable phone notifications";
+      btn.className = "push-button";
+      btn.disabled = false;
+    }
+  } catch (err) {
+    console.error("Failed to check subscription:", err);
+    text.textContent = "Phone notifications unavailable";
+    btn.className = "push-button blocked";
+    btn.disabled = true;
+  }
+}
+
+async function handlePushButtonClick() {
+  const btn = document.getElementById("enablePushButton");
+  const text = document.getElementById("pushButtonText");
+  if (!btn) return;
+  
+  btn.disabled = true;
+  
+  try {
+    if (pushSubscription) {
+      // Unsubscribe
+      const success = await unsubscribeFromPush();
+      if (success) {
+        text.textContent = "Enable phone notifications";
+        btn.className = "push-button";
+      }
+    } else {
+      // Subscribe
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        text.textContent = "Notifications blocked";
+        btn.className = "push-button blocked";
+        return;
+      }
+      
+      const success = await subscribeToPush();
+      if (success) {
+        text.textContent = "Phone notifications enabled ✓";
+        btn.className = "push-button enabled";
+      } else {
+        text.textContent = "Failed to enable notifications";
+        btn.className = "push-button";
+      }
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Initialize push notifications
+registerServiceWorker().then(registration => {
+  swRegistration = registration;
+  if (registration) {
+    updatePushButtonState();
+    
+    const btn = document.getElementById("enablePushButton");
+    if (btn) {
+      btn.addEventListener("click", handlePushButtonClick);
+    }
+  }
 });
 
 applyTheme(themeName());
