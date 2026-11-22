@@ -66,6 +66,8 @@ import {
   getDeviceCommand,
   listTrackedEntityIds,
   countDevices,
+  setDeviceAlert,
+  getActiveAlerts,
 } from "./db.js";
 import {
   authenticationOptions,
@@ -1204,6 +1206,17 @@ app.post("/api/admin/devices/:entityId/acl", requireSiteAdmin, (req, res) => {
   res.json({ device });
 });
 
+app.post("/api/admin/devices/:entityId/alert", requireSiteAdmin, (req, res) => {
+  const entityId = decodeURIComponent(req.params.entityId);
+  const device = setDeviceAlert(req.site.db, entityId, {
+    isAlert: req.body?.isAlert,
+    alertMessage: req.body?.alertMessage,
+  });
+  if (!device) return res.status(404).json({ error: "not_found" });
+  broadcastAlerts(req.site);
+  res.json({ device });
+});
+
 // --- Protected dashboard / data ---
 
 app.get("/help", (req, res) => {
@@ -1393,6 +1406,7 @@ function handleIngest(req, res) {
       broadcast({ type: "loadsPower", loadsPowerW: sample.loadsPowerW }, site.slug);
     }
     broadcastDevices(site);
+    broadcastAlerts(site);
     const fields = listHaFields(site.db);
     res.json({ ok: true, sample, site: site.slug, fields });
   } catch (err) {
@@ -1483,6 +1497,12 @@ function broadcastDevices(site) {
   }
 }
 
+function broadcastAlerts(site) {
+  const sdb = site?.db || db;
+  const slug = site?.slug || "home";
+  broadcast({ type: "alerts", alerts: getActiveAlerts(sdb) }, slug);
+}
+
 function runSession(req, res, next) {
   sessionMiddleware(req, res, next);
 }
@@ -1536,6 +1556,7 @@ wss.on("connection", (socket) => {
       devices: user
         ? listDevicesForViewer(sdb, { isAdmin: isSiteAdmin(site, user.email) })
         : [],
+      alerts: getActiveAlerts(sdb),
     }),
   );
 });

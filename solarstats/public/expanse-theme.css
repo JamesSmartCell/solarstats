@@ -178,3 +178,11 @@ body.theme-expanse .dot.live {
     flex-wrap: wrap;
   }
 }
+
+body.theme-expanse .alert-banner {
+  background: linear-gradient(135deg, #d4782a 0%, #b05822 100%);
+  border: 2px solid #e6b15a;
+  box-shadow: 0 4px 12px rgba(212, 120, 42, 0.4);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+}

@@ -63,6 +63,64 @@ body {
   padding-bottom: 1rem;
 }
 
+.alert-banners {
+  margin-bottom: 1.25rem;
+}
+
+.alert-banners[hidden] {
+  display: none;
+}
+
+.alert-banner {
+  background: linear-gradient(135deg, var(--danger) 0%, #c85a5a 100%);
+  color: white;
+  padding: 1rem 1.5rem;
+  border-radius: 0.5rem;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 12px rgba(226, 109, 109, 0.3);
+  font-weight: 500;
+  font-size: 1.1rem;
+  text-align: center;
+  animation: slideIn 0.3s ease-out;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.alert-banner:last-child {
+  margin-bottom: 0;
+}
+
+.alert-banner::before {
+  content: "⚠";
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.alert-message {
+  flex: 1;
+}
+
+.alert-state {
+  font-size: 0.9rem;
+  opacity: 0.85;
+  font-weight: 400;
+  margin-left: 0.5rem;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .brand {
   font-size: clamp(1.8rem, 4vw, 2.6rem);
   font-weight: 600;

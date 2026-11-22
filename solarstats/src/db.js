@@ -176,6 +176,8 @@ export function openDatabase(dbPath) {
   ensureColumn(db, "ha_devices", "display_name", "TEXT");
   ensureColumn(db, "ha_devices", "state_hold_until", "TEXT");
   ensureColumn(db, "ha_devices", "device_id", "TEXT");
+  ensureColumn(db, "ha_devices", "is_alert", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "ha_devices", "alert_message", "TEXT");
   ensureColumn(db, "device_commands", "result_state", "TEXT");
   ensureHaFieldTables(db);
 
@@ -187,7 +189,26 @@ export function openDatabase(dbPath) {
   }
 
   seedAdmin(db);
+  seedAlerts(db);
   return db;
+}
+
+function seedAlerts(db) {
+  const rainSensorId = "binary_sensor.garden_rainfall_rain_detected";
+  const existing = db.prepare("SELECT entity_id, is_alert FROM ha_devices WHERE entity_id = ?").get(rainSensorId);
+  
+  if (existing && existing.is_alert !== 1) {
+    db.prepare(
+      `UPDATE ha_devices
+       SET is_alert = 1, alert_message = ?, allow_users = 1, allow_admin = 1
+       WHERE entity_id = ?`,
+    ).run("It's raining", rainSensorId);
+  } else if (!existing) {
+    db.prepare(
+      `INSERT OR IGNORE INTO ha_devices (entity_id, domain, name, is_alert, alert_message, allow_users, allow_admin, state, updated_at)
+       VALUES (?, 'binary_sensor', 'Garden rainfall', 1, ?, 1, 1, NULL, ?)`,
+    ).run(rainSensorId, "It's raining", new Date().toISOString());
+  }
 }
 
 function ensureColumn(db, table, column, type) {
@@ -1810,7 +1831,7 @@ export function listAllDevices(db) {
   const tiles = new Set(getDisplayTileIds(db));
   return db
     .prepare(
-      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, device_class, unit
+      `SELECT entity_id, domain, name, display_name, allow_users, allow_admin, state, updated_at, device_class, unit, is_alert, alert_message
        FROM ha_devices ORDER BY domain ASC, name ASC`,
     )
     .all()
@@ -1819,6 +1840,8 @@ export function listAllDevices(db) {
       onTop: tiles.has(r.entity_id),
       exposure:
         r.allow_users === 1 ? "user" : r.allow_admin === 1 ? "admin" : "off",
+      isAlert: r.is_alert === 1,
+      alertMessage: r.alert_message || null,
     }));
 }
 
@@ -1903,6 +1926,50 @@ export function setDeviceAcl(db, entityId, { allowUsers, allowAdmin }) {
   ).run(users, admin, entityId);
 
   return listAllDevices(db).find((d) => d.entityId === entityId) || null;
+}
+
+export function setDeviceAlert(db, entityId, { isAlert, alertMessage }) {
+  const row = db.prepare(`SELECT entity_id FROM ha_devices WHERE entity_id = ?`).get(entityId);
+  if (!row) return null;
+
+  db.prepare(
+    `UPDATE ha_devices SET is_alert = ?, alert_message = ? WHERE entity_id = ?`,
+  ).run(isAlert ? 1 : 0, alertMessage || null, entityId);
+
+  return listAllDevices(db).find((d) => d.entityId === entityId) || null;
+}
+
+function stateLabelForDevice(device) {
+  const deviceClass = String(device?.deviceClass || device?.device_class || "").toLowerCase();
+  const state = String(device?.state || "").toLowerCase();
+  
+  if (deviceClass === "moisture" || deviceClass === "water_leak") {
+    if (state === "on" || state === "wet") return "Raining";
+    if (state === "off" || state === "dry") return "Dry";
+  }
+  
+  return state === "on" ? "On" : state === "off" ? "Off" : state;
+}
+
+export function getActiveAlerts(db) {
+  const rows = db
+    .prepare(
+      `SELECT entity_id, domain, name, display_name, state, device_class, is_alert, alert_message
+       FROM ha_devices
+       WHERE is_alert = 1 AND (state != 'off' AND state != 'dry' AND state IS NOT NULL)
+       ORDER BY entity_id ASC`,
+    )
+    .all();
+
+  return rows.map((row) => ({
+    entityId: row.entity_id,
+    domain: row.domain,
+    name: friendlyName(row),
+    state: row.state,
+    stateLabel: stateLabelForDevice(row),
+    deviceClass: row.device_class || null,
+    message: row.alert_message || friendlyName(row),
+  }));
 }
 
 export function getDevice(db, entityId) {
@@ -2004,4 +2071,4 @@ export function completeDeviceCommand(db, id, ok, reportedState) {
   };
 }
 
-export { LOAD_KEYS, MIN_LIVE_BATTERY_V };
+export { LOAD_KEYS, MIN_LIVE_BATTERY_V, stateLabelForDevice };
