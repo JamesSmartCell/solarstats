@@ -113,7 +113,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
 const INGEST_SECRET = process.env.INGEST_SECRET || "";
 const DB_PATH = process.env.DB_PATH || "./data/solarstats.db";
-const HISTORY_RETENTION_DAYS = Number(process.env.HISTORY_RETENTION_DAYS || 30);
+const HISTORY_RETENTION_DAYS = Number(process.env.HISTORY_RETENTION_DAYS || 2);
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-insecure-session-secret";
 
 /** ~4 months — stay signed in + login-method UX markers. */
@@ -181,6 +181,13 @@ for (const site of sites.values()) {
     console.warn(
       `startup ${site.slug}: removed ${repaired.deleted} zeroed/unavailable sample(s); latest=${repaired.latest?.ts || "none"}`,
     );
+  }
+  
+  // Prune old samples at startup
+  console.log(`startup ${site.slug}: pruning samples older than ${HISTORY_RETENTION_DAYS} days...`);
+  const pruned = pruneOldSamples(site.db, HISTORY_RETENTION_DAYS);
+  if (pruned > 0) {
+    console.log(`startup ${site.slug}: pruned ${pruned} old samples`);
   }
 }
 
@@ -1561,15 +1568,19 @@ wss.on("connection", (socket) => {
   );
 });
 
+// Prune old samples hourly (instead of every 6 hours)
 setInterval(() => {
   for (const site of sites.values()) {
     try {
-      pruneOldSamples(site.db, HISTORY_RETENTION_DAYS);
+      const pruned = pruneOldSamples(site.db, HISTORY_RETENTION_DAYS);
+      if (pruned > 0) {
+        console.log(`prune ${site.slug}: deleted ${pruned} old samples`);
+      }
     } catch (err) {
       console.error(`prune ${site.slug} failed:`, err.message);
     }
   }
-}, 6 * 3600000);
+}, 3600000); // 1 hour
 
 app.get("/:slug", (req, res, next) => {
   const site = getSite(req.params.slug);

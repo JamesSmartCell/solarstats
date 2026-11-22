@@ -71,9 +71,6 @@ jobs:
         run: |
           echo "Restarting homesolar.service..."
           sudo systemctl restart homesolar
-          
-          # Wait a moment for the service to start
-          sleep 3
       
       - name: Check service status
         run: |
@@ -90,18 +87,19 @@ jobs:
         run: |
           echo "Waiting for service to be ready..."
           
-          # Wait up to 30 seconds for the service to respond
-          for i in {1..30}; do
+          # Wait up to 90 seconds for the service to respond
+          # (First startup after deploy may take longer due to VACUUM or large prune)
+          for i in {1..90}; do
             if curl -f -s http://localhost:8787/api/health > /dev/null; then
-              echo "✅ Health check passed"
+              echo "✅ Health check passed after $i seconds"
               curl -s http://localhost:8787/api/health | jq .
               exit 0
             fi
-            echo "Attempt $i/30 - Service not ready yet..."
+            echo "Attempt $i/90 - Service not ready yet..."
             sleep 1
           done
           
-          echo "❌ Health check failed after 30 seconds"
+          echo "❌ Health check failed after 90 seconds"
           echo "Service logs:"
           sudo journalctl -u homesolar -n 100 --no-pager
           exit 1
