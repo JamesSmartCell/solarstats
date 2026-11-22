@@ -1,4 +1,4 @@
-name: Deploy Solarstats Dashboard
+name: Deploy Solarstats Dashboard (Web Server)
 
 on:
   push:
@@ -6,25 +6,25 @@ on:
       - master
     paths:
       - 'solarstats/**'
-      - '.github/workflows/deploy.yml'
+      - '.github/workflows/deploy-site.yml'
   workflow_dispatch:
 
 # Prevent concurrent deploys to avoid conflicts
 concurrency:
-  group: solarstats-deploy
+  group: solarstats-site-deploy
   cancel-in-progress: false
 
 env:
-  # Path where the service runs (WorkingDirectory from solarstats.service)
+  # Path where the dashboard service runs (WorkingDirectory from solarstats.service)
   # This is the solarstats/ subfolder; git root is /home/james/dev/solarstats
-  # Runner must run as the user that owns this checkout (james)
-  # Change this if your deployment path differs
+  # Runner must run as user 'james'
+  # ⚠️ IMPORTANT: Confirm this path matches your systemd service WorkingDirectory
   DEPLOY_PATH: /home/james/dev/solarstats/solarstats
 
 jobs:
   deploy:
-    name: Deploy to Production
-    runs-on: [self-hosted, solarstats]
+    name: Deploy Dashboard to Linode
+    runs-on: [self-hosted, solarstats-site]
     
     # Only deploy from the main repository to prevent forks from deploying
     if: github.repository == 'JamesSmartCell/solarstats'
